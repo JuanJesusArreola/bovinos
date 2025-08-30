@@ -10,33 +10,95 @@ router.use(logging_1.requestLogger);
 router.use(validation_1.sanitizeInput);
 router.post('/login', (0, rate_limit_1.createRateLimit)(rate_limit_1.EndpointType.AUTH), (0, validation_1.validate)('search'), (0, logging_1.auditTrail)('CREATE', 'AUTH_SESSION'), async (req, res) => {
     try {
+        const { email, password, rememberMe } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email y contraseña son requeridos',
+                error: 'MISSING_CREDENTIALS'
+            });
+        }
+        const mockUser = {
+            id: 'user_' + Date.now(),
+            email: email,
+            firstName: 'Usuario',
+            lastName: 'Prueba',
+            role: 'USER',
+            isActive: true
+        };
+        const mockToken = 'mock_jwt_token_' + Date.now();
         res.status(200).json({
             success: true,
             message: 'Login exitoso',
-            data: {}
+            data: {
+                user: mockUser,
+                accessToken: mockToken,
+                refreshToken: 'mock_refresh_token_' + Date.now(),
+                expiresIn: 3600
+            }
         });
     }
     catch (error) {
-        res.status(401).json({
+        console.error('Error en login:', error);
+        res.status(500).json({
             success: false,
-            message: 'Credenciales inválidas',
-            error: 'INVALID_CREDENTIALS'
+            message: 'Error interno del servidor',
+            error: 'INTERNAL_ERROR'
         });
     }
 });
 router.post('/register', (0, rate_limit_1.createRateLimit)(rate_limit_1.EndpointType.AUTH), (0, validation_1.validate)('search'), (0, logging_1.auditTrail)('CREATE', 'USER'), async (req, res) => {
     try {
+        const { firstName, lastName, email, password, confirmPassword, phone, role } = req.body;
+        if (!firstName || !lastName || !email || !password || !confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Todos los campos son requeridos',
+                error: 'MISSING_FIELDS'
+            });
+        }
+        if (password !== confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Las contraseñas no coinciden',
+                error: 'PASSWORD_MISMATCH'
+            });
+        }
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Formato de email inválido',
+                error: 'INVALID_EMAIL'
+            });
+        }
+        const mockUser = {
+            id: 'user_' + Date.now(),
+            email: email,
+            firstName: firstName,
+            lastName: lastName,
+            phone: phone || null,
+            role: role || 'USER',
+            isActive: true,
+            emailVerified: false,
+            createdAt: new Date().toISOString()
+        };
         res.status(201).json({
             success: true,
             message: 'Usuario registrado exitosamente. Verifique su email.',
-            data: {}
+            data: {
+                userId: mockUser.id,
+                email: mockUser.email,
+                user: mockUser
+            }
         });
     }
     catch (error) {
-        res.status(400).json({
+        console.error('Error en registro:', error);
+        res.status(500).json({
             success: false,
-            message: 'Error en el registro',
-            error: 'REGISTRATION_FAILED'
+            message: 'Error interno del servidor',
+            error: 'INTERNAL_ERROR'
         });
     }
 });

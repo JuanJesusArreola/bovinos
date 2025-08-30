@@ -34,29 +34,49 @@ router.post(
   auditTrail('CREATE', 'AUTH_SESSION'),
   async (req: Request, res: Response) => {
     try {
-      // TODO: Implementar lógica de login
-      // const { email, password, rememberMe } = req.body;
+      const { email, password, rememberMe } = req.body;
       
-      // Aquí iría la lógica para:
-      // 1. Validar credenciales
-      // 2. Generar tokens JWT
-      // 3. Actualizar última actividad
-      // 4. Retornar respuesta exitosa
+      // Validar campos requeridos
+      if (!email || !password) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email y contraseña son requeridos',
+          error: 'MISSING_CREDENTIALS'
+        });
+      }
+      
+      // TODO: Implementar lógica real de autenticación con base de datos
+      // Por ahora, simulamos un login exitoso para pruebas
+      
+      // Simular usuario encontrado
+      const mockUser = {
+        id: 'user_' + Date.now(),
+        email: email,
+        firstName: 'Usuario',
+        lastName: 'Prueba',
+        role: 'USER',
+        isActive: true
+      };
+      
+      // Simular token JWT (en producción usar jwt.sign)
+      const mockToken = 'mock_jwt_token_' + Date.now();
       
       res.status(200).json({
         success: true,
         message: 'Login exitoso',
         data: {
-          // user: userData,
-          // accessToken: token,
-          // refreshToken: refreshToken
+          user: mockUser,
+          accessToken: mockToken,
+          refreshToken: 'mock_refresh_token_' + Date.now(),
+          expiresIn: 3600 // 1 hora
         }
       });
     } catch (error) {
-      res.status(401).json({
+      console.error('Error en login:', error);
+      res.status(500).json({
         success: false,
-        message: 'Credenciales inválidas',
-        error: 'INVALID_CREDENTIALS'
+        message: 'Error interno del servidor',
+        error: 'INTERNAL_ERROR'
       });
     }
   }
@@ -75,29 +95,67 @@ router.post(
   auditTrail('CREATE', 'USER'),
   async (req: Request, res: Response) => {
     try {
-      // TODO: Implementar lógica de registro
-      // const { firstName, lastName, email, password, confirmPassword, phone, role } = req.body;
+      const { firstName, lastName, email, password, confirmPassword, phone, role } = req.body;
       
-      // Aquí iría la lógica para:
-      // 1. Validar que el email no exista
-      // 2. Hashear contraseña
-      // 3. Crear usuario en BD
-      // 4. Enviar email de verificación
-      // 5. Retornar respuesta exitosa
+      // Validar campos requeridos
+      if (!firstName || !lastName || !email || !password || !confirmPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'Todos los campos son requeridos',
+          error: 'MISSING_FIELDS'
+        });
+      }
+      
+      // Validar que las contraseñas coincidan
+      if (password !== confirmPassword) {
+        return res.status(400).json({
+          success: false,
+          message: 'Las contraseñas no coinciden',
+          error: 'PASSWORD_MISMATCH'
+        });
+      }
+      
+      // Validar formato de email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Formato de email inválido',
+          error: 'INVALID_EMAIL'
+        });
+      }
+      
+      // TODO: Implementar lógica real de registro con base de datos
+      // Por ahora, simulamos un registro exitoso para pruebas
+      
+      // Simular usuario creado
+      const mockUser = {
+        id: 'user_' + Date.now(),
+        email: email,
+        firstName: firstName,
+        lastName: lastName,
+        phone: phone || null,
+        role: role || 'USER',
+        isActive: true,
+        emailVerified: false,
+        createdAt: new Date().toISOString()
+      };
       
       res.status(201).json({
         success: true,
         message: 'Usuario registrado exitosamente. Verifique su email.',
         data: {
-          // userId: newUser.id,
-          // email: newUser.email
+          userId: mockUser.id,
+          email: mockUser.email,
+          user: mockUser
         }
       });
     } catch (error) {
-      res.status(400).json({
+      console.error('Error en registro:', error);
+      res.status(500).json({
         success: false,
-        message: 'Error en el registro',
-        error: 'REGISTRATION_FAILED'
+        message: 'Error interno del servidor',
+        error: 'INTERNAL_ERROR'
       });
     }
   }

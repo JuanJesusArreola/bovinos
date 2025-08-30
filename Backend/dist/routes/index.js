@@ -10,6 +10,7 @@ const compression_1 = __importDefault(require("compression"));
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const auth_1 = require("../middleware/auth");
 const logging_1 = require("../middleware/logging");
+const auth_2 = __importDefault(require("./auth"));
 const bovines_1 = __importDefault(require("./bovines"));
 const feeding_1 = __importDefault(require("./feeding"));
 const health_1 = __importDefault(require("./health"));
@@ -234,6 +235,7 @@ router.get('/info', (req, res) => {
         }
     });
 });
+router.use('/auth', auth_2.default);
 router.use('/bovines', bovines_1.default);
 router.use('/feeding', feeding_1.default);
 router.use('/health', health_1.default);

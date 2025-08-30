@@ -32,7 +32,7 @@ declare global {
 // ===================================================================
 
 // Rutas de autenticación y usuarios
-// import authRoutes from './auth';
+import authRoutes from './auth';
 
 // Rutas de gestión de ganado
 import bovinesRoutes from './bovines';
@@ -359,8 +359,8 @@ router.get('/info', (req: Request, res: Response) => {
 // CONFIGURACIÓN DE RUTAS PRINCIPALES
 // ===================================================================
 
-// Rutas de autenticación (comentadas hasta implementar)
-// router.use('/auth', authRoutes);
+// Rutas de autenticación
+router.use('/auth', authRoutes);
 
 // Rutas principales del sistema ganadero con prefijo /api/v1
 router.use('/bovines', bovinesRoutes);

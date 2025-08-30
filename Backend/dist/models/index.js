@@ -164,7 +164,7 @@ class Database {
         });
         Event_1.default.belongsTo(User_1.default, {
             foreignKey: 'createdById',
-            as: 'createdBy',
+            as: 'creator',
             onDelete: 'SET NULL',
             onUpdate: 'CASCADE'
         });

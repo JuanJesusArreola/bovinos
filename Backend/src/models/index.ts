@@ -258,7 +258,7 @@ class Database {
     // 20. Un evento es creado por un usuario
     Event.belongsTo(User, {
       foreignKey: 'createdById',
-      as: 'createdBy',
+      as: 'creator',
       onDelete: 'SET NULL',
       onUpdate: 'CASCADE'
     });

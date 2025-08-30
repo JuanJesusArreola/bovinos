@@ -1,45 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-// Import express-validator with conditional handling
-let body: any, query: any, param: any, validationResult: any;
-
-try {
-  const expressValidator = require('express-validator');
-  body = expressValidator.body;
-  query = expressValidator.query;
-  param = expressValidator.param;
-  validationResult = expressValidator.validationResult;
-} catch (error) {
-  // Fallback implementations if express-validator is not available
-  body = (field: string) => ({
-    isUUID: () => ({ withMessage: () => ({}) }),
-    notEmpty: () => ({ withMessage: () => ({}) }),
-    isLength: () => ({ withMessage: () => ({}) }),
-    isISO8601: () => ({ withMessage: () => ({}) }),
-    matches: () => ({ withMessage: () => ({}) }),
-    isIn: () => ({ withMessage: () => ({}) }),
-    isBoolean: () => ({ withMessage: () => ({}) }),
-    isInt: () => ({ withMessage: () => ({}) }),
-    isFloat: () => ({ withMessage: () => ({}) }),
-    isArray: () => ({ withMessage: () => ({}) }),
-    optional: () => ({
-      isUUID: () => ({ withMessage: () => ({}) }),
-      isLength: () => ({ withMessage: () => ({}) }),
-      isISO8601: () => ({ withMessage: () => ({}) }),
-      matches: () => ({ withMessage: () => ({}) }),
-      isIn: () => ({ withMessage: () => ({}) }),
-      isBoolean: () => ({ withMessage: () => ({}) }),
-      isInt: () => ({ withMessage: () => ({}) }),
-      isFloat: () => ({ withMessage: () => ({}) }),
-      isArray: () => ({ withMessage: () => ({}) }),
-      custom: () => ({ withMessage: () => ({}) })
-    }),
-    custom: () => ({ withMessage: () => ({}) })
-  });
-  
-  query = body;
-  param = body;
-  validationResult = () => ({ isEmpty: () => true, array: () => [] });
-}
+import { body, query, param, validationResult } from 'express-validator';
 import { Op, WhereOptions } from 'sequelize';
 
 // Importaciones de middleware

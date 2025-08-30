@@ -249,7 +249,13 @@ app.use(express.urlencoded({
 // RUTAS PRINCIPALES
 // ============================================================================
 
-// Ruta de salud básica
+// Importar el router principal con todas las rutas
+import mainRouter from './routes';
+
+// Usar el router principal para todas las rutas /api
+app.use('/api', mainRouter);
+
+// Ruta raíz básica
 app.get('/', (req: Request, res: Response) => {
   res.json({
     success: true,
@@ -264,43 +270,7 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
-// Health check básico
-app.get('/api/health', (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    version: '1.0.0',
-    cors: 'working',
-    environment: process.env.NODE_ENV || 'development',
-    corsHeaders: 'ALL HEADERS INCLUDED',
-    endpoints: 'health, ping, reproduction, info'
-  });
-});
-
-// 🔧 ARREGLO 6: Endpoint específico para pruebas de CORS
-app.get('/api/test-cors', (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    message: 'CORS funcionando correctamente',
-    origin: req.headers.origin || 'no-origin',
-    userAgent: req.headers['user-agent'],
-    method: req.method,
-    timestamp: new Date().toISOString(),
-    receivedHeaders: {
-      'x-app-version': req.headers['x-app-version'] || 'not-sent',
-      'content-type': req.headers['content-type'] || 'not-sent',
-      'authorization': req.headers['authorization'] ? 'present' : 'not-sent'
-    },
-    corsResponseHeaders: {
-      'access-control-allow-origin': res.getHeader('Access-Control-Allow-Origin'),
-      'access-control-allow-methods': res.getHeader('Access-Control-Allow-Methods'),
-      'access-control-allow-headers': res.getHeader('Access-Control-Allow-Headers'),
-    }
-  });
-});
+// 🔧 ARREGLO 6: Endpoint específico para pruebas de CORS (ahora manejado por el router principal)
 
 // ✅ NUEVA RUTA: Endpoints específicos que estaban fallando
 app.get('/api/health/vaccinations', (req: Request, res: Response) => {
@@ -326,108 +296,9 @@ app.get('/api/info', (req: Request, res: Response) => {
   });
 });
 
-// 🆕 ENDPOINT PING que faltaba
-app.get('/api/ping', (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    message: 'pong',
-    status: 'alive',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    version: '1.0.0'
-  });
-});
-
-// 🆕 También agregar POST si es necesario
-app.post('/api/ping', (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    message: 'pong (POST)',
-    status: 'alive',
-    timestamp: new Date().toISOString(),
-    receivedData: req.body
-  });
-});
-
 // ============================================================================
-// 🆕 ENDPOINTS DE REPRODUCCIÓN (que faltaban)
+// ENDPOINTS (ahora manejados por el router principal)
 // ============================================================================
-
-// Registros de apareamiento
-app.get('/api/reproduction/mating-records', (req: Request, res: Response) => {
-  const { page = 1, limit = 20 } = req.query;
-  res.json({
-    success: true,
-    message: 'Registros de apareamiento obtenidos',
-    data: [],
-    pagination: {
-      page: parseInt(page as string),
-      limit: parseInt(limit as string),
-      total: 0,
-      totalPages: 0
-    },
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Dashboard de reproducción  
-app.get('/api/reproduction/dashboard', (req: Request, res: Response) => {
-  const { timeRange, includeProjections, includeAlerts } = req.query;
-  res.json({
-    success: true,
-    message: 'Dashboard de reproducción obtenido',
-    data: {
-      summary: {
-        totalMatings: 0,
-        successfulMatings: 0,
-        pendingMatings: 0,
-        alerts: []
-      },
-      timeRange: timeRange || '30d',
-      includeProjections: includeProjections === 'true',
-      includeAlerts: includeAlerts === 'true'
-    },
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Crear registro de apareamiento
-app.post('/api/reproduction/mating-records', (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    message: 'Registro de apareamiento creado',
-    data: {
-      id: Date.now(),
-      ...req.body,
-      createdAt: new Date().toISOString()
-    }
-  });
-});
-
-// Actualizar registro de apareamiento
-app.put('/api/reproduction/mating-records/:id', (req: Request, res: Response) => {
-  const { id } = req.params;
-  res.json({
-    success: true,
-    message: `Registro de apareamiento ${id} actualizado`,
-    data: {
-      id: parseInt(id),
-      ...req.body,
-      updatedAt: new Date().toISOString()
-    }
-  });
-});
-
-// Eliminar registro de apareamiento
-app.delete('/api/reproduction/mating-records/:id', (req: Request, res: Response) => {
-  const { id } = req.params;
-  res.json({
-    success: true,
-    message: `Registro de apareamiento ${id} eliminado`,
-    deletedId: parseInt(id),
-    timestamp: new Date().toISOString()
-  });
-});
 
 // Información del sistema
 app.get('/system-info', async (req: Request, res: Response) => {
@@ -469,18 +340,27 @@ const notFoundHandler = (req: Request, res: Response): void => {
     availableEndpoints: [
       'GET /',
       'GET /api/health',
-      'GET /api/health/vaccinations',
       'GET /api/info',
       'GET /api/ping',
       'POST /api/ping',
       'GET /api/test-cors',
       'GET /system-info',
-      // Endpoints de reproducción
-      'GET /api/reproduction/mating-records',
-      'POST /api/reproduction/mating-records',
-      'PUT /api/reproduction/mating-records/:id',
-      'DELETE /api/reproduction/mating-records/:id',
-      'GET /api/reproduction/dashboard'
+      // Endpoints de autenticación
+      'POST /api/auth/register',
+      'POST /api/auth/login',
+      'POST /api/auth/forgot-password',
+      'POST /api/auth/reset-password',
+      'POST /api/auth/verify-email',
+      // Endpoints principales
+      'GET /api/bovines',
+      'GET /api/ranch',
+      'GET /api/health',
+      'GET /api/reproduction',
+      'GET /api/production',
+      'GET /api/inventory',
+      'GET /api/finances',
+      'GET /api/reports',
+      'GET /api/dashboard'
     ]
   });
 };
