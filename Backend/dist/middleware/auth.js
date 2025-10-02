@@ -23,7 +23,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.logUserActivity = exports.verifyToken = exports.generateToken = exports.checkApiLimits = exports.optionalAuth = exports.requireActiveSubscription = exports.checkResourceOwnership = exports.checkPermission = exports.authorizeRoles = exports.authenticateToken = exports.ApiError = exports.UserRole = void 0;
+exports.logUserActivity = exports.verifyToken = exports.generateToken = exports.checkApiLimits = exports.optionalAuth = exports.requireActiveSubscription = exports.checkResourceOwnership = exports.checkPermission = exports.authorizeRoles = exports.authenticateToken = exports.mockUserDatabase = exports.ApiError = exports.UserRole = void 0;
 const jwt = __importStar(require("jsonwebtoken"));
 var UserRole;
 (function (UserRole) {
@@ -46,13 +46,13 @@ class ApiError extends Error {
 exports.ApiError = ApiError;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-for-cattle-management';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
-const mockUserDatabase = {};
+exports.mockUserDatabase = {};
 const findUserById = async (userId) => {
-    return mockUserDatabase[userId] || null;
+    return exports.mockUserDatabase[userId] || null;
 };
 const updateUserActivity = async (userId) => {
-    if (mockUserDatabase[userId]) {
-        mockUserDatabase[userId].lastLoginAt = new Date();
+    if (exports.mockUserDatabase[userId]) {
+        exports.mockUserDatabase[userId].lastLoginAt = new Date();
     }
 };
 const authenticateToken = async (req, res, next) => {

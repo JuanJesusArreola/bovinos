@@ -1182,47 +1182,47 @@ Reproduction.init(
       // Índices para optimizar consultas
       {
         unique: true,
-        fields: ['reproductionCode']
+        fields: ['reproduction_code']
       },
       {
-        fields: ['damId']
+        fields: ['dam_id']
       },
       {
-        fields: ['reproductionType']
+        fields: ['reproduction_type']
       },
       {
         fields: ['status']
       },
       {
-        fields: ['breedingSeasonId']
+        fields: ['breeding_season_id']
       },
       {
-        fields: ['isCompleted']
+        fields: ['is_completed']
       },
       {
-        fields: ['isSuccessful']
+        fields: ['is_successful']
       },
       {
-        fields: ['ranchId']
+        fields: ['ranch_id']
       },
       {
-        fields: ['seasonYear']
+        fields: ['season_year']
       },
       {
         name: 'reproduction_dam_season',
-        fields: ['damId', 'seasonYear']
+        fields: ['dam_id', 'season_year']
       },
       {
         name: 'reproduction_status_date',
-        fields: ['status', 'createdAt']
+        fields: ['status', 'created_at']
       },
       {
         name: 'reproduction_type_success',
-        fields: ['reproductionType', 'isSuccessful']
+        fields: ['reproduction_type', 'is_successful']
       },
       {
         name: 'reproduction_sire_analysis',
-        fields: ['sireInfo'],
+        fields: ['sire_info'],
         using: 'gin'
       }
     ],

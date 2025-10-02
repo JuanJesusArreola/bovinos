@@ -445,7 +445,7 @@ class Database {
   public async syncDatabase(config: Partial<DatabaseConfig> = {}): Promise<void> {
     const defaultConfig: DatabaseConfig = {
       sync: true,
-      force: false,      // ⚠️ CUIDADO: true elimina todas las tablas
+      force: true,      // ⚠️ CUIDADO: true elimina todas las tablas - se cambio a true para que se elimine todas las tablas y se cree nuevamente
       alter: false,      // true modifica tablas existentes
       logging: true
     };
@@ -454,7 +454,7 @@ class Database {
 
     try {
       console.log('🗄️  Iniciando sincronización de base de datos...');
-      
+
       // Verificar conexión
       await this.sequelize.authenticate();
       console.log('✅ Conexión a la base de datos establecida correctamente');
@@ -482,55 +482,122 @@ class Database {
   }
 
   /**
-   * Crea índices adicionales para optimización
-   */
-  private async createAdditionalIndexes(): Promise<void> {
-    try {
-      console.log('📊 Creando índices adicionales...');
+ * Crea índices adicionales para optimización
+ */
+private async createAdditionalIndexes(): Promise<void> {
+  try {
+    console.log('�� Creando índices adicionales...');
 
-      // Crear índices solo si las tablas existen
-      const queryInterface = this.sequelize.getQueryInterface();
-      const tables = await queryInterface.showAllTables();
+    // Crear índices solo si las tablas existen
+    const queryInterface = this.sequelize.getQueryInterface();
+    const tables = await queryInterface.showAllTables();
 
-      // Índice para usuarios por email y rol
-      if (tables.includes('users')) {
+    // Índice para usuarios por email y rol
+    if (tables.includes('users')) {
+      const userColumns = [];
+      
+      // Verificar cada columna antes de agregarla al índice
+      if (await this.columnExists('users', 'email')) userColumns.push('email');
+      if (await this.columnExists('users', 'role')) userColumns.push('role');
+      if (await this.columnExists('users', 'status')) userColumns.push('status');
+      if (await this.columnExists('users', 'is_active')) userColumns.push('is_active');
+      
+      if (userColumns.length > 0) {
         await this.sequelize.query(`
           CREATE INDEX IF NOT EXISTS idx_users_search 
-          ON users (email, role, status, is_active)
+          ON users (${userColumns.join(', ')})
         `).catch(() => console.log('⚠️ Índice de usuarios ya existe o no se pudo crear'));
+        
+        console.log(`✅ Índice de usuarios creado con columnas: ${userColumns.join(', ')}`);
+      } else {
+        console.log('⚠️ No se encontraron columnas válidas para índice de usuarios');
       }
+    }
 
-      // Índices para bovinos si la tabla existe
-      if (tables.includes('bovines')) {
+    // Índices para bovinos si la tabla existe
+    if (tables.includes('bovines')) {
+      const bovineColumns = [];
+      
+      if (await this.columnExists('bovines', 'ear_tag')) bovineColumns.push('ear_tag');
+      if (await this.columnExists('bovines', 'breed')) bovineColumns.push('breed');
+      if (await this.columnExists('bovines', 'is_active')) bovineColumns.push('is_active');
+      
+      if (bovineColumns.length > 0) {
         await this.sequelize.query(`
           CREATE INDEX IF NOT EXISTS idx_bovines_search 
-          ON bovines (ear_tag, breed, is_active)
+          ON bovines (${bovineColumns.join(', ')})
         `).catch(() => console.log('⚠️ Índice de bovinos ya existe o no se pudo crear'));
+        
+        console.log(`✅ Índice de bovinos creado con columnas: ${bovineColumns.join(', ')}`);
+      } else {
+        console.log('⚠️ No se encontraron columnas válidas para índice de bovinos');
       }
+    }
 
-      // Índices para eventos si la tabla existe
-      if (tables.includes('events')) {
+    // Índices para eventos si la tabla existe
+    if (tables.includes('events')) {
+      const eventColumns = [];
+      
+      if (await this.columnExists('events', 'event_type')) eventColumns.push('event_type');
+      if (await this.columnExists('events', 'scheduled_date')) eventColumns.push('scheduled_date');
+      if (await this.columnExists('events', 'status')) eventColumns.push('status');
+      
+      if (eventColumns.length > 0) {
         await this.sequelize.query(`
           CREATE INDEX IF NOT EXISTS idx_events_search 
-          ON events (event_type, scheduled_date, status)
+          ON events (${eventColumns.join(', ')})
         `).catch(() => console.log('⚠️ Índice de eventos ya existe o no se pudo crear'));
+        
+        console.log(`✅ Índice de eventos creado con columnas: ${eventColumns.join(', ')}`);
+      } else {
+        console.log('⚠️ No se encontraron columnas válidas para índice de eventos');
       }
+    }
 
-      // Índices para finanzas si la tabla existe
-      if (tables.includes('finances')) {
+    // Índices para finanzas si la tabla existe
+    if (tables.includes('finances')) {
+      const financeColumns = [];
+      
+      if (await this.columnExists('finances', 'transaction_date')) financeColumns.push('transaction_date');
+      if (await this.columnExists('finances', 'transaction_type')) financeColumns.push('transaction_type');
+      
+      if (financeColumns.length > 0) {
         await this.sequelize.query(`
           CREATE INDEX IF NOT EXISTS idx_finances_period 
-          ON finances (transaction_date, transaction_type)
+          ON finances (${financeColumns.join(', ')})
         `).catch(() => console.log('⚠️ Índice de finanzas ya existe o no se pudo crear'));
+        
+        console.log(`✅ Índice de finanzas creado con columnas: ${financeColumns.join(', ')}`);
+      } else {
+        console.log('⚠️ No se encontraron columnas válidas para índice de finanzas');
       }
+    }
 
-      console.log('✅ Índices adicionales procesados');
+    console.log('✅ Índices adicionales procesados');
 
+  } catch (error) {
+    console.error('⚠️  Error creando índices adicionales:', error);
+    // No lanzar error, los índices son opcionales
+  }
+}
+  /**
+   * Verifica si una columna existe en una tabla
+   * @param tableName Nombre de la tabla
+   * @param columnName Nombre de la columna
+   * @returns true si la columna existe, false si no
+   */
+  private async columnExists(tableName: string, columnName: string): Promise<boolean> {
+    try {
+      const queryInterface = this.sequelize.getQueryInterface();
+      const columns = await queryInterface.describeTable(tableName);
+      return columns[columnName] !== undefined;
     } catch (error) {
-      console.error('⚠️  Error creando índices adicionales:', error);
-      // No lanzar error, los índices son opcionales
+      console.error('❌ Error verificando existencia de columna:', error);
+      return false;
     }
   }
+
+
 
   /**
    * Cierra la conexión a la base de datos
@@ -551,10 +618,10 @@ class Database {
   public async runMigrations(): Promise<void> {
     try {
       console.log('🚀 Ejecutando migraciones...');
-      
+
       // Aquí se ejecutarían las migraciones de Sequelize
       // await this.sequelize.getQueryInterface().
-      
+
       console.log('✅ Migraciones ejecutadas correctamente');
     } catch (error) {
       console.error('❌ Error ejecutando migraciones:', error);
@@ -681,8 +748,8 @@ class Database {
         medications,
         production,
         reproduction,
-        totalRecords: users + bovines + events + finances + healthRecords + 
-                     ranches + locations + inventory + medications + production + reproduction
+        totalRecords: users + bovines + events + finances + healthRecords +
+          ranches + locations + inventory + medications + production + reproduction
       };
     } catch (error) {
       console.error('❌ Error obteniendo estadísticas:', error);
@@ -722,7 +789,7 @@ class Database {
         });
 
         const orphanCount = orphanEvents.filter(event => !event.get('bovine')).length;
-        
+
         if (orphanCount > 0) {
           issues.push(`${orphanCount} eventos sin bovino asociado`);
         }
@@ -770,10 +837,10 @@ class Database {
   public async backupSchema(): Promise<string> {
     try {
       console.log('💾 Creando respaldo del esquema...');
-      
+
       const queryInterface = this.sequelize.getQueryInterface();
       const tables = await queryInterface.showAllTables();
-      
+
       let backupScript = '-- Respaldo del esquema de base de datos\n';
       backupScript += `-- Generado el: ${new Date().toISOString()}\n\n`;
 
@@ -820,9 +887,9 @@ export {
 export async function initializeDatabase(config?: Partial<DatabaseConfig>): Promise<Database> {
   try {
     console.log('🚀 Inicializando sistema de base de datos...');
-    
+
     await databaseInstance.syncDatabase(config);
-    
+
     // Crear datos de prueba solo en desarrollo
     if (process.env.NODE_ENV === 'development') {
       await databaseInstance.createSeedData();

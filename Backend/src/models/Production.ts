@@ -1050,54 +1050,54 @@ Production.init(
       // Índices para optimizar consultas
       {
         unique: true,
-        fields: ['productionCode']
+        fields: ['production_code']
       },
       {
-        fields: ['productionType']
+        fields: ['production_type']
       },
       {
-        fields: ['bovineId']
+        fields: ['bovine_id']
       },
       {
-        fields: ['productionDate']
+        fields: ['production_date']
       },
       {
         fields: ['status']
       },
       {
-        fields: ['qualityGrade']
+        fields: ['quality_grade']
       },
       {
-        fields: ['isCompleted']
+        fields: ['is_completed']
       },
       {
-        fields: ['isApproved']
+        fields: ['is_approved']
       },
       {
-        fields: ['farmId']
+        fields: ['farm_id']
       },
       {
-        fields: ['seasonId']
+        fields: ['season_id']
       },
       {
-        fields: ['traceabilityCode']
+        fields: ['traceability_code']
       },
       {
         name: 'production_bovine_date',
-        fields: ['bovineId', 'productionDate']
+        fields: ['bovine_id', 'production_date']
       },
       {
         name: 'production_type_date',
-        fields: ['productionType', 'productionDate']
+        fields: ['production_type', 'production_date']
       },
       {
         name: 'production_status_date',
-        fields: ['status', 'productionDate']
+        fields: ['status', 'production_date']
       },
       {
-        name: 'production_location_gist',
+        name: 'production_location_gin',
         fields: ['location'],
-        using: 'gist',
+        using: 'gin',
         where: {
           location: {
             [Op.ne]: null

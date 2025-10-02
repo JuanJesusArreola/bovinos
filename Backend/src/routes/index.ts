@@ -589,12 +589,13 @@ router.use((error: any, req: Request, res: Response, next: NextFunction) => {
 async function checkDatabaseConnection(): Promise<{ status: string; responseTime: number }> {
   const startTime = Date.now();
   try {
-    // Aquí se implementaría la verificación real de la base de datos
-    // Por ahora simulamos una verificación exitosa
-    await new Promise(resolve => setTimeout(resolve, 10));
+    // Aquí se implementa la verificación real de la base de datos
+    
+    const {initializeDatabase} = await import('../config/database');
+    const isConnected = await initializeDatabase();
     
     return {
-      status: 'connected',
+      status: isConnected ? 'connected' : 'disconnected',
       responseTime: Date.now() - startTime
     };
   } catch (error) {

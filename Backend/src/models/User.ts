@@ -959,7 +959,8 @@ User.init(
       type: DataTypes.STRING(20),
       allowNull: false,
       unique: true,
-      comment: 'Código único del usuario'
+      comment: 'Código único del usuario',
+      field: 'usercode'
     },
     username: {
       type: DataTypes.STRING(50),
@@ -1198,7 +1199,7 @@ User.init(
       // Índices únicos
       {
         unique: true,
-        fields: ['userCode']
+        fields: [{name: 'usercode'}]
       },
       {
         unique: true,
@@ -1216,25 +1217,25 @@ User.init(
         fields: ['status']
       },
       {
-        fields: ['accessLevel']
+        fields: ['access_level']
       },
       {
-        fields: ['verificationStatus']
+        fields: ['verification_status']
       },
       {
-        fields: ['isActive']
+        fields: ['is_active']
       },
       {
-        fields: ['isVerified']
+        fields: ['is_verified']
       },
       {
-        fields: ['emailVerified']
+        fields: ['email_verified']
       },
       {
-        fields: ['lastLoginAt']
+        fields: ['last_login_at']
       },
       {
-        fields: ['lastActiveAt']
+        fields: ['last_active_at']
       },
       // Índices compuestos
       {
@@ -1243,21 +1244,21 @@ User.init(
       },
       {
         name: 'users_active_verified',
-        fields: ['isActive', 'isVerified']
+        fields: ['is_active', 'is_verified']
       },
       {
         name: 'users_search_text',
-        fields: ['personalInfo'],
+        fields: ['personal_info'],
         using: 'gin'
       },
       {
         name: 'users_contact_search',
-        fields: ['contactInfo'],
+        fields: ['contact_info'],
         using: 'gin'
       },
       {
         name: 'users_ranch_access',
-        fields: ['ranchAccess'],
+        fields: ['ranch_access'],
         using: 'gin'
       }
     ],

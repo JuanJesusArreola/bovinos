@@ -82,8 +82,7 @@ interface TokenPayload {
   role: UserRole;
 }
 
-// Simulación de base de datos de usuarios (en producción sería reemplazado por el modelo real)
-const mockUserDatabase: Record<string, User> = {};
+export const mockUserDatabase: Record<string, User> = {};
 
 /**
  * Función helper para buscar usuario por ID

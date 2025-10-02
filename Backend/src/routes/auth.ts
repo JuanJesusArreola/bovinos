@@ -1,10 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { 
-  authenticateToken, 
-  authorizeRoles, 
+import {
+  authenticateToken,
+  authorizeRoles,
   optionalAuth,
   requireActiveSubscription,
-  UserRole 
+  UserRole,
+  generateToken,
+  mockUserDatabase
 } from '../middleware/auth';
 import { validate, sanitizeInput, validateId } from '../middleware/validation';
 import { createRateLimit, EndpointType } from '../middleware/rate-limit';
@@ -35,7 +37,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const { email, password, rememberMe } = req.body;
-      
+
       // Validar campos requeridos
       if (!email || !password) {
         return res.status(400).json({
@@ -44,8 +46,8 @@ router.post(
           error: 'MISSING_CREDENTIALS'
         });
       }
-      
-      // TODO: Implementar lógica real de autenticación con base de datos
+
+      /*// TODO: Implementar lógica real de autenticación con base de datos
       // Por ahora, simulamos un login exitoso para pruebas
       
       // Simular usuario encontrado
@@ -67,6 +69,36 @@ router.post(
         data: {
           user: mockUser,
           accessToken: mockToken,
+          refreshToken: 'mock_refresh_token_' + Date.now(),
+          expiresIn: 3600 // 1 hora
+        }
+      }); */
+
+      // Crear usuario real
+      const userId = 'user_' + Date.now();
+      const mockUser = {
+        id: userId,
+        email: email,
+        firstName: 'Usuario',
+        lastName: 'Prueba',
+        role: UserRole.ADMIN,
+        isActive: true,
+        isEmailVerified: true,
+        lastLoginAt: new Date()
+      };
+
+      // Guardar usuario en mock database para que el middleware lo encuentre
+      mockUserDatabase[userId] = mockUser;
+
+      // Generar JWT real usando la función del middleware
+      const realToken = generateToken(userId, email, UserRole.ADMIN);
+
+      res.status(200).json({
+        success: true,
+        message: 'Login exitoso',
+        data: {
+          user: mockUser,
+          accessToken: realToken,  // ✅ JWT REAL
           refreshToken: 'mock_refresh_token_' + Date.now(),
           expiresIn: 3600 // 1 hora
         }
@@ -96,7 +128,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const { firstName, lastName, email, password, confirmPassword, phone, role } = req.body;
-      
+
       // Validar campos requeridos
       if (!firstName || !lastName || !email || !password || !confirmPassword) {
         return res.status(400).json({
@@ -105,7 +137,7 @@ router.post(
           error: 'MISSING_FIELDS'
         });
       }
-      
+
       // Validar que las contraseñas coincidan
       if (password !== confirmPassword) {
         return res.status(400).json({
@@ -114,7 +146,7 @@ router.post(
           error: 'PASSWORD_MISMATCH'
         });
       }
-      
+
       // Validar formato de email
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
@@ -124,10 +156,10 @@ router.post(
           error: 'INVALID_EMAIL'
         });
       }
-      
+
       // TODO: Implementar lógica real de registro con base de datos
       // Por ahora, simulamos un registro exitoso para pruebas
-      
+
       // Simular usuario creado
       const mockUser = {
         id: 'user_' + Date.now(),
@@ -140,7 +172,7 @@ router.post(
         emailVerified: false,
         createdAt: new Date().toISOString()
       };
-      
+
       res.status(201).json({
         success: true,
         message: 'Usuario registrado exitosamente. Verifique su email.',
@@ -175,13 +207,13 @@ router.post(
     try {
       // TODO: Implementar lógica de forgot password
       // const { email } = req.body;
-      
+
       // Aquí iría la lógica para:
       // 1. Validar que el email existe
       // 2. Generar token de reset
       // 3. Enviar email con instrucciones
       // 4. Retornar respuesta exitosa
-      
+
       res.status(200).json({
         success: true,
         message: 'Si el email existe, recibirá instrucciones para restablecer su contraseña'
@@ -210,7 +242,7 @@ router.post(
     try {
       // TODO: Implementar lógica de reset password
       // const { token, password, confirmPassword } = req.body;
-      
+
       res.status(200).json({
         success: true,
         message: 'Contraseña restablecida exitosamente'
@@ -238,7 +270,7 @@ router.post(
     try {
       // TODO: Implementar lógica de verificación de email
       // const { token } = req.body;
-      
+
       res.status(200).json({
         success: true,
         message: 'Email verificado exitosamente'
@@ -266,7 +298,7 @@ router.post(
     try {
       // TODO: Implementar lógica de refresh token
       // const { refreshToken } = req.body;
-      
+
       res.status(200).json({
         success: true,
         message: 'Token refrescado exitosamente',
@@ -306,7 +338,7 @@ router.post(
       // 1. Invalidar tokens
       // 2. Limpiar sesiones activas
       // 3. Log de logout
-      
+
       res.status(200).json({
         success: true,
         message: 'Sesión cerrada exitosamente'
@@ -335,7 +367,7 @@ router.get(
     try {
       // El usuario está disponible en req.user gracias al middleware authenticateToken
       const user = req.user;
-      
+
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -343,10 +375,10 @@ router.get(
           error: 'USER_NOT_FOUND'
         });
       }
-      
+
       // Remover información sensible antes de enviar
       const { ...safeUserData } = user;
-      
+
       res.status(200).json({
         success: true,
         message: 'Perfil obtenido exitosamente',
@@ -380,7 +412,7 @@ router.put(
     try {
       // TODO: Implementar lógica de actualización de perfil
       // const { firstName, lastName, phone } = req.body;
-      
+
       res.status(200).json({
         success: true,
         message: 'Perfil actualizado exitosamente',
@@ -415,7 +447,7 @@ router.post(
     try {
       // TODO: Implementar lógica de cambio de contraseña
       // const { currentPassword, newPassword, confirmPassword } = req.body;
-      
+
       res.status(200).json({
         success: true,
         message: 'Contraseña cambiada exitosamente'
@@ -446,7 +478,7 @@ router.delete(
     try {
       // TODO: Implementar lógica de eliminación de cuenta
       // const { password, confirmation } = req.body;
-      
+
       res.status(200).json({
         success: true,
         message: 'Cuenta eliminada exitosamente'
@@ -482,7 +514,7 @@ router.get(
     try {
       // TODO: Implementar lógica de listado de usuarios
       // const { page = 1, limit = 10, search, role, status } = req.query;
-      
+
       res.status(200).json({
         success: true,
         message: 'Usuarios obtenidos exitosamente',
@@ -519,7 +551,7 @@ router.put(
       // TODO: Implementar lógica de actualización de rol
       // const { userId } = req.params;
       // const { role } = req.body;
-      
+
       res.status(200).json({
         success: true,
         message: 'Rol de usuario actualizado exitosamente'
@@ -552,7 +584,7 @@ router.put(
       // TODO: Implementar lógica de actualización de estatus
       // const { userId } = req.params;
       // const { status } = req.body;
-      
+
       res.status(200).json({
         success: true,
         message: 'Estatus de usuario actualizado exitosamente'
@@ -583,7 +615,7 @@ router.get(
   async (req: Request, res: Response) => {
     try {
       const user = req.user;
-      
+
       if (!user) {
         return res.status(404).json({
           success: false,
@@ -591,7 +623,7 @@ router.get(
           error: 'USER_NOT_FOUND'
         });
       }
-      
+
       res.status(200).json({
         success: true,
         message: 'Usuario autenticado',
@@ -632,7 +664,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       // TODO: Implementar reenvío de email de verificación
-      
+
       res.status(200).json({
         success: true,
         message: 'Email de verificación enviado'
@@ -660,7 +692,7 @@ router.post(
     try {
       // TODO: Implementar verificación de email
       // const { email } = req.body;
-      
+
       res.status(200).json({
         success: true,
         message: 'Email verificado',

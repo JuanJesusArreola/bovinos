@@ -1,0 +1,1 @@
+{"timestamp":"2025-09-05T05:53:59.863Z","level":"info","message":"🚀 Sistema de logging inicializado","module":"Logger","metadata":{"config":{"level":"info","enableConsole":true,"enableFile":true,"logDirectory":"./logs"},"environment":"development","processId":24684},"processId":24684,"hostname":"unknown"}

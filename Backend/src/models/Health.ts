@@ -828,55 +828,55 @@ Health.init(
     indexes: [
       // Índices para optimizar consultas
       {
-        fields: ['bovineId']
+        fields: ['bovine_id']
       },
       {
-        fields: ['recordType']
+        fields: ['record_type']
       },
       {
-        fields: ['recordDate']
+        fields: ['record_date']
       },
       {
-        fields: ['overallHealthStatus']
+        fields: ['overall_health_status']
       },
       {
-        fields: ['veterinarianId']
+        fields: ['veterinarian_id']
       },
       {
-        fields: ['isEmergency']
+        fields: ['is_emergency']
       },
       {
-        fields: ['isCompleted']
+        fields: ['is_completed']
       },
       {
-        fields: ['followUpRequired']
+        fields: ['follow_up_required']
       },
       {
-        fields: ['followUpDate']
+        fields: ['follow_up_date']
       },
       {
-        fields: ['nextAppointment']
+        fields: ['next_appointment']
       },
       {
         name: 'health_bovine_date',
-        fields: ['bovineId', 'recordDate']
+        fields: ['bovine_id', 'record_date']
       },
       {
         name: 'health_status_date',
-        fields: ['overallHealthStatus', 'recordDate']
+        fields: ['overall_health_status', 'record_date']
       },
       {
         name: 'health_emergency_date',
-        fields: ['isEmergency', 'recordDate']
+        fields: ['is_emergency', 'record_date']
       },
       {
         name: 'health_followup_date',
-        fields: ['followUpRequired', 'followUpDate']
+        fields: ['follow_up_required', 'follow_up_date']
       },
       {
-        name: 'health_location_gist',
+        name: 'health_location_gin',
         fields: ['location'],
-        using: 'gist',
+        using: 'gin',
         where: {
           location: {
             [Op.ne]: null

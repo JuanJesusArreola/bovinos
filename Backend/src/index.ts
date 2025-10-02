@@ -19,6 +19,7 @@ import { errorHandler } from './middleware/error';
 
 // Cargar variables de entorno
 dotenv.config();
+//import { initializeDatabase } from './models';
 
 // Crear aplicación Express
 const app: Application = express();
@@ -251,6 +252,7 @@ app.use(express.urlencoded({
 
 // Importar el router principal con todas las rutas
 import mainRouter from './routes';
+import { initializeDatabase } from './models';
 
 // Usar el router principal para todas las rutas /api
 app.use('/api', mainRouter);
@@ -385,6 +387,10 @@ async function initializeServices(): Promise<boolean> {
 
     // Validaciones básicas
     console.log('📋 Validando configuración básica...');
+
+    console.log('🔧 Inicializando base de datos...');
+    await initializeDatabase();
+    console.log('✅ Base de datos inicializada correctamente');
     
     if (!process.env.DB_HOST) {
       console.warn('⚠️ DB_HOST no configurado');

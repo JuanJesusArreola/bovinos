@@ -831,7 +831,7 @@ Finance.init(
     indexes: [
       // Índices para optimizar consultas
       {
-        fields: ['transactionType']
+        fields: ['transaction_type']
       },
       {
         fields: ['category']
@@ -840,51 +840,51 @@ Finance.init(
         fields: ['status']
       },
       {
-        fields: ['transactionDate']
+        fields: ['transaction_date']
       },
       {
-        fields: ['dueDate']
+        fields: ['due_date']
       },
       {
-        fields: ['bovineId']
+        fields: ['bovine_id']
       },
       {
-        fields: ['eventId']
+        fields: ['event_id']
       },
       {
-        fields: ['farmId']
+        fields: ['farm_id']
       },
       {
-        fields: ['createdBy']
+        fields: ['created_by']
       },
       {
         fields: ['currency']
       },
       {
-        fields: ['isApproved']
+        fields: ['is_approved']
       },
       {
-        fields: ['isRecurring']
+        fields: ['is_recurring']
       },
       {
-        fields: ['fiscalYear']
+        fields: ['fiscal_year']
       },
       {
         name: 'finances_type_status_date',
-        fields: ['transactionType', 'status', 'transactionDate']
+        fields: ['transaction_type', 'status', 'transaction_date']
       },
       {
         name: 'finances_category_date',
-        fields: ['category', 'transactionDate']
+        fields: ['category', 'transaction_date']
       },
       {
         name: 'finances_amount_currency',
         fields: ['amount', 'currency']
       },
       {
-        name: 'finances_location_gist',
+        name: 'finances_location_gin',
         fields: ['location'],
-        using: 'gist',
+        using: 'gin',
         where: {
           location: {
             [Op.ne]: null

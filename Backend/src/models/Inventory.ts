@@ -1031,7 +1031,7 @@ Inventory.init(
       // Índices para optimizar consultas
       {
         unique: true,
-        fields: ['itemCode']
+        fields: ['item_code']
       },
       {
         fields: ['category']
@@ -1040,42 +1040,42 @@ Inventory.init(
         fields: ['status']
       },
       {
-        fields: ['isActive']
+        fields: ['is_active']
       },
       {
-        fields: ['isCritical']
+        fields: ['is_critical']
       },
       {
-        fields: ['expirationDate']
+        fields: ['expiration_date']
       },
       {
-        fields: ['currentStock']
+        fields: ['current_stock']
       },
       {
-        fields: ['farmId']
+        fields: ['farm_id']
       },
       {
-        fields: ['warehouseId']
+        fields: ['warehouse_id']
       },
       {
-        fields: ['storageLocation']
+        fields: ['storage_location']
       },
       {
         name: 'inventory_stock_status',
-        fields: ['currentStock', 'minimumStock', 'status']
+        fields: ['current_stock', 'minimum_stock', 'status']
       },
       {
         name: 'inventory_expiration_warning',
-        fields: ['expirationDate', 'trackExpiration']
+        fields: ['expiration_date', 'track_expiration']
       },
       {
         name: 'inventory_location_category',
-        fields: ['storageLocation', 'category']
+        fields: ['storage_location', 'category']
       },
       {
-        name: 'inventory_location_gist',
+        name: 'inventory_location_gin',
         fields: ['location'],
-        using: 'gist',
+        using: 'gin',
         where: {
           location: {
             [Op.ne]: null

@@ -18,21 +18,25 @@ router.post('/login', (0, rate_limit_1.createRateLimit)(rate_limit_1.EndpointTyp
                 error: 'MISSING_CREDENTIALS'
             });
         }
+        const userId = 'user_' + Date.now();
         const mockUser = {
-            id: 'user_' + Date.now(),
+            id: userId,
             email: email,
             firstName: 'Usuario',
             lastName: 'Prueba',
-            role: 'USER',
-            isActive: true
+            role: auth_1.UserRole.ADMIN,
+            isActive: true,
+            isEmailVerified: true,
+            lastLoginAt: new Date()
         };
-        const mockToken = 'mock_jwt_token_' + Date.now();
+        auth_1.mockUserDatabase[userId] = mockUser;
+        const realToken = (0, auth_1.generateToken)(userId, email, auth_1.UserRole.ADMIN);
         res.status(200).json({
             success: true,
             message: 'Login exitoso',
             data: {
                 user: mockUser,
-                accessToken: mockToken,
+                accessToken: realToken,
                 refreshToken: 'mock_refresh_token_' + Date.now(),
                 expiresIn: 3600
             }

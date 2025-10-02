@@ -314,7 +314,8 @@ User.init({
         type: sequelize_1.DataTypes.STRING(20),
         allowNull: false,
         unique: true,
-        comment: 'Código único del usuario'
+        comment: 'Código único del usuario',
+        field: 'user_code'
     },
     username: {
         type: sequelize_1.DataTypes.STRING(50),

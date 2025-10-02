@@ -471,33 +471,33 @@ Bovine.init(
       // Índices para mejorar el rendimiento de las consultas
       {
         unique: true,
-        fields: ['earTag']
+        fields: ['ear_tag']
       },
       {
-        fields: ['healthStatus']
+        fields: ['health_status']
       },
       {
-        fields: ['cattleType']
+        fields: ['cattle_type']
       },
       {
-        fields: ['vaccinationStatus']
+        fields: ['vaccination_status']
       },
       {
-        fields: ['ownerId']
+        fields: ['owner_id']
       },
       {
-        fields: ['farmId']
+        fields: ['farm_id']
       },
       {
-        fields: ['isActive']
+        fields: ['is_active']
       },
       {
-        fields: ['birthDate']
+        fields: ['birth_date']
       },
       {
-        name: 'bovines_location_gist',
+        name: 'bovines_location_gin',
         fields: ['location'],
-        using: 'gist',
+        using: 'gin',
         where: {
           location: {
             [Op.ne]: null

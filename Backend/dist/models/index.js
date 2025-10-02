@@ -281,7 +281,7 @@ class Database {
     async syncDatabase(config = {}) {
         const defaultConfig = {
             sync: true,
-            force: false,
+            force: true,
             alter: false,
             logging: true
         };
@@ -308,37 +308,100 @@ class Database {
     }
     async createAdditionalIndexes() {
         try {
-            console.log('📊 Creando índices adicionales...');
+            console.log('�� Creando índices adicionales...');
             const queryInterface = this.sequelize.getQueryInterface();
             const tables = await queryInterface.showAllTables();
             if (tables.includes('users')) {
-                await this.sequelize.query(`
+                const userColumns = [];
+                if (await this.columnExists('users', 'email'))
+                    userColumns.push('email');
+                if (await this.columnExists('users', 'role'))
+                    userColumns.push('role');
+                if (await this.columnExists('users', 'status'))
+                    userColumns.push('status');
+                if (await this.columnExists('users', 'is_active'))
+                    userColumns.push('is_active');
+                if (userColumns.length > 0) {
+                    await this.sequelize.query(`
           CREATE INDEX IF NOT EXISTS idx_users_search 
-          ON users (email, role, status, is_active)
+          ON users (${userColumns.join(', ')})
         `).catch(() => console.log('⚠️ Índice de usuarios ya existe o no se pudo crear'));
+                    console.log(`✅ Índice de usuarios creado con columnas: ${userColumns.join(', ')}`);
+                }
+                else {
+                    console.log('⚠️ No se encontraron columnas válidas para índice de usuarios');
+                }
             }
             if (tables.includes('bovines')) {
-                await this.sequelize.query(`
+                const bovineColumns = [];
+                if (await this.columnExists('bovines', 'ear_tag'))
+                    bovineColumns.push('ear_tag');
+                if (await this.columnExists('bovines', 'breed'))
+                    bovineColumns.push('breed');
+                if (await this.columnExists('bovines', 'is_active'))
+                    bovineColumns.push('is_active');
+                if (bovineColumns.length > 0) {
+                    await this.sequelize.query(`
           CREATE INDEX IF NOT EXISTS idx_bovines_search 
-          ON bovines (ear_tag, breed, is_active)
+          ON bovines (${bovineColumns.join(', ')})
         `).catch(() => console.log('⚠️ Índice de bovinos ya existe o no se pudo crear'));
+                    console.log(`✅ Índice de bovinos creado con columnas: ${bovineColumns.join(', ')}`);
+                }
+                else {
+                    console.log('⚠️ No se encontraron columnas válidas para índice de bovinos');
+                }
             }
             if (tables.includes('events')) {
-                await this.sequelize.query(`
+                const eventColumns = [];
+                if (await this.columnExists('events', 'event_type'))
+                    eventColumns.push('event_type');
+                if (await this.columnExists('events', 'scheduled_date'))
+                    eventColumns.push('scheduled_date');
+                if (await this.columnExists('events', 'status'))
+                    eventColumns.push('status');
+                if (eventColumns.length > 0) {
+                    await this.sequelize.query(`
           CREATE INDEX IF NOT EXISTS idx_events_search 
-          ON events (event_type, scheduled_date, status)
+          ON events (${eventColumns.join(', ')})
         `).catch(() => console.log('⚠️ Índice de eventos ya existe o no se pudo crear'));
+                    console.log(`✅ Índice de eventos creado con columnas: ${eventColumns.join(', ')}`);
+                }
+                else {
+                    console.log('⚠️ No se encontraron columnas válidas para índice de eventos');
+                }
             }
             if (tables.includes('finances')) {
-                await this.sequelize.query(`
+                const financeColumns = [];
+                if (await this.columnExists('finances', 'transaction_date'))
+                    financeColumns.push('transaction_date');
+                if (await this.columnExists('finances', 'transaction_type'))
+                    financeColumns.push('transaction_type');
+                if (financeColumns.length > 0) {
+                    await this.sequelize.query(`
           CREATE INDEX IF NOT EXISTS idx_finances_period 
-          ON finances (transaction_date, transaction_type)
+          ON finances (${financeColumns.join(', ')})
         `).catch(() => console.log('⚠️ Índice de finanzas ya existe o no se pudo crear'));
+                    console.log(`✅ Índice de finanzas creado con columnas: ${financeColumns.join(', ')}`);
+                }
+                else {
+                    console.log('⚠️ No se encontraron columnas válidas para índice de finanzas');
+                }
             }
             console.log('✅ Índices adicionales procesados');
         }
         catch (error) {
             console.error('⚠️  Error creando índices adicionales:', error);
+        }
+    }
+    async columnExists(tableName, columnName) {
+        try {
+            const queryInterface = this.sequelize.getQueryInterface();
+            const columns = await queryInterface.describeTable(tableName);
+            return columns[columnName] !== undefined;
+        }
+        catch (error) {
+            console.error('❌ Error verificando existencia de columna:', error);
+            return false;
         }
     }
     async closeConnection() {

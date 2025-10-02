@@ -1258,7 +1258,7 @@ Ranch.init(
       // Índices para optimizar consultas
       {
         unique: true,
-        fields: ['ranchCode']
+        fields: ['ranch_code']
       },
       {
         fields: ['name']
@@ -1270,10 +1270,10 @@ Ranch.init(
         fields: ['status']
       },
       {
-        fields: ['landTenure']
+        fields: ['land_tenure']
       },
       {
-        fields: ['climateZone']
+        fields: ['climate_zone']
       },
       {
         fields: ['city']
@@ -1285,21 +1285,21 @@ Ranch.init(
         fields: ['country']
       },
       {
-        fields: ['isActive']
+        fields: ['is_active']
       },
       {
-        fields: ['isVerified']
+        fields: ['is_verified']
       },
       {
-        fields: ['nextInspectionDate']
+        fields: ['next_inspection_date']
       },
       {
-        fields: ['complianceScore']
+        fields: ['compliance_score']
       },
       {
-        name: 'ranches_coordinates_gist',
+        name: 'ranches_coordinates_gin',
         fields: ['coordinates'],
-        using: 'gist'
+        using: 'gin'
       },
       {
         name: 'ranches_type_status',
@@ -1311,9 +1311,9 @@ Ranch.init(
       },
       {
         name: 'ranches_capacity_search',
-        fields: ['type', 'isActive'],
+        fields: ['type', 'is_active'],
         where: {
-          isActive: true
+          is_active: true
         }
       }
     ],

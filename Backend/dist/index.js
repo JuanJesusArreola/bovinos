@@ -182,6 +182,7 @@ app.use(express_1.default.urlencoded({
     limit: '10mb'
 }));
 const routes_1 = __importDefault(require("./routes"));
+const models_1 = require("./models");
 app.use('/api', routes_1.default);
 app.get('/', (req, res) => {
     res.json({
@@ -280,6 +281,9 @@ async function initializeServices() {
         console.log('🚀 Iniciando Sistema de Gestión Ganadera...');
         console.log('='.repeat(50));
         console.log('📋 Validando configuración básica...');
+        console.log('🔧 Inicializando base de datos...');
+        await (0, models_1.initializeDatabase)();
+        console.log('✅ Base de datos inicializada correctamente');
         if (!process.env.DB_HOST) {
             console.warn('⚠️ DB_HOST no configurado');
         }

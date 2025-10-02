@@ -14,6 +14,7 @@ import Bovine, {
 import Location from '../models/Location'; // Importación corregida
 import { bovineService } from '../services/bovine'; // Importando la instancia del servicio
 
+
 // Interfaces para requests - adaptadas al modelo real
 interface CreateBovineRequest {
   earTag: string;
