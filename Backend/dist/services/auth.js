@@ -32,7 +32,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const User_1 = __importStar(require("../models/User"));
 const Ranch_1 = __importDefault(require("../models/Ranch"));
 const email_1 = require("./email");
-const logger_1 = require("../utils/logger");
+const logger_1 = __importDefault(require("../utils/logger"));
 class AuthService {
     constructor() {
         this.JWT_SECRET = process.env.JWT_SECRET || 'your-default-secret-key';
@@ -99,7 +99,7 @@ class AuthService {
             const refreshToken = this.generateRefreshToken(newUser.id);
             const userResponse = await this.formatUserResponse(newUser);
             await this.sendWelcomeEmail(newUser);
-            (0, logger_1.logInfo)(`Usuario registrado exitosamente: ${newUser.email}`, undefined, 'AuthService');
+            logger_1.default.info(`Usuario registrado exitosamente: ${newUser.email}`, 'AuthService', undefined);
             return {
                 user: userResponse,
                 token,
@@ -108,7 +108,7 @@ class AuthService {
             };
         }
         catch (error) {
-            (0, logger_1.logError)('Error en el registro', { email: registerData.email }, error, 'AuthService');
+            logger_1.default.error('Error en el registro', 'AuthService', { email: registerData.email }, error);
             throw error;
         }
     }
@@ -141,7 +141,7 @@ class AuthService {
             const token = this.generateToken(tokenPayload, credentials.rememberMe);
             const refreshToken = this.generateRefreshToken(user.id);
             const userResponse = await this.formatUserResponse(user);
-            (0, logger_1.logInfo)(`Usuario autenticado exitosamente: ${user.email}`, undefined, 'AuthService');
+            logger_1.default.info(`Usuario autenticado exitosamente: ${user.email}`, 'AuthService', undefined);
             return {
                 user: userResponse,
                 token,
@@ -150,16 +150,16 @@ class AuthService {
             };
         }
         catch (error) {
-            (0, logger_1.logError)('Error en el login', { email: credentials.email }, error, 'AuthService');
+            logger_1.default.error('Error en el login', 'AuthService', { email: credentials.email }, error);
             throw error;
         }
     }
     async logout(userId) {
         try {
-            (0, logger_1.logInfo)(`Usuario cerró sesión: ${userId}`, undefined, 'AuthService');
+            logger_1.default.info(`Usuario cerró sesión: ${userId}`, 'AuthService', undefined);
         }
         catch (error) {
-            (0, logger_1.logError)('Error en el logout', { userId }, error, 'AuthService');
+            logger_1.default.error('Error en el logout', 'AuthService', { userId }, error);
             throw error;
         }
     }
@@ -191,7 +191,7 @@ class AuthService {
             };
         }
         catch (error) {
-            (0, logger_1.logError)('Error al refrescar token', undefined, error, 'AuthService');
+            logger_1.default.error('Error al refrescar token', 'AuthService', undefined, error);
             throw new Error('Token de refresco inválido o expirado');
         }
     }
@@ -203,16 +203,16 @@ class AuthService {
                 }
             });
             if (!user) {
-                (0, logger_1.logWarn)(`Intento de recuperación de contraseña para email inexistente: ${email}`, undefined, 'AuthService');
+                logger_1.default.warn(`Intento de recuperación de contraseña para email inexistente: ${email}`, 'AuthService', undefined);
                 return;
             }
             const resetToken = crypto_1.default.randomBytes(32).toString('hex');
             const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
             await email_1.emailService.sendPasswordResetEmail(user.email, resetToken, user.personalInfo.firstName);
-            (0, logger_1.logInfo)(`Token de recuperación enviado para: ${user.email}`, undefined, 'AuthService');
+            logger_1.default.info(`Token de recuperación enviado para: ${user.email}`, 'AuthService', undefined);
         }
         catch (error) {
-            (0, logger_1.logError)('Error en forgot password', { email }, error, 'AuthService');
+            logger_1.default.error('Error en forgot password', 'AuthService', { email }, error);
             throw error;
         }
     }
@@ -222,10 +222,10 @@ class AuthService {
                 throw new Error('Las contraseñas no coinciden');
             }
             this.validatePasswordStrength(resetData.newPassword);
-            (0, logger_1.logInfo)(`Contraseña restablecida exitosamente`, undefined, 'AuthService');
+            logger_1.default.info(`Contraseña restablecida exitosamente`, 'AuthService', undefined);
         }
         catch (error) {
-            (0, logger_1.logError)('Error en reset password', undefined, error, 'AuthService');
+            logger_1.default.error('Error en reset password', 'AuthService', undefined, error);
             throw error;
         }
     }
@@ -243,10 +243,10 @@ class AuthService {
             const hashedPassword = await User_1.default.hashPassword(updateData.newPassword);
             user.password = hashedPassword;
             await user.save();
-            (0, logger_1.logInfo)(`Contraseña actualizada para: ${user.email}`, undefined, 'AuthService');
+            logger_1.default.info(`Contraseña actualizada para: ${user.email}`, 'AuthService', undefined);
         }
         catch (error) {
-            (0, logger_1.logError)('Error en update password', { userId: updateData.userId }, error, 'AuthService');
+            logger_1.default.error('Error en update password', 'AuthService', { userId: updateData.userId }, error);
             throw error;
         }
     }
@@ -256,7 +256,7 @@ class AuthService {
             return decoded;
         }
         catch (error) {
-            (0, logger_1.logError)('Error al verificar token', undefined, error, 'AuthService');
+            logger_1.default.error('Error al verificar token', 'AuthService', undefined, error);
             throw new Error('Token inválido o expirado');
         }
     }
@@ -438,7 +438,7 @@ class AuthService {
             await email_1.emailService.sendWelcomeEmail(user.email, user.personalInfo.firstName);
         }
         catch (error) {
-            (0, logger_1.logError)('Error enviando email de bienvenida', { email: user.email }, error, 'AuthService');
+            logger_1.default.error('Error enviando email de bienvenida', 'AuthService', { email: user.email }, error);
         }
     }
 }

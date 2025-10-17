@@ -10,12 +10,9 @@
 
 // Configuración de base de datos
 import sequelize, { 
-  testConnection, 
-  syncDatabase, 
-  closeConnection, 
-  getConnectionInfo,
-  databaseConfig,
-  environment as dbEnvironment
+  getDatabaseManager,
+  initializeDatabase,
+  closeDatabase
 } from './database';
 
 // Configuración de autenticación
@@ -35,13 +32,7 @@ import authConfig, {
 
 // Configuración de CORS
 import corsConfig, {
-  getCurrentCorsConfig,
-  getCorsMiddleware,
-  isOriginAllowed,
-  addAllowedOrigin,
-  getCorsInfo,
-  corsLoggingMiddleware,
-  securityHeadersMiddleware
+  getCorsMiddleware
 } from './cors';
 
 // Configuración de uploads
@@ -63,9 +54,9 @@ import {
 // ============================================================================
 
 // Re-exportar tipos importantes para facilitar su uso
-export type { DatabaseConfig, ConnectionConfig } from './database';
+export type { DatabaseManagerConfig } from './database';
 export type { JWTPayload, TokenResponse, AuthConfig } from './auth';
-export type { CorsConfig, EnvironmentCorsConfig } from './cors';
+// Tipos de CORS se definen localmente
 export type { 
   UploadConfig, 
   FileTypeConfig, 
@@ -93,7 +84,7 @@ interface AppConfig {
   
   // Configuraciones de servicios
   services: {
-    database: typeof databaseConfig;
+    database: any; // Se obtiene dinámicamente del DatabaseManager
     auth: typeof authConfig;
     cors: typeof corsConfig;
     uploads: typeof uploadConfigs;
@@ -129,7 +120,7 @@ const appConfig: AppConfig = {
   },
   
   services: {
-    database: databaseConfig,
+    database: getDatabaseManager().getConnectionInfo(),
     auth: authConfig,
     cors: corsConfig,
     uploads: uploadConfigs
@@ -172,7 +163,8 @@ export const initializeConfig = async (): Promise<boolean> => {
     }
     
     // Probar conexión a base de datos
-    const dbConnected = await testConnection();
+    const dbManager = getDatabaseManager();
+    const dbConnected = await dbManager.testConnection();
     if (!dbConnected) {
       console.error('❌ No se pudo conectar a la base de datos');
       return false;
@@ -212,8 +204,9 @@ export const validateConfig = (): { isValid: boolean; errors: string[]; warnings
     }
     
     // Validar configuración de base de datos
-    const dbConfig = databaseConfig[dbEnvironment];
-    if (!dbConfig.host || !dbConfig.database || !dbConfig.username) {
+    const dbManager = getDatabaseManager();
+    const dbInfo = dbManager.getConnectionInfo();
+    if (!dbInfo.host || !dbInfo.database || !dbInfo.username) {
       errors.push('Configuración de base de datos incompleta');
     }
     
@@ -259,8 +252,8 @@ export const getSystemInfo = () => {
       nodeVersion: process.version,
       platform: process.platform
     },
-    database: getConnectionInfo(),
-    cors: getCorsInfo(),
+    database: getDatabaseManager().getConnectionInfo(),
+    cors: { enabled: true, middleware: 'getCorsMiddleware' },
     storage: getStorageStats(),
     memory: {
       used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
@@ -279,7 +272,7 @@ export const gracefulShutdown = async (): Promise<void> => {
     console.log('🔄 Iniciando cierre ordenado del sistema...');
     
     // Cerrar conexión a base de datos
-    await closeConnection();
+    await closeDatabase();
     
     console.log('✅ Sistema cerrado correctamente');
   } catch (error) {
@@ -299,11 +292,9 @@ export default appConfig;
 export {
   // Base de datos
   sequelize,
-  testConnection,
-  syncDatabase,
-  closeConnection,
-  getConnectionInfo,
-  databaseConfig,
+  getDatabaseManager,
+  initializeDatabase,
+  closeDatabase,
   
   // Autenticación
   authConfig,
@@ -321,13 +312,7 @@ export {
   
   // CORS
   corsConfig,
-  getCurrentCorsConfig,
   getCorsMiddleware,
-  isOriginAllowed,
-  addAllowedOrigin,
-  getCorsInfo,
-  corsLoggingMiddleware,
-  securityHeadersMiddleware,
   
   // Uploads
   uploadConfigs,

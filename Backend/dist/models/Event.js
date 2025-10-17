@@ -427,10 +427,10 @@ Event.init({
     paranoid: true,
     indexes: [
         {
-            fields: ['bovineId']
+            fields: ['bovine_id']
         },
         {
-            fields: ['eventType']
+            fields: ['event_type']
         },
         {
             fields: ['status']
@@ -439,32 +439,32 @@ Event.init({
             fields: ['priority']
         },
         {
-            fields: ['scheduledDate']
+            fields: ['scheduled_date']
         },
         {
-            fields: ['createdBy']
+            fields: ['created_by']
         },
         {
-            fields: ['veterinarianId']
+            fields: ['veterinarian_id']
         },
         {
-            fields: ['isActive']
+            fields: ['is_active']
         },
         {
-            fields: ['parentEventId']
+            fields: ['parent_event_id']
         },
         {
             name: 'events_scheduled_date_status',
-            fields: ['scheduledDate', 'status']
+            fields: ['scheduled_date', 'status']
         },
         {
             name: 'events_bovine_type_date',
-            fields: ['bovineId', 'eventType', 'scheduledDate']
+            fields: ['bovine_id', 'event_type', 'scheduled_date']
         },
         {
-            name: 'events_location_gist',
+            name: 'events_location_gin',
             fields: ['location'],
-            using: 'gist'
+            using: 'gin'
         }
     ],
     hooks: {

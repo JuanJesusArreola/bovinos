@@ -5,7 +5,7 @@ import { Op } from 'sequelize';
 import User, { UserRole, UserStatus, AccessLevel, UserPermissions, VerificationStatus } from '../models/User';
 import Ranch from '../models/Ranch';
 import { emailService } from './email';
-import { logInfo, logError, logWarn } from '../utils/logger';
+import logger from '../utils/logger';
 
 // Interfaces para el servicio de autenticación
 interface LoginCredentials {
@@ -163,7 +163,7 @@ class AuthService {
       // Enviar email de bienvenida
       await this.sendWelcomeEmail(newUser);
 
-      logInfo(`Usuario registrado exitosamente: ${newUser.email}`, undefined, 'AuthService');
+      logger.info(`Usuario registrado exitosamente: ${newUser.email}`, 'AuthService', undefined );
 
       return {
         user: userResponse,
@@ -173,7 +173,7 @@ class AuthService {
       };
 
     } catch (error) {
-      logError('Error en el registro', { email: registerData.email }, error as Error, 'AuthService');
+      logger.error('Error en el registro', 'AuthService', { email: registerData.email }, error as Error);
       throw error;
     }
   }
@@ -227,7 +227,7 @@ class AuthService {
       // Preparar respuesta del usuario
       const userResponse = await this.formatUserResponse(user);
 
-      logInfo(`Usuario autenticado exitosamente: ${user.email}`, undefined, 'AuthService');
+      logger.info(`Usuario autenticado exitosamente: ${user.email}`, 'AuthService', undefined);
 
       return {
         user: userResponse,
@@ -237,7 +237,7 @@ class AuthService {
       };
 
     } catch (error) {
-      logError('Error en el login', { email: credentials.email }, error as Error, 'AuthService');
+      logger.error('Error en el login', 'AuthService', { email: credentials.email }, error as Error);
       throw error;
     }
   }
@@ -249,9 +249,9 @@ class AuthService {
    */
   async logout(userId: string): Promise<void> {
     try {
-      logInfo(`Usuario cerró sesión: ${userId}`, undefined, 'AuthService');
+      logger.info(`Usuario cerró sesión: ${userId}`, 'AuthService', undefined);
     } catch (error) {
-      logError('Error en el logout', { userId }, error as Error, 'AuthService');
+      logger.error('Error en el logout', 'AuthService', { userId }, error as Error);
       throw error;
     }
   }
@@ -297,7 +297,7 @@ class AuthService {
       };
 
     } catch (error) {
-      logError('Error al refrescar token', undefined, error as Error, 'AuthService');
+      logger.error('Error al refrescar token', 'AuthService', undefined, error as Error);
       throw new Error('Token de refresco inválido o expirado');
     }
   }
@@ -317,7 +317,7 @@ class AuthService {
 
       if (!user) {
         // Por seguridad, no revelamos si el usuario existe o no
-        logWarn(`Intento de recuperación de contraseña para email inexistente: ${email}`, undefined, 'AuthService');
+        logger.warn(`Intento de recuperación de contraseña para email inexistente: ${email}`, 'AuthService', undefined);
         return;
       }
 
@@ -332,10 +332,10 @@ class AuthService {
         user.personalInfo.firstName
       );
 
-      logInfo(`Token de recuperación enviado para: ${user.email}`, undefined, 'AuthService');
+      logger.info(`Token de recuperación enviado para: ${user.email}`, 'AuthService', undefined, );
 
     } catch (error) {
-      logError('Error en forgot password', { email }, error as Error, 'AuthService');
+      logger.error('Error en forgot password', 'AuthService', { email }, error as Error);
       throw error;
     }
   }
@@ -354,10 +354,10 @@ class AuthService {
       // Validar fortaleza de la nueva contraseña
       this.validatePasswordStrength(resetData.newPassword);
 
-      logInfo(`Contraseña restablecida exitosamente`, undefined, 'AuthService');
+      logger.info(`Contraseña restablecida exitosamente`, 'AuthService', undefined );
 
     } catch (error) {
-      logError('Error en reset password', undefined, error as Error, 'AuthService');
+      logger.error('Error en reset password', 'AuthService', undefined, error as Error);
       throw error;
     }
   }
@@ -390,10 +390,10 @@ class AuthService {
       user.password = hashedPassword;
       await user.save();
 
-      logInfo(`Contraseña actualizada para: ${user.email}`, undefined, 'AuthService');
+      logger.info(`Contraseña actualizada para: ${user.email}`, 'AuthService', undefined);
 
     } catch (error) {
-      logError('Error en update password', { userId: updateData.userId }, error as Error, 'AuthService');
+      logger.error('Error en update password', 'AuthService', { userId: updateData.userId }, error as Error);
       throw error;
     }
   }
@@ -408,7 +408,7 @@ class AuthService {
       const decoded = jwt.verify(token, this.JWT_SECRET) as TokenPayload;
       return decoded;
     } catch (error) {
-      logError('Error al verificar token', undefined, error as Error, 'AuthService');
+      logger.error('Error al verificar token', 'AuthService', undefined, error as Error);
       throw new Error('Token inválido o expirado');
     }
   }
@@ -651,7 +651,7 @@ class AuthService {
     try {
       await emailService.sendWelcomeEmail(user.email, user.personalInfo.firstName);
     } catch (error) {
-      logError('Error enviando email de bienvenida', { email: user.email }, error as Error, 'AuthService');
+      logger.error('Error enviando email de bienvenida', 'AuthService', { email: user.email }, error as Error);
       // No arrojar error para no afectar el registro
     }
   }

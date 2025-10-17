@@ -1,191 +1,222 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.environment = exports.databaseConfig = exports.getConnectionInfo = exports.closeConnection = exports.syncDatabase = exports.testConnection = void 0;
-let Sequelize;
-let config;
-try {
-    const sequelizeModule = require('sequelize');
-    Sequelize = sequelizeModule.Sequelize;
-    const dotenvModule = require('dotenv');
-    config = dotenvModule.config;
-    config();
-}
-catch (error) {
-    console.warn('⚠️  Dependencias no instaladas aún. Ejecuta: npm install sequelize pg dotenv');
-}
-const baseConfig = {
-    dialect: 'postgres',
-    timezone: '-06:00',
-    pool: {
-        max: 5,
-        min: 0,
-        acquire: 30000,
-        idle: 10000
-    },
-    define: {
-        timestamps: true,
-        underscored: true,
-        createdAt: 'created_at',
-        updatedAt: 'updated_at',
-        charset: 'utf8mb4',
-        collate: 'utf8mb4_unicode_ci'
-    }
-};
-const databaseConfig = {
-    development: {
-        host: process.env.DB_HOST || 'localhost',
-        port: parseInt(process.env.DB_PORT || '5432'),
-        database: process.env.DB_NAME || 'cattle_management_dev',
-        username: process.env.DB_USER || 'postgres',
-        password: process.env.DB_PASSWORD || 'password',
-        dialect: 'postgres',
-        timezone: '-06:00',
-        pool: {
-            max: 5,
-            min: 0,
-            acquire: 30000,
-            idle: 10000
-        },
-        define: {
-            timestamps: true,
-            underscored: true,
-            createdAt: 'created_at',
-            updatedAt: 'updated_at',
-            charset: 'utf8mb4',
-            collate: 'utf8mb4_unicode_ci'
-        },
-        logging: console.log,
-    },
-    test: {
-        host: process.env.TEST_DB_HOST || 'localhost',
-        port: parseInt(process.env.TEST_DB_PORT || '5432'),
-        database: process.env.TEST_DB_NAME || 'cattle_management_test',
-        username: process.env.TEST_DB_USER || 'postgres',
-        password: process.env.TEST_DB_PASSWORD || 'password',
-        dialect: 'postgres',
-        timezone: '-06:00',
-        pool: {
-            max: 5,
-            min: 0,
-            acquire: 30000,
-            idle: 10000
-        },
-        define: {
-            timestamps: true,
-            underscored: true,
-            createdAt: 'created_at',
-            updatedAt: 'updated_at',
-            charset: 'utf8mb4',
-            collate: 'utf8mb4_unicode_ci'
-        },
-        logging: false,
-    },
-    production: {
-        host: process.env.PROD_DB_HOST || 'localhost',
-        port: parseInt(process.env.PROD_DB_PORT || '5432'),
-        database: process.env.PROD_DB_NAME || 'cattle_management_prod',
-        username: process.env.PROD_DB_USER || 'postgres',
-        password: process.env.PROD_DB_PASSWORD || '',
-        dialect: 'postgres',
-        timezone: '-06:00',
-        dialectOptions: {
-            ssl: process.env.NODE_ENV === 'production' ? {
-                require: true,
-                rejectUnauthorized: false
-            } : false
-        },
-        pool: {
-            max: 20,
-            min: 5,
-            acquire: 60000,
-            idle: 300000
-        },
-        define: {
-            timestamps: true,
-            underscored: true,
-            createdAt: 'created_at',
-            updatedAt: 'updated_at',
-            charset: 'utf8mb4',
-            collate: 'utf8mb4_unicode_ci'
-        },
-        logging: false,
-    }
-};
-exports.databaseConfig = databaseConfig;
-const environment = process.env.NODE_ENV || 'development';
-exports.environment = environment;
-let sequelize;
-if (Sequelize) {
-    sequelize = new Sequelize(databaseConfig[environment]);
-}
-else {
-    sequelize = {
-        authenticate: () => Promise.resolve(),
-        sync: () => Promise.resolve(),
-        close: () => Promise.resolve()
-    };
-}
-const testConnection = async () => {
-    try {
-        await sequelize.authenticate();
-        console.log(`✅ Conexión a base de datos establecida correctamente en entorno: ${environment}`);
-        return true;
-    }
-    catch (error) {
-        console.error('❌ Error al conectar con la base de datos:', error);
-        return false;
-    }
-};
-exports.testConnection = testConnection;
-const syncDatabase = async (force = false, alter = false) => {
-    try {
-        const options = { force, alter };
-        if (force) {
-            console.log('⚠️  ADVERTENCIA: Eliminando y recreando todas las tablas...');
+exports.sequelize = exports.closeDatabase = exports.initializeDatabase = exports.getDatabaseManager = exports.DatabaseManager = void 0;
+const sequelize_1 = require("sequelize");
+const environments_1 = require("./environments");
+const MigrationManager_1 = require("../migrations/MigrationManager");
+const BackupManager_1 = require("../backup/BackupManager");
+const logger_1 = __importDefault(require("../utils/logger"));
+class DatabaseManager {
+    constructor(managerConfig) {
+        const validation = (0, environments_1.validateEnvironmentVariables)();
+        if (!validation.isValid) {
+            throw new Error(`❌ Variables de entorno faltantes: ${validation.missing.join(', ')}`);
         }
-        else if (alter) {
-            console.log('🔄 Modificando tablas existentes para coincidir con modelos...');
+        this.config = (0, environments_1.getEnvironmentConfig)();
+        this.managerConfig = {
+            enableMigrations: managerConfig?.enableMigrations ?? this.config.features.enableMigrations,
+            enableBackup: managerConfig?.enableBackup ?? this.config.features.enableBackup,
+            enableLogging: managerConfig?.enableLogging ?? true,
+            autoSync: managerConfig?.autoSync ?? true,
+            forceSync: managerConfig?.forceSync ?? false,
+            alterSync: managerConfig?.alterSync ?? false
+        };
+        this.sequelize = new sequelize_1.Sequelize(this.config.database);
+        this.initializeManagers();
+        logger_1.default.info('🗄️ DatabaseManager inicializado', 'Database', {
+            environment: this.config.database.database,
+            host: this.config.database.host,
+            features: this.managerConfig
+        });
+    }
+    initializeManagers() {
+        if (this.managerConfig.enableMigrations) {
+            this.migrationManager = new MigrationManager_1.MigrationManager(this.sequelize);
+            logger_1.default.info('📋 MigrationManager inicializado', 'Database');
         }
-        else {
-            console.log('📋 Creando tablas que no existen...');
+        if (this.managerConfig.enableBackup) {
+            this.backupManager = new BackupManager_1.BackupManager(this.sequelize);
+            logger_1.default.info('💾 BackupManager inicializado', 'Database');
         }
-        await sequelize.sync(options);
-        console.log('✅ Sincronización de base de datos completada');
     }
-    catch (error) {
-        console.error('❌ Error durante la sincronización de base de datos:', error);
-        throw error;
+    getSequelize() {
+        return this.sequelize;
     }
-};
-exports.syncDatabase = syncDatabase;
-const closeConnection = async () => {
-    try {
-        await sequelize.close();
-        console.log('🔌 Conexión a base de datos cerrada correctamente');
+    getMigrationManager() {
+        return this.migrationManager;
     }
-    catch (error) {
-        console.error('❌ Error al cerrar la conexión:', error);
-        throw error;
+    getBackupManager() {
+        return this.backupManager;
     }
-};
-exports.closeConnection = closeConnection;
-const getConnectionInfo = () => {
-    const config = databaseConfig[environment];
-    return {
-        environment,
-        host: config.host,
-        port: config.port,
-        database: config.database,
-        username: config.username,
-        isConnected: sequelize.authenticate ? true : false,
-        poolInfo: {
-            max: config.pool?.max || 0,
-            min: config.pool?.min || 0,
-            acquire: config.pool?.acquire || 0,
-            idle: config.pool?.idle || 0
+    async initialize() {
+        try {
+            logger_1.default.start('Inicialización completa de base de datos', 'Database');
+            await this.testConnection();
+            if (this.managerConfig.enableMigrations && this.migrationManager) {
+                await this.runMigrations();
+            }
+            if (this.managerConfig.autoSync) {
+                await this.syncDatabase();
+            }
+            if (this.managerConfig.enableBackup && this.backupManager) {
+                this.scheduleBackups();
+            }
+            logger_1.default.end('Inicialización completa de base de datos', 'Database');
         }
-    };
-};
-exports.getConnectionInfo = getConnectionInfo;
-exports.default = sequelize;
+        catch (error) {
+            logger_1.default.fail('Inicialización completa de base de datos', error, 'Database');
+            throw error;
+        }
+    }
+    async testConnection() {
+        try {
+            await this.sequelize.authenticate();
+            logger_1.default.info('Conexión a base de datos establecida', 'Database', {
+                host: this.config.database.host,
+                database: this.config.database.database
+            });
+            return true;
+        }
+        catch (error) {
+            logger_1.default.fail('Conexión a base de datos', error, 'Database');
+            return false;
+        }
+    }
+    async syncDatabase() {
+        try {
+            logger_1.default.start('Sincronización de base de datos', 'Database');
+            const options = {
+                force: this.managerConfig.forceSync,
+                alter: this.managerConfig.alterSync,
+                logging: this.managerConfig.enableLogging ? console.log : false
+            };
+            if (options.force) {
+                logger_1.default.warn('Eliminando y recreando todas las tablas', 'Database');
+            }
+            else if (options.alter) {
+                logger_1.default.info('Modificando tablas existentes', 'Database');
+            }
+            else {
+                logger_1.default.info('Creando tablas que no existen', 'Database');
+            }
+            await this.sequelize.sync(options);
+            logger_1.default.end('Sincronización de base de datos', 'Database');
+        }
+        catch (error) {
+            logger_1.default.fail('Sincronización de base de datos', error, 'Database');
+            throw error;
+        }
+    }
+    async runMigrations() {
+        if (!this.migrationManager) {
+            logger_1.default.warn('MigrationManager no disponible', 'Database');
+            return;
+        }
+        try {
+            logger_1.default.start('Ejecución de migraciones', 'Database');
+            const result = await this.migrationManager.runMigrations();
+            if (result.success) {
+                logger_1.default.end('Ejecución de migraciones', 'Database', {
+                    executed: result.executed.length,
+                    failed: result.failed.length
+                });
+            }
+            else {
+                logger_1.default.fail('Ejecución de migraciones', new Error(result.errors.join(', ')), 'Database');
+            }
+        }
+        catch (error) {
+            logger_1.default.fail('Ejecución de migraciones', error, 'Database');
+            throw error;
+        }
+    }
+    scheduleBackups() {
+        if (!this.backupManager) {
+            logger_1.default.warn('BackupManager no disponible', 'Database');
+            return;
+        }
+        this.backupManager.scheduleBackups();
+        logger_1.default.info('Backups automáticos programados', 'Database');
+    }
+    async closeConnection() {
+        try {
+            if (this.backupManager) {
+                this.backupManager.stopScheduledBackups();
+            }
+            await this.sequelize.close();
+            logger_1.default.info('Conexión a base de datos cerrada', 'Database');
+        }
+        catch (error) {
+            logger_1.default.fail('Cerrar conexión a base de datos', error, 'Database');
+            throw error;
+        }
+    }
+    getConnectionInfo() {
+        return {
+            environment: this.config.database.database,
+            host: this.config.database.host,
+            port: this.config.database.port,
+            database: this.config.database.database,
+            username: this.config.database.username,
+            isConnected: true,
+            poolInfo: this.config.database.pool,
+            features: {
+                migrations: this.managerConfig.enableMigrations,
+                backup: this.managerConfig.enableBackup,
+                logging: this.managerConfig.enableLogging
+            }
+        };
+    }
+    async getDatabaseStats() {
+        try {
+            const [results] = await this.sequelize.query(`
+        SELECT 
+          schemaname,
+          tablename,
+          n_tup_ins as inserts,
+          n_tup_upd as updates,
+          n_tup_del as deletes,
+          n_live_tup as live_tuples,
+          n_dead_tup as dead_tuples
+        FROM pg_stat_user_tables 
+        ORDER BY schemaname, tablename
+      `);
+            return {
+                tables: results,
+                connectionInfo: this.getConnectionInfo(),
+                timestamp: new Date().toISOString()
+            };
+        }
+        catch (error) {
+            logger_1.default.error('Error obteniendo estadísticas de base de datos', 'Database', {}, error);
+            throw error;
+        }
+    }
+}
+exports.DatabaseManager = DatabaseManager;
+let databaseManager;
+function getDatabaseManager() {
+    if (!databaseManager) {
+        databaseManager = new DatabaseManager();
+    }
+    return databaseManager;
+}
+exports.getDatabaseManager = getDatabaseManager;
+async function initializeDatabase() {
+    const manager = getDatabaseManager();
+    await manager.initialize();
+    return manager;
+}
+exports.initializeDatabase = initializeDatabase;
+async function closeDatabase() {
+    if (databaseManager) {
+        await databaseManager.closeConnection();
+    }
+}
+exports.closeDatabase = closeDatabase;
+exports.sequelize = getDatabaseManager().getSequelize();
+exports.default = exports.sequelize;
 //# sourceMappingURL=database.js.map

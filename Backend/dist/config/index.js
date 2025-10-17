@@ -23,14 +23,12 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ENV_VARIABLES = exports.uploadErrorHandler = exports.getStorageStats = exports.getFileUrl = exports.deleteFile = exports.validateFile = exports.getUploadConfig = exports.createThumbnails = exports.processImage = exports.createUploadMiddleware = exports.uploadConfigs = exports.securityHeadersMiddleware = exports.corsLoggingMiddleware = exports.getCorsInfo = exports.addAllowedOrigin = exports.isOriginAllowed = exports.getCorsMiddleware = exports.getCurrentCorsConfig = exports.corsConfig = exports.UserRole = exports.generateTokenResponse = exports.generateRandomString = exports.validateEmail = exports.validatePasswordStrength = exports.comparePassword = exports.hashPassword = exports.verifyRefreshToken = exports.verifyAccessToken = exports.generateRefreshToken = exports.generateAccessToken = exports.authConfig = exports.databaseConfig = exports.getConnectionInfo = exports.closeConnection = exports.syncDatabase = exports.testConnection = exports.sequelize = exports.gracefulShutdown = exports.getSystemInfo = exports.validateConfig = exports.initializeConfig = void 0;
+exports.ENV_VARIABLES = exports.uploadErrorHandler = exports.getStorageStats = exports.getFileUrl = exports.deleteFile = exports.validateFile = exports.getUploadConfig = exports.createThumbnails = exports.processImage = exports.createUploadMiddleware = exports.uploadConfigs = exports.getCorsMiddleware = exports.corsConfig = exports.UserRole = exports.generateTokenResponse = exports.generateRandomString = exports.validateEmail = exports.validatePasswordStrength = exports.comparePassword = exports.hashPassword = exports.verifyRefreshToken = exports.verifyAccessToken = exports.generateRefreshToken = exports.generateAccessToken = exports.authConfig = exports.closeDatabase = exports.initializeDatabase = exports.getDatabaseManager = exports.sequelize = exports.gracefulShutdown = exports.getSystemInfo = exports.validateConfig = exports.initializeConfig = void 0;
 const database_1 = __importStar(require("./database"));
 exports.sequelize = database_1.default;
-Object.defineProperty(exports, "testConnection", { enumerable: true, get: function () { return database_1.testConnection; } });
-Object.defineProperty(exports, "syncDatabase", { enumerable: true, get: function () { return database_1.syncDatabase; } });
-Object.defineProperty(exports, "closeConnection", { enumerable: true, get: function () { return database_1.closeConnection; } });
-Object.defineProperty(exports, "getConnectionInfo", { enumerable: true, get: function () { return database_1.getConnectionInfo; } });
-Object.defineProperty(exports, "databaseConfig", { enumerable: true, get: function () { return database_1.databaseConfig; } });
+Object.defineProperty(exports, "getDatabaseManager", { enumerable: true, get: function () { return database_1.getDatabaseManager; } });
+Object.defineProperty(exports, "initializeDatabase", { enumerable: true, get: function () { return database_1.initializeDatabase; } });
+Object.defineProperty(exports, "closeDatabase", { enumerable: true, get: function () { return database_1.closeDatabase; } });
 const auth_1 = __importStar(require("./auth"));
 exports.authConfig = auth_1.default;
 Object.defineProperty(exports, "generateAccessToken", { enumerable: true, get: function () { return auth_1.generateAccessToken; } });
@@ -46,13 +44,7 @@ Object.defineProperty(exports, "generateTokenResponse", { enumerable: true, get:
 Object.defineProperty(exports, "UserRole", { enumerable: true, get: function () { return auth_1.UserRole; } });
 const cors_1 = __importStar(require("./cors"));
 exports.corsConfig = cors_1.default;
-Object.defineProperty(exports, "getCurrentCorsConfig", { enumerable: true, get: function () { return cors_1.getCurrentCorsConfig; } });
 Object.defineProperty(exports, "getCorsMiddleware", { enumerable: true, get: function () { return cors_1.getCorsMiddleware; } });
-Object.defineProperty(exports, "isOriginAllowed", { enumerable: true, get: function () { return cors_1.isOriginAllowed; } });
-Object.defineProperty(exports, "addAllowedOrigin", { enumerable: true, get: function () { return cors_1.addAllowedOrigin; } });
-Object.defineProperty(exports, "getCorsInfo", { enumerable: true, get: function () { return cors_1.getCorsInfo; } });
-Object.defineProperty(exports, "corsLoggingMiddleware", { enumerable: true, get: function () { return cors_1.corsLoggingMiddleware; } });
-Object.defineProperty(exports, "securityHeadersMiddleware", { enumerable: true, get: function () { return cors_1.securityHeadersMiddleware; } });
 const upload_1 = require("./upload");
 Object.defineProperty(exports, "uploadConfigs", { enumerable: true, get: function () { return upload_1.uploadConfigs; } });
 Object.defineProperty(exports, "createUploadMiddleware", { enumerable: true, get: function () { return upload_1.createUploadMiddleware; } });
@@ -75,7 +67,7 @@ const appConfig = {
         baseUrl: process.env.BASE_URL || 'http://localhost:8000'
     },
     services: {
-        database: database_1.databaseConfig,
+        database: (0, database_1.getDatabaseManager)().getConnectionInfo(),
         auth: auth_1.default,
         cors: cors_1.default,
         uploads: upload_1.uploadConfigs
@@ -103,7 +95,8 @@ const initializeConfig = async () => {
         if (missingVars.length > 0) {
             console.warn(`⚠️  Variables de entorno faltantes: ${missingVars.join(', ')}`);
         }
-        const dbConnected = await (0, database_1.testConnection)();
+        const dbManager = (0, database_1.getDatabaseManager)();
+        const dbConnected = await dbManager.testConnection();
         if (!dbConnected) {
             console.error('❌ No se pudo conectar a la base de datos');
             return false;
@@ -132,8 +125,9 @@ const validateConfig = () => {
         if (appConfig.app.port < 1000 || appConfig.app.port > 65535) {
             errors.push('Puerto de la aplicación fuera del rango válido');
         }
-        const dbConfig = database_1.databaseConfig[database_1.environment];
-        if (!dbConfig.host || !dbConfig.database || !dbConfig.username) {
+        const dbManager = (0, database_1.getDatabaseManager)();
+        const dbInfo = dbManager.getConnectionInfo();
+        if (!dbInfo.host || !dbInfo.database || !dbInfo.username) {
             errors.push('Configuración de base de datos incompleta');
         }
         if (auth_1.default.jwt.accessTokenSecret.length < 32) {
@@ -170,8 +164,8 @@ const getSystemInfo = () => {
             nodeVersion: process.version,
             platform: process.platform
         },
-        database: (0, database_1.getConnectionInfo)(),
-        cors: (0, cors_1.getCorsInfo)(),
+        database: (0, database_1.getDatabaseManager)().getConnectionInfo(),
+        cors: { enabled: true, middleware: 'getCorsMiddleware' },
         storage: (0, upload_1.getStorageStats)(),
         memory: {
             used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
@@ -184,7 +178,7 @@ exports.getSystemInfo = getSystemInfo;
 const gracefulShutdown = async () => {
     try {
         console.log('🔄 Iniciando cierre ordenado del sistema...');
-        await (0, database_1.closeConnection)();
+        await (0, database_1.closeDatabase)();
         console.log('✅ Sistema cerrado correctamente');
     }
     catch (error) {

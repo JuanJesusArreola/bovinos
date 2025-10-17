@@ -582,49 +582,49 @@ Medication.init({
     indexes: [
         {
             unique: true,
-            fields: ['medicationCode']
+            fields: ['medication_code']
         },
         {
-            fields: ['genericName']
+            fields: ['generic_name']
         },
         {
-            fields: ['brandName']
+            fields: ['brand_name']
         },
         {
             fields: ['type']
         },
         {
-            fields: ['isActive']
+            fields: ['is_active']
         },
         {
-            fields: ['isAvailable']
+            fields: ['is_available']
         },
         {
-            fields: ['isControlled']
+            fields: ['is_controlled']
         },
         {
-            fields: ['isVaccine']
+            fields: ['is_vaccine']
         },
         {
-            fields: ['isAntibiotic']
+            fields: ['is_antibiotic']
         },
         {
-            fields: ['isPrescriptionOnly']
+            fields: ['is_prescription_only']
         },
         {
-            fields: ['withdrawalPeriod']
+            fields: ['withdrawal_period']
         },
         {
             name: 'medications_type_species',
-            fields: ['type', 'targetSpecies']
+            fields: ['type', 'target_species']
         },
         {
             name: 'medications_controlled_prescription',
-            fields: ['isControlled', 'isPrescriptionOnly']
+            fields: ['is_controlled', 'is_prescription_only']
         },
         {
             name: 'medications_withdrawal_periods',
-            fields: ['withdrawalPeriod', 'milkWithdrawalPeriod']
+            fields: ['withdrawal_period', 'milk_withdrawal_period']
         }
     ],
     hooks: {

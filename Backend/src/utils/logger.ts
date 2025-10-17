@@ -138,7 +138,7 @@ export class Logger {
       // Limpiar archivos antiguos
       this.cleanOldLogFiles();
 
-      console.log(`📁 Log rotado: ${path.basename(backupPath)}`);
+      console.log(`Log rotado: ${path.basename(backupPath)}`);
     } catch (error) {
       console.error('Error rotando archivo de log:', error);
     }
@@ -167,7 +167,7 @@ export class Logger {
       const filesToDelete = files.slice(this.config.maxFiles! - 1);
       for (const file of filesToDelete) {
         fs.unlinkSync(file.path);
-        console.log(`🗑️ Archivo de log eliminado: ${file.name}`);
+        console.log(`Archivo de log eliminado: ${file.name}`);
       }
     } catch (error) {
       console.error('Error limpiando archivos de log antiguos:', error);
@@ -237,21 +237,21 @@ export class Logger {
    * Log de inicio de operación
    */
   public start(operation: string, context?: string, metadata?: Record<string, any>): void {
-    this.info(`🚀 Iniciando: ${operation}`, context, metadata);
+    this.info(`Iniciando: ${operation}`, context, metadata);
   }
 
   /**
    * Log de finalización de operación
    */
   public end(operation: string, context?: string, metadata?: Record<string, any>): void {
-    this.info(`✅ Completado: ${operation}`, context, metadata);
+    this.info(`Completado: ${operation}`, context, metadata);
   }
 
   /**
    * Log de operación fallida
    */
   public fail(operation: string, error: Error, context?: string, metadata?: Record<string, any>): void {
-    this.error(`❌ Falló: ${operation}`, context, metadata, error);
+    this.error(`Falló: ${operation}`, context, metadata, error);
   }
 
   /**
@@ -259,28 +259,28 @@ export class Logger {
    */
   public progress(operation: string, current: number, total: number, context?: string): void {
     const percentage = Math.round((current / total) * 100);
-    this.info(`📊 Progreso: ${operation} (${current}/${total} - ${percentage}%)`, context);
+    this.info(`Progreso: ${operation} (${current}/${total} - ${percentage}%)`, context);
   }
 
   /**
    * Log de métricas
    */
   public metrics(operation: string, metrics: Record<string, number>, context?: string): void {
-    this.info(`📈 Métricas: ${operation}`, context, metrics);
+    this.info(`Métricas: ${operation}`, context, metrics);
   }
 
   /**
    * Log de seguridad
    */
   public security(event: string, context?: string, metadata?: Record<string, any>): void {
-    this.warn(`🔒 Seguridad: ${event}`, context, metadata);
+    this.warn(`Seguridad: ${event}`, context, metadata);
   }
 
   /**
    * Log de base de datos
    */
   public database(operation: string, context?: string, metadata?: Record<string, any>): void {
-    this.debug(`🗄️ Base de datos: ${operation}`, context, metadata);
+    this.debug(`Base de datos: ${operation}`, context, metadata);
   }
 
   /**
@@ -288,21 +288,21 @@ export class Logger {
    */
   public api(method: string, endpoint: string, statusCode: number, duration: number, context?: string): void {
     const level = statusCode >= 400 ? 'error' : statusCode >= 300 ? 'warn' : 'info';
-    this.log(level, `🌐 API: ${method} ${endpoint} - ${statusCode} (${duration}ms)`, context);
+    this.log(level, `API: ${method} ${endpoint} - ${statusCode} (${duration}ms)`, context);
   }
 
   /**
    * Log de autenticación
    */
   public auth(event: string, context?: string, metadata?: Record<string, any>): void {
-    this.info(`🔐 Autenticación: ${event}`, context, metadata);
+    this.info(`Autenticación: ${event}`, context, metadata);
   }
 
   /**
    * Log de validación
    */
   public validation(operation: string, errors: string[], context?: string): void {
-    this.warn(`✅ Validación: ${operation}`, context, { errors });
+    this.warn(`Validación: ${operation}`, context, { errors });
   }
 
   /**
@@ -370,7 +370,7 @@ export function createLoggingMiddleware() {
     const startTime = Date.now();
     
     // Log de request
-    logger.info(`📥 Request: ${req.method} ${req.path}`, 'HTTP', {
+    logger.info(`Request: ${req.method} ${req.path}`, 'HTTP', {
       method: req.method,
       path: req.path,
       ip: req.ip,

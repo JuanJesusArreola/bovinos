@@ -584,7 +584,7 @@ Location.init({
     indexes: [
         {
             unique: true,
-            fields: ['locationCode']
+            fields: ['location_code']
         },
         {
             fields: ['type']
@@ -593,33 +593,33 @@ Location.init({
             fields: ['status']
         },
         {
-            fields: ['accessLevel']
+            fields: ['access_level']
         },
         {
-            fields: ['isActive']
+            fields: ['is_active']
         },
         {
-            fields: ['isMonitored']
+            fields: ['is_monitored']
         },
         {
-            fields: ['hasAlerts']
+            fields: ['has_alerts']
         },
         {
-            fields: ['farmId']
+            fields: ['farm_id']
         },
         {
-            fields: ['ownerId']
+            fields: ['owner_id']
         },
         {
-            fields: ['parentLocationId']
+            fields: ['parent_location_id']
         },
         {
-            fields: ['nextInspectionDate']
+            fields: ['next_inspection_date']
         },
         {
-            name: 'locations_coordinates_gist',
+            name: 'locations_coordinates_gin',
             fields: ['coordinates'],
-            using: 'gist'
+            using: 'gin'
         },
         {
             name: 'locations_type_status',
@@ -627,7 +627,7 @@ Location.init({
         },
         {
             name: 'locations_farm_type',
-            fields: ['farmId', 'type']
+            fields: ['farm_id', 'type']
         }
     ],
     hooks: {

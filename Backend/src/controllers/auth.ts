@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User'; 
 import { authService } from '../services/auth'; 
-import { logInfo, logError } from '../utils/logger';
+import logger from '../utils/logger';
 
 
 const bcrypt = {
@@ -251,7 +251,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logError('Error en registro', { email: req.body?.email }, error as Error, 'AuthController');
+      logger.error('Error en registro', 'AuthController', { email: req.body?.email }, error as Error, );
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -308,7 +308,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logError('Error en login', { email: req.body?.email }, error as Error, 'AuthController');
+      logger.error('Error en login', 'AuthController', { email: req.body?.email }, error as Error );
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -375,7 +375,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logError('Error en forgot password', { email: req.body?.email }, error as Error, 'AuthController');
+      logger.error('Error en forgot password', 'AuthController', { email: req.body?.email }, error as Error, );
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -459,7 +459,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logError('Error en reset password', {}, error as Error, 'AuthController');
+      logger.error('Error en reset password', 'AuthController', {}, error as Error, );
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -513,7 +513,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logError('Error en refresh token', {}, error as Error, 'AuthController');
+      logger.error('Error en refresh token', 'AuthController', {}, error as Error, );
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -539,7 +539,7 @@ export class AuthController {
           await this.authService.logout(userId);
         } catch (serviceError: any) {
           // Log error but don't fail logout
-          logError('Error en servicio de logout', { userId }, serviceError as Error, 'AuthController');
+          logger.error('Error en servicio de logout', 'AuthController', { userId }, serviceError as Error, );
         }
       }
 
@@ -552,7 +552,7 @@ export class AuthController {
       });
 
     } catch (error: any) {
-      logError('Error en logout', {}, error as Error, 'AuthController');
+      logger.error('Error en logout', 'AuthController', {}, error as Error, );
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -619,7 +619,7 @@ export class AuthController {
       });
 
     } catch (error: any) {
-      logError('Error al obtener perfil', { userId: (req as any).user?.id }, error as Error, 'AuthController');
+      logger.error('Error al obtener perfil', 'AuthController', { userId: (req as any).user?.id }, error as Error, );
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -674,7 +674,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logError('Error en verificación de email', { token: req.body?.token }, error as Error, 'AuthController');
+      logger.error('Error en verificación de email', 'AuthController', { token: req.body?.token }, error as Error, );
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -770,7 +770,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logError('Error en actualización de contraseña', { userId: (req as any).user?.id }, error as Error, 'AuthController');
+      logger.error('Error en actualización de contraseña', 'AuthController', { userId: (req as any).user?.id }, error as Error, );
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',

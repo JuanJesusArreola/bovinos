@@ -311,9 +311,9 @@ export const info = {
           
           // Registrar migración como ejecutada
           await this.sequelize.query(
-            'INSERT INTO sequelize_migrations (migration_id, name, executed_at) VALUES (?, ?, ?)',
+            'INSERT INTO sequelize_migrations (migration_id, name, executed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
             {
-              replacements: [migration.id, migration.name, new Date()]
+              replacements: [migration.id, migration.name, new Date(), new Date(), new Date()]
             }
           );
 
@@ -543,4 +543,6 @@ export async function runMigrationsCLI(): Promise<void> {
 
 export default MigrationManager;
 
-
+if (require.main === module) {
+  runMigrationsCLI();
+}

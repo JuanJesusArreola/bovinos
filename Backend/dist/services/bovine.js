@@ -22,15 +22,18 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.bovineService = void 0;
 const sequelize_1 = require("sequelize");
 const Bovine_1 = __importStar(require("../models/Bovine"));
-const logger_1 = require("../utils/logger");
-const logger = {
-    info: (message, metadata) => (0, logger_1.logInfo)(message, metadata, 'BovineService'),
-    error: (message, error) => (0, logger_1.logError)(message, { error }, error, 'BovineService'),
-    warn: (message, metadata) => (0, logger_1.logWarn)(message, metadata, 'BovineService')
+const logger_1 = __importDefault(require("../utils/logger"));
+const bovineLogger = {
+    info: (message, metadata) => logger_1.default.info(message, 'BovineService', metadata),
+    error: (message, error) => logger_1.default.error(message, 'BovineService', { error }),
+    warn: (message, metadata) => logger_1.default.warn(message, 'BovineService', metadata)
 };
 var EventType;
 (function (EventType) {
@@ -75,10 +78,10 @@ const geolocationService = {
 };
 const notificationService = {
     sendVaccinationReminder: async (bovineId, vaccineType) => {
-        logger.info(`Enviando recordatorio de vacunación para bovino ${bovineId}: ${vaccineType}`);
+        logger_1.default.info(`Enviando recordatorio de vacunación para bovino ${bovineId}: ${vaccineType}`);
     },
     sendHealthAlert: async (bovineId, healthStatus) => {
-        logger.info(`Alerta de salud para bovino ${bovineId}: ${healthStatus}`);
+        logger_1.default.info(`Alerta de salud para bovino ${bovineId}: ${healthStatus}`);
     }
 };
 class BovineService {
@@ -102,7 +105,7 @@ class BovineService {
             const totalPages = Math.ceil(total / pagination.limit);
             const hasNext = pagination.page < totalPages;
             const hasPrev = pagination.page > 1;
-            logger.info(`Obtenidos ${bovines.length} bovinos para usuario ${userId}`, {
+            bovineLogger.info(`Obtenidos ${bovines.length} bovinos para usuario ${userId}`, {
                 total,
                 filters,
                 pagination
@@ -120,7 +123,7 @@ class BovineService {
             };
         }
         catch (error) {
-            logger.error('Error obteniendo bovinos', error);
+            bovineLogger.error('Error obteniendo bovinos', error);
             throw error;
         }
     }
@@ -130,11 +133,11 @@ class BovineService {
             if (!bovine) {
                 throw new Error('Bovino no encontrado');
             }
-            logger.info(`Bovino ${bovineId} obtenido por usuario ${userId}`);
+            bovineLogger.info(`Bovino ${bovineId} obtenido por usuario ${userId}`);
             return bovine;
         }
         catch (error) {
-            logger.error(`Error obteniendo bovino ${bovineId}`, error);
+            bovineLogger.error(`Error obteniendo bovino ${bovineId}`, error);
             throw error;
         }
     }
@@ -150,7 +153,7 @@ class BovineService {
             return bovine;
         }
         catch (error) {
-            logger.error(`Error obteniendo bovino por earTag ${earTag}`, error);
+            bovineLogger.error(`Error obteniendo bovino por earTag ${earTag}`, error);
             throw error;
         }
     }
@@ -180,14 +183,14 @@ class BovineService {
                 userId,
                 data: { action: 'register' }
             });
-            logger.info(`Bovino creado: ${newBovine.earTag} por usuario ${userId}`, {
+            bovineLogger.info(`Bovino creado: ${newBovine.earTag} por usuario ${userId}`, {
                 bovineId: newBovine.id,
                 earTag: newBovine.earTag
             });
             return newBovine;
         }
         catch (error) {
-            logger.error('Error creando bovino', error);
+            bovineLogger.error('Error creando bovino', error);
             throw error;
         }
     }
@@ -219,14 +222,14 @@ class BovineService {
             if (updateData.healthStatus && updateData.healthStatus !== existingBovine.healthStatus) {
                 await this.handleHealthStatusChange(updatedBovine, existingBovine.healthStatus, updateData.healthStatus);
             }
-            logger.info(`Bovino actualizado: ${updatedBovine.earTag} por usuario ${userId}`, {
+            bovineLogger.info(`Bovino actualizado: ${updatedBovine.earTag} por usuario ${userId}`, {
                 bovineId: updateData.id,
                 changes: Object.keys(updateData)
             });
             return updatedBovine;
         }
         catch (error) {
-            logger.error(`Error actualizando bovino ${updateData.id}`, error);
+            bovineLogger.error(`Error actualizando bovino ${updateData.id}`, error);
             throw error;
         }
     }
@@ -244,13 +247,13 @@ class BovineService {
                 userId,
                 data: { action: 'delete' }
             });
-            logger.info(`Bovino eliminado: ${bovine.earTag} por usuario ${userId}`, {
+            bovineLogger.info(`Bovino eliminado: ${bovine.earTag} por usuario ${userId}`, {
                 bovineId,
                 earTag: bovine.earTag
             });
         }
         catch (error) {
-            logger.error(`Error eliminando bovino ${bovineId}`, error);
+            bovineLogger.error(`Error eliminando bovino ${bovineId}`, error);
             throw error;
         }
     }
@@ -287,13 +290,13 @@ class BovineService {
                     source: locationData.source
                 }
             });
-            logger.info(`Ubicación actualizada para bovino ${locationData.bovineId} por usuario ${userId}`, {
+            bovineLogger.info(`Ubicación actualizada para bovino ${locationData.bovineId} por usuario ${userId}`, {
                 bovineId: locationData.bovineId,
                 newLocation: locationData.location
             });
         }
         catch (error) {
-            logger.error(`Error actualizando ubicación del bovino ${locationData.bovineId}`, error);
+            bovineLogger.error(`Error actualizando ubicación del bovino ${locationData.bovineId}`, error);
             throw error;
         }
     }
@@ -366,11 +369,11 @@ class BovineService {
                 sickAnimals,
                 pregnantCows
             };
-            logger.info('Estadísticas de bovinos calculadas', { farmId, totalBovines, userId });
+            bovineLogger.info('Estadísticas de bovinos calculadas', { farmId, totalBovines, userId });
             return stats;
         }
         catch (error) {
-            logger.error('Error obteniendo estadísticas de bovinos', error);
+            bovineLogger.error('Error obteniendo estadísticas de bovinos', error);
             throw error;
         }
     }
@@ -386,7 +389,7 @@ class BovineService {
                 const distance = geolocationService.calculateDistance(centerLocation, bovine.location);
                 return distance <= radiusKm;
             });
-            logger.info(`Encontrados ${bovinesInRadius.length} bovinos en radio de ${radiusKm}km`, {
+            bovineLogger.info(`Encontrados ${bovinesInRadius.length} bovinos en radio de ${radiusKm}km`, {
                 centerLocation,
                 radiusKm,
                 totalChecked: allBovines.length,
@@ -395,7 +398,7 @@ class BovineService {
             return bovinesInRadius;
         }
         catch (error) {
-            logger.error('Error buscando bovinos por ubicación', error);
+            bovineLogger.error('Error buscando bovinos por ubicación', error);
             throw error;
         }
     }
@@ -471,38 +474,38 @@ class BovineService {
                     newStatus
                 }
             });
-            logger.info(`Estado de salud cambiado para bovino ${bovine.earTag}: ${previousStatus} -> ${newStatus}`, {
+            bovineLogger.info(`Estado de salud cambiado para bovino ${bovine.earTag}: ${previousStatus} -> ${newStatus}`, {
                 bovineId: bovine.id,
                 previousStatus,
                 newStatus
             });
         }
         catch (error) {
-            logger.error('Error manejando cambio de estado de salud', error);
+            bovineLogger.error('Error manejando cambio de estado de salud', error);
         }
     }
     async createBovineEvent(eventData) {
         try {
-            logger.info('Evento de bovino creado', {
+            bovineLogger.info('Evento de bovino creado', {
                 bovineId: eventData.bovineId,
                 type: eventData.type,
                 description: eventData.description
             });
         }
         catch (error) {
-            logger.error('Error creando evento de bovino', error);
+            bovineLogger.error('Error creando evento de bovino', error);
         }
     }
     async createLocationRecord(locationData) {
         try {
-            logger.info('Registro de ubicación creado', {
+            bovineLogger.info('Registro de ubicación creado', {
                 bovineId: locationData.bovineId,
                 location: locationData.location,
                 source: locationData.source
             });
         }
         catch (error) {
-            logger.error('Error creando registro de ubicación', error);
+            bovineLogger.error('Error creando registro de ubicación', error);
         }
     }
 }

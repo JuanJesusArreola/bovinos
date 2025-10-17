@@ -7,7 +7,7 @@ exports.authController = exports.AuthController = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = __importDefault(require("../models/User"));
 const auth_1 = require("../services/auth");
-const logger_1 = require("../utils/logger");
+const logger_1 = __importDefault(require("../utils/logger"));
 const bcrypt = {
     async hash(password, saltRounds) {
         return `hashed_${password}_salt_${saltRounds}`;
@@ -174,7 +174,7 @@ class AuthController {
                 }
             }
             catch (error) {
-                (0, logger_1.logError)('Error en registro', { email: req.body?.email }, error, 'AuthController');
+                logger_1.default.error('Error en registro', 'AuthController', { email: req.body?.email }, error);
                 res.status(500).json({
                     success: false,
                     message: 'Error interno del servidor',
@@ -221,7 +221,7 @@ class AuthController {
                 }
             }
             catch (error) {
-                (0, logger_1.logError)('Error en login', { email: req.body?.email }, error, 'AuthController');
+                logger_1.default.error('Error en login', 'AuthController', { email: req.body?.email }, error);
                 res.status(500).json({
                     success: false,
                     message: 'Error interno del servidor',
@@ -276,7 +276,7 @@ class AuthController {
                 }
             }
             catch (error) {
-                (0, logger_1.logError)('Error en forgot password', { email: req.body?.email }, error, 'AuthController');
+                logger_1.default.error('Error en forgot password', 'AuthController', { email: req.body?.email }, error);
                 res.status(500).json({
                     success: false,
                     message: 'Error interno del servidor',
@@ -346,7 +346,7 @@ class AuthController {
                 }
             }
             catch (error) {
-                (0, logger_1.logError)('Error en reset password', {}, error, 'AuthController');
+                logger_1.default.error('Error en reset password', 'AuthController', {}, error);
                 res.status(500).json({
                     success: false,
                     message: 'Error interno del servidor',
@@ -391,7 +391,7 @@ class AuthController {
                 }
             }
             catch (error) {
-                (0, logger_1.logError)('Error en refresh token', {}, error, 'AuthController');
+                logger_1.default.error('Error en refresh token', 'AuthController', {}, error);
                 res.status(500).json({
                     success: false,
                     message: 'Error interno del servidor',
@@ -409,7 +409,7 @@ class AuthController {
                         await this.authService.logout(userId);
                     }
                     catch (serviceError) {
-                        (0, logger_1.logError)('Error en servicio de logout', { userId }, serviceError, 'AuthController');
+                        logger_1.default.error('Error en servicio de logout', 'AuthController', { userId }, serviceError);
                     }
                 }
                 res.status(200).json({
@@ -421,7 +421,7 @@ class AuthController {
                 });
             }
             catch (error) {
-                (0, logger_1.logError)('Error en logout', {}, error, 'AuthController');
+                logger_1.default.error('Error en logout', 'AuthController', {}, error);
                 res.status(500).json({
                     success: false,
                     message: 'Error interno del servidor',
@@ -477,7 +477,7 @@ class AuthController {
                 });
             }
             catch (error) {
-                (0, logger_1.logError)('Error al obtener perfil', { userId: req.user?.id }, error, 'AuthController');
+                logger_1.default.error('Error al obtener perfil', 'AuthController', { userId: req.user?.id }, error);
                 res.status(500).json({
                     success: false,
                     message: 'Error interno del servidor',
@@ -521,7 +521,7 @@ class AuthController {
                 }
             }
             catch (error) {
-                (0, logger_1.logError)('Error en verificación de email', { token: req.body?.token }, error, 'AuthController');
+                logger_1.default.error('Error en verificación de email', 'AuthController', { token: req.body?.token }, error);
                 res.status(500).json({
                     success: false,
                     message: 'Error interno del servidor',
@@ -602,7 +602,7 @@ class AuthController {
                 }
             }
             catch (error) {
-                (0, logger_1.logError)('Error en actualización de contraseña', { userId: req.user?.id }, error, 'AuthController');
+                logger_1.default.error('Error en actualización de contraseña', 'AuthController', { userId: req.user?.id }, error);
                 res.status(500).json({
                     success: false,
                     message: 'Error interno del servidor',
