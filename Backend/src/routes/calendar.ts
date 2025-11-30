@@ -3,9 +3,9 @@ import {
   authenticateToken, 
   authorizeRoles, 
   checkPermission,
-  requireActiveSubscription,
-  UserRole 
+  requireActiveSubscription 
 } from '../middleware/auth';
+import { UserRole } from '../models/User';
 import { validate, sanitizeInput, validateId } from '../middleware/validation';
 import { createRateLimit, EndpointType } from '../middleware/rate-limit';
 import { 
@@ -126,7 +126,7 @@ router.get(
  */
 router.post(
   '/events',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   validate('search'), // TODO: Crear esquema específico para eventos
   auditTrail('CREATE', 'CALENDAR_EVENT'),
@@ -210,7 +210,7 @@ router.get(
 router.put(
   '/events/:id',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   validate('search'), // TODO: Crear esquema específico para actualización de eventos
   auditTrail('UPDATE', 'CALENDAR_EVENT'),
@@ -247,7 +247,7 @@ router.put(
 router.delete(
   '/events/:id',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   auditTrail('DELETE', 'CALENDAR_EVENT'),
   async (req: Request, res: Response) => {
@@ -588,7 +588,7 @@ router.get(
  */
 router.post(
   '/reminders',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   validate('search'), // TODO: Crear esquema específico para recordatorios
   auditTrail('CREATE', 'REMINDER'),
@@ -623,7 +623,7 @@ router.post(
 router.put(
   '/reminders/:id',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   validate('search'), // TODO: Crear esquema específico para actualizar recordatorios
   auditTrail('UPDATE', 'REMINDER'),

@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import User from '../models/User'; 
-import { authService } from '../services/auth'; 
+import User from '../models/User';
+import { authService } from '../services/auth';
 import logger from '../utils/logger';
+import { UserRole } from '@/config';
 
 
 const bcrypt = {
@@ -16,23 +17,23 @@ const bcrypt = {
 
 const validateEmail = (email: string): { isValid: boolean; errors: string[] } => {
   const errors: string[] = [];
-  
+
   if (!email || typeof email !== 'string') {
     errors.push('El email es requerido');
     return { isValid: false, errors };
   }
-  
+
   const cleanEmail = email.trim().toLowerCase();
-  
+
   if (cleanEmail.length > 255) {
     errors.push('El email no puede tener más de 255 caracteres');
   }
-  
+
   const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailPattern.test(cleanEmail)) {
     errors.push('El formato del email no es válido');
   }
-  
+
   return {
     isValid: errors.length === 0,
     errors
@@ -41,32 +42,32 @@ const validateEmail = (email: string): { isValid: boolean; errors: string[] } =>
 
 const validatePassword = (password: string): { isValid: boolean; errors: string[] } => {
   const errors: string[] = [];
-  
+
   if (!password || typeof password !== 'string') {
     errors.push('La contraseña es requerida');
     return { isValid: false, errors };
   }
-  
+
   if (password.length < 8) {
     errors.push('La contraseña debe tener al menos 8 caracteres');
   }
-  
+
   if (password.length > 128) {
     errors.push('La contraseña no puede exceder 128 caracteres');
   }
-  
+
   // Verificar complejidad
   let complexity = 0;
-  
+
   if (/[a-z]/.test(password)) complexity++;      // Minúsculas
   if (/[A-Z]/.test(password)) complexity++;      // Mayúsculas
   if (/[0-9]/.test(password)) complexity++;      // Números
   if (/[^a-zA-Z0-9]/.test(password)) complexity++; // Caracteres especiales
-  
+
   if (complexity < 3) {
     errors.push('La contraseña debe contener al menos 3 de los siguientes: minúsculas, mayúsculas, números, caracteres especiales');
   }
-  
+
   return {
     isValid: errors.length === 0,
     errors
@@ -122,6 +123,8 @@ interface RegisterRequest {
 
 interface ForgotPasswordRequest {
   email: string;
+  ipAddress?: string;
+  userAgent?: string;
 }
 
 interface ResetPasswordRequest {
@@ -147,16 +150,13 @@ export class AuthController {
    */
   public register = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { 
-        firstName, 
-        lastName, 
-        email, 
-        password, 
-        confirmPassword 
-      }: RegisterRequest = req.body;
+      const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+      const userAgent = req.get('User-Agent') || 'unknown';
+      const {firstName, lastName, email, password, confirmPassword, phone, role } = req.body;
+  
 
       // Validación de datos básicos
-      if (!firstName || !lastName || !email || !password) {
+      if (!firstName || !lastName || !email || !password || !confirmPassword) {
         res.status(400).json({
           success: false,
           message: 'Todos los campos son obligatorios',
@@ -206,8 +206,8 @@ export class AuthController {
       }
 
       // Verificar si el usuario ya existe
-      const existingUser = await User.findOne({ 
-        where: { email: email.toLowerCase() } 
+      const existingUser = await User.findOne({
+        where: { email: email.toLowerCase() }
       });
 
       if (existingUser) {
@@ -224,13 +224,14 @@ export class AuthController {
       // Usar el servicio de auth para registrar
       try {
         const authResponse = await this.authService.register({
+          
           email,
           password,
           confirmPassword,
           firstName,
           lastName,
-          phone: '',
-          role: 'RANCH_MANAGER' as any // Temporal, ajustar según necesidad
+          phone,
+          role
         });
 
         res.status(201).json({
@@ -251,7 +252,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logger.error('Error en registro', 'AuthController', { email: req.body?.email }, error as Error, );
+      logger.error('Error en registro', 'AuthController', { email: req.body?.email }, error as Error,);
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -282,12 +283,17 @@ export class AuthController {
         return;
       }
 
+      const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+      const userAgent = req.get('User-Agent') || 'unknown';
+
       try {
         // Usar el servicio de auth para login
         const authResponse = await this.authService.login({
           email,
           password,
-          rememberMe: false
+          rememberMe: false,
+          ipAddress,
+          userAgent
         });
 
         res.status(200).json({
@@ -308,7 +314,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logger.error('Error en login', 'AuthController', { email: req.body?.email }, error as Error );
+      logger.error('Error en login', 'AuthController', { email: req.body?.email }, error as Error);
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -350,11 +356,12 @@ export class AuthController {
         });
         return;
       }
+      const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+      const userAgent = req.get('User-Agent') || 'unknown';
 
       try {
         // Usar el servicio de auth para forgot password
-        await this.authService.forgotPassword(email);
-
+        await this.authService.forgotPassword(email, ipAddress, userAgent);
         res.status(200).json({
           success: true,
           message: 'Se ha enviado un email con instrucciones para recuperar tu contraseña',
@@ -375,7 +382,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logger.error('Error en forgot password', 'AuthController', { email: req.body?.email }, error as Error, );
+      logger.error('Error en forgot password', 'AuthController', { email: req.body?.email }, error as Error,);
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -392,6 +399,8 @@ export class AuthController {
    */
   public resetPassword = async (req: Request, res: Response): Promise<void> => {
     try {
+      const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+      const userAgent = req.get('User-Agent') || 'unknown';
       const { token, password, confirmPassword }: ResetPasswordRequest = req.body;
 
       // Validación de datos básicos
@@ -437,7 +446,7 @@ export class AuthController {
           token,
           newPassword: password,
           confirmPassword
-        });
+        }, ipAddress, userAgent);
 
         res.status(200).json({
           success: true,
@@ -459,7 +468,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logger.error('Error en reset password', 'AuthController', {}, error as Error, );
+      logger.error('Error en reset password', 'AuthController', {}, error as Error,);
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -476,6 +485,8 @@ export class AuthController {
    */
   public refreshToken = async (req: Request, res: Response): Promise<void> => {
     try {
+      const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+      const userAgent = req.get('User-Agent') || 'unknown';
       const { refreshToken }: RefreshTokenRequest = req.body;
 
       if (!refreshToken) {
@@ -492,7 +503,9 @@ export class AuthController {
       try {
         // Usar el servicio de auth para refresh token
         const tokenResponse = await this.authService.refreshToken({
-          refreshToken
+          refreshToken, 
+          ipAddress,
+          userAgent
         });
 
         res.status(200).json({
@@ -513,7 +526,7 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logger.error('Error en refresh token', 'AuthController', {}, error as Error, );
+      logger.error('Error en refresh token', 'AuthController', {}, error as Error,);
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -533,14 +546,43 @@ export class AuthController {
       // Obtener usuario del middleware de autenticación
       const userId = (req as any).user?.id;
 
-      if (userId) {
-        try {
-          // Usar el servicio de auth para logout
-          await this.authService.logout(userId);
-        } catch (serviceError: any) {
-          // Log error but don't fail logout
-          logger.error('Error en servicio de logout', 'AuthController', { userId }, serviceError as Error, );
-        }
+      // Extraer el token del header Authorization para invalidarlo
+      // Formato: "Bearer <token>"
+      const authHeader = req.headers.authorization;
+      const token = authHeader && authHeader.split(' ')[1];
+
+      // Extraer IP y user agent de la request para auditoría
+      const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+      const userAgent = req.get('User-Agent') || 'unknown';
+
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: 'Usuario no autenticado',
+          errors: {
+            auth: 'Token de acceso requerido'
+          }
+        });
+        return;
+      }
+
+      if (!token) {
+        res.status(400).json({
+          success: false,
+          message: 'Token no encontrado en la solicitud',
+          errors: {
+            token: 'No se pudo extraer el token del header Authorization'
+          }
+        });
+        return;
+      }
+
+      try {
+        // Usar el servicio de auth para logout con token, userId, IP y user agent
+        await this.authService.logout(token, userId, ipAddress, userAgent);
+      } catch (serviceError: any) {
+        // Log error but don't fail logout
+        logger.error('Error en servicio de logout', 'AuthController', { userId }, serviceError as Error,);
       }
 
       res.status(200).json({
@@ -552,7 +594,7 @@ export class AuthController {
       });
 
     } catch (error: any) {
-      logger.error('Error en logout', 'AuthController', {}, error as Error, );
+      logger.error('Error en logout', 'AuthController', {}, error as Error,);
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -619,7 +661,7 @@ export class AuthController {
       });
 
     } catch (error: any) {
-      logger.error('Error al obtener perfil', 'AuthController', { userId: (req as any).user?.id }, error as Error, );
+      logger.error('Error al obtener perfil', 'AuthController', { userId: (req as any).user?.id }, error as Error,);
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -631,59 +673,48 @@ export class AuthController {
   };
 
   /**
-   * Verificar email del usuario
-   * POST /api/auth/verify-email
-   */
-  public verifyEmail = async (req: Request, res: Response): Promise<void> => {
+ * Verificar email del usuario
+ * POST /api/auth/verify-email
+ */
+  public verifyEmail = async (req: Request, res: Response): Promise<Response> => {
     try {
       const { token } = req.body;
-
+  
       if (!token) {
-        res.status(400).json({
+        return res.status(400).json({
           success: false,
           message: 'Token de verificación es obligatorio',
-          errors: {
-            token: 'Token requerido para verificar email'
-          }
+          errors: { token: 'Token requerido' }
         });
-        return;
       }
-
-      // Mock implementation - implementar cuando esté disponible en el servicio
-      try {
-        // const user = await this.authService.validateEmailVerificationToken(token);
-
-        // Por ahora, mock response
-        res.status(200).json({
-          success: true,
-          message: 'Email verificado exitosamente',
-          data: {
-            emailVerified: true
-          }
-        });
-
-      } catch (serviceError: any) {
-        res.status(400).json({
+  
+      const isVerified = await this.authService.verifyEmail(token);
+  
+      if (!isVerified) {
+        return res.status(400).json({
           success: false,
-          message: 'Token de verificación inválido o expirado',
-          errors: {
-            token: serviceError.message || 'El enlace de verificación ha expirado o es inválido'
-          }
+          message: 'Token inválido o expirado',
+          errors: { token: 'El enlace de verificación no es válido o expiró' }
         });
-        return;
       }
-
-    } catch (error: any) {
-      logger.error('Error en verificación de email', 'AuthController', { token: req.body?.token }, error as Error, );
-      res.status(500).json({
+  
+      return res.status(200).json({
+        success: true,
+        message: 'Email verificado exitosamente',
+        data: { emailVerified: true }
+      });
+  
+    } catch (error) {
+      logger.error('Error en verificación de email', 'AuthController', { token: req.body?.token }, error as Error);
+  
+      return res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
-        errors: {
-          general: 'Ocurrió un error al verificar el email'
-        }
+        errors: { general: 'Ocurrió un error al verificar el email' }
       });
     }
   };
+
 
   /**
    * Actualizar contraseña del usuario autenticado
@@ -770,13 +801,85 @@ export class AuthController {
       }
 
     } catch (error: any) {
-      logger.error('Error en actualización de contraseña', 'AuthController', { userId: (req as any).user?.id }, error as Error, );
+      logger.error('Error en actualización de contraseña', 'AuthController', { userId: (req as any).user?.id }, error as Error,);
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
         errors: {
           general: 'Ocurrió un error al actualizar la contraseña'
         }
+      });
+    }
+  };
+
+  public updateProfile = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const userId = (req as any).user?.id; // viene del middleware authenticateToken
+      const { firstName, lastName, phone } = req.body;
+  
+      const updatedUser = await authService.updateProfile(userId, {
+        firstName,
+        lastName,
+        phone
+      });
+  
+      return res.status(200).json({
+        success: true,
+        message: 'Perfil actualizado exitosamente',
+        data: updatedUser
+      });
+  
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: 'Error al actualizar tu perfil',
+        error: error.message || 'PROFILE_UPDATE_FAILED'
+      });
+    }
+  };
+
+  public deleteAccount = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const userId = (req as any).user?.id; 
+      const { password, confirmation } = req.body;
+  
+      await authService.deleteAccount(userId, password, confirmation);
+  
+      return res.status(200).json({
+        success: true,
+        message: 'Cuenta eliminada exitosamente'
+      });
+  
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: 'Error al eliminar la cuenta',
+        error: error.message || 'ACCOUNT_DELETION_FAILED'
+      });
+    }
+  };
+
+  public changePassword = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const userId = (req as any).user?.id;  // colocado por authenticateToken
+      const { currentPassword, newPassword, confirmPassword } = req.body;
+  
+      await authService.changePassword(userId, {
+        currentPassword,
+        newPassword,
+        confirmPassword
+      });
+  
+      return res.status(200).json({
+        success: true,
+        message: 'Contraseña cambiada exitosamente'
+      });
+  
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: 'Error al cambiar la contraseña',
+        error: error.message || 'PASSWORD_CHANGE_FAILED'
       });
     }
   };

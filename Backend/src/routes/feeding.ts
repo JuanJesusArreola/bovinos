@@ -4,7 +4,7 @@ import { authenticateToken as authMiddleware } from '../middleware/auth';
 import { validate as validationMiddleware } from '../middleware/validation';
 import { createRateLimit, EndpointType } from '../middleware/rate-limit';
 import { requireMinimumRole as roleMiddleware } from '../middleware/role';
-import { UserRole } from '../middleware/auth';
+import { UserRole } from '../models/User';
 import { createUploadMiddleware, processUploadedFiles, handleUploadErrors, FileCategory } from '../middleware/upload';
 
 // Crear instancia del router
@@ -132,7 +132,7 @@ router.put(
  */
 router.delete(
   '/records/:id',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.BULK_OPERATIONS),
   (req: Request, res: Response) => {
     return res.json({
@@ -254,7 +254,7 @@ router.put(
  */
 router.post(
   '/plans/:id/assign',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.CATTLE_WRITE),
   validationMiddleware('search'),
   (req: Request, res: Response) => {
@@ -341,7 +341,7 @@ router.get(
  */
 router.post(
   '/schedule',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.CATTLE_WRITE),
   validationMiddleware('search'),
   (req: Request, res: Response) => {
@@ -542,7 +542,7 @@ router.get(
  */
 router.post(
   '/inventory',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.CATTLE_WRITE),
   uploadMiddleware.multiple('feedPhotos', 5),
   processUploadedFiles(FileCategory.FEED_REPORTS),
@@ -643,7 +643,7 @@ router.get(
  */
 router.put(
   '/settings',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.CATTLE_WRITE),
   validationMiddleware('search'),
   (req: Request, res: Response) => {

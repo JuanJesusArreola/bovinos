@@ -1,32 +1,25 @@
 import { DataTypes, Model, Optional, Op } from 'sequelize';
 import sequelize from '../config/database';
-// import { LocationData } from './Bovine'; // Se habilitará cuando exista el modelo Bovine
+import bcrypt from 'bcryptjs';
+import  LocationData from './Bovine'; // Se habilitará cuando exista el modelo Bovine
 
-// Implementación temporal de bcrypt - Reemplazar cuando se instale bcrypt
-const bcrypt = {
-  async hash(password: string, saltRounds: number): Promise<string> {
-    // Implementación temporal - REEMPLAZAR con bcrypt real
-    return `hashed_${password}_salt_${saltRounds}`;
-  },
-  async compare(password: string, hash: string): Promise<boolean> {
-    // Implementación temporal - REEMPLAZAR con bcrypt real
-    return hash === `hashed_${password}_salt_12`;
-  }
-};
-
-// Interface temporal para LocationData - Se moverá al modelo Bovine cuando exista
+/*// Interface temporal para LocationData - Se moverá al modelo Bovine cuando exista
 interface LocationData {
   latitude: number;
   longitude: number;
   altitude?: number;
   accuracy?: number;
-}
+}*/
 
 // Enums para usuarios
 export enum UserRole {
   SUPER_ADMIN = 'SUPER_ADMIN',                 // Super administrador
   RANCH_MANAGER = 'RANCH_MANAGER',             // Gerente de rancho
   VETERINARIAN = 'VETERINARIAN',               // Veterinario
+  OWNER = 'OWNER',
+  MANAGER = 'MANAGER',
+  WORKER = 'WORKER',
+  VIEWER = 'VIEWER'
 }
 
 export enum UserStatus {
@@ -386,7 +379,7 @@ export interface UserAttributes {
     plan: string;
     startDate: Date;
     endDate?: Date;
-    status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'SUSPENDED';
+    status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'SUSPENDED' | 'TRIAL';
     features: string[];
     billingCycle: 'MONTHLY' | 'YEARLY';
     autoRenew: boolean;
@@ -433,9 +426,9 @@ export interface UserAttributes {
   lastActiveAt?: Date;                         // Última actividad
   createdBy?: string;                          // ID del usuario que lo creó
   updatedBy?: string;                          // ID del usuario que lo actualizó
-  createdAt: Date;
+  /*createdAt: Date;
   updatedAt: Date;
-  deletedAt?: Date;
+  deletedAt?: Date;*/
 }
 
 // Atributos opcionales al crear un nuevo usuario
@@ -445,8 +438,8 @@ export interface UserCreationAttributes
     'performanceMetrics' | 'ranchAccess' | 'subscriptionInfo' | 'apiAccess' | 
     'securityInfo' | 'complianceInfo' | 'integrations' | 'tags' | 'notes' | 
     'termsAcceptedDate' | 'privacyPolicyAcceptedDate' | 'lastLoginAt' | 
-    'lastActiveAt' | 'createdBy' | 'updatedBy' | 'createdAt' | 'updatedAt' | 
-    'deletedAt'
+    'lastActiveAt' | 'createdBy' | 'updatedBy' /*| 'createdAt' | 'updatedAt' | 
+    'deletedAt'*/
   > {}
 
 // Clase del modelo User
@@ -482,7 +475,7 @@ class User extends Model<UserAttributes, UserCreationAttributes>
     plan: string;
     startDate: Date;
     endDate?: Date;
-    status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'SUSPENDED';
+    status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'SUSPENDED' | 'TRIAL' ;
     features: string[];
     billingCycle: 'MONTHLY' | 'YEARLY';
     autoRenew: boolean;
@@ -545,6 +538,10 @@ class User extends Model<UserAttributes, UserCreationAttributes>
       [UserRole.SUPER_ADMIN]: 'Super Administrador',
       [UserRole.RANCH_MANAGER]: 'Gerente de Rancho',
       [UserRole.VETERINARIAN]: 'Veterinario',
+      [UserRole.OWNER]: 'Propietario',
+      [UserRole.MANAGER]: 'Gerente',
+      [UserRole.WORKER]: 'Trabajador',
+      [UserRole.VIEWER]: 'Observador',
     };
     return labels[this.role];
   }
@@ -575,6 +572,63 @@ class User extends Model<UserAttributes, UserCreationAttributes>
   public static async hashPassword(password: string): Promise<string> {
     const saltRounds = 12;
     return bcrypt.hash(password, saltRounds);
+  }
+
+  /**
+   * Verifica si un string es un hash de bcrypt
+   * Los hashes de bcrypt tienen un formato específico:
+   * - Empiezan con $2a$, $2b$, $2x$, $2y$ (versiones del algoritmo)
+   * - Tienen una longitud mínima de 60 caracteres
+   * - Siguen el formato: $version$cost$salt+hash
+   * 
+   * @param value String a verificar
+   * @returns True si el string es un hash de bcrypt
+   * 
+   * @example
+   * isBcryptHash('$2a$12$KIX5w9...') // true
+   * isBcryptHash('password123') // false
+   */
+  public static isBcryptHash(value: string): boolean {
+    // Validación básica: debe ser string y tener al menos longitud mínima
+    if (typeof value !== 'string' || value.length < 60) {
+      return false;
+    }
+
+    // Verificar formato de hash bcrypt
+    // Los hashes bcrypt empiezan con: $2a$, $2b$, $2x$, $2y$, o $2$ (versiones antiguas)
+    const bcryptHashPattern = /^\$2[abyx]?\$\d{1,2}\$[./A-Za-z0-9]{53}$/;
+    
+    return bcryptHashPattern.test(value);
+  }
+
+  /**
+   * Valida que una contraseña no sea igual a otra (ya hasheada)
+   * Compara la contraseña en texto plano con una contraseña hasheada usando bcrypt.compare
+   * 
+   * @param plainPassword Contraseña en texto plano
+   * @param hashedPassword Contraseña hasheada con bcrypt
+   * @returns Promise<boolean> True si son diferentes, False si son iguales
+   * 
+   * @example
+   * await isPasswordDifferent('newpass', '$2a$12$...oldhash') // true o false
+   */
+  public static async isPasswordDifferent(
+    plainPassword: string, 
+    hashedPassword: string
+  ): Promise<boolean> {
+    try {
+      // Usar bcrypt.compare para verificar si la contraseña en texto plano
+      // coincide con el hash (esto es seguro y es el método correcto)
+      const isSame = await bcrypt.compare(plainPassword, hashedPassword);
+      // Si son iguales, retornamos false (no son diferentes)
+      // Si son diferentes, retornamos true
+      return !isSame;
+    } catch (error) {
+      // Si hay error al comparar, asumimos que son diferentes por seguridad
+      // Esto previene errores en casos edge donde el hash pueda estar corrupto
+      console.error('Error comparando contraseñas:', error);
+      return true;
+    }
   }
 
   /**
@@ -959,8 +1013,11 @@ User.init(
       type: DataTypes.STRING(20),
       allowNull: false,
       unique: true,
+      defaultValue: () => {
+        const timestamp = Date.now().toString().slice(-6);
+        return `US${timestamp}`;
+      },
       comment: 'Código único del usuario',
-      field: 'usercode'
     },
     username: {
       type: DataTypes.STRING(50),
@@ -969,7 +1026,10 @@ User.init(
       validate: {
         notEmpty: true,
         len: [3, 50],
-        isAlphanumeric: true
+        is: {
+          args: /^[\p{L}0-9._\-\s]+$/u,
+          msg: 'El nombre de usuario solo puede contener letras, números, puntos, guiones bajos, guiones y espacios'
+        }
       },
       comment: 'Nombre de usuario único'
     },
@@ -1173,7 +1233,7 @@ User.init(
       allowNull: true,
       comment: 'ID del usuario que lo actualizó'
     },
-    createdAt: {
+    /*createdAt: {
       type: DataTypes.DATE,
       allowNull: false,
       comment: 'Fecha de creación del usuario'
@@ -1187,7 +1247,7 @@ User.init(
       type: DataTypes.DATE,
       allowNull: true,
       comment: 'Fecha de eliminación (soft delete)'
-    }
+    }*/
   },
   {
     sequelize,
@@ -1199,7 +1259,7 @@ User.init(
       // Índices únicos
       {
         unique: true,
-        fields: [{name: 'usercode'}]
+        fields: ['user_code']
       },
       {
         unique: true,
@@ -1265,10 +1325,6 @@ User.init(
     hooks: {
       // Hook para hashear contraseña antes de crear
       beforeCreate: async (user: User) => {
-        if (user.password) {
-          user.password = await User.hashPassword(user.password);
-        }
-
         // Generar código de usuario único si no existe
         if (!user.userCode) {
           const timestamp = Date.now().toString().slice(-6);
@@ -1328,8 +1384,10 @@ User.init(
 
       // Hook para hashear contraseña antes de actualizar
       beforeUpdate: async (user: User) => {
-        if (user.changed('password')) {
-          user.password = await User.hashPassword(user.password);
+        if (user.changed('password')) {        
+                              
+          // Actualizar el timestamp de último cambio de contraseña
+          // Esto es importante para políticas de seguridad (ej: forzar cambio cada X días)
           if (!user.securityInfo) {
             user.securityInfo = {
               passwordLastChanged: new Date()

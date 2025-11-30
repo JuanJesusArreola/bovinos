@@ -3,9 +3,9 @@ import {
   authenticateToken, 
   authorizeRoles, 
   checkPermission,
-  checkResourceOwnership,
-  UserRole 
+  checkResourceOwnership, 
 } from '../middleware/auth';
+import { UserRole } from '../models/User';
 import { validate, sanitizeInput, validateId } from '../middleware/validation';
 import { createRateLimit, EndpointType, veterinaryPriorityLimit } from '../middleware/rate-limit';
 import { 
@@ -128,7 +128,7 @@ router.get(
  */
 router.post(
   '/',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   cattlePhotosUpload.multiple('attachments', 10), // máximo 10 archivos adjuntos
   processUploadedFiles(FileCategory.CATTLE_PHOTOS),
@@ -235,7 +235,7 @@ router.get(
 router.put(
   '/:id',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   cattlePhotosUpload.multiple('attachments', 10),
   processUploadedFiles(FileCategory.CATTLE_PHOTOS),
@@ -276,7 +276,7 @@ router.put(
 router.delete(
   '/:id',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.CATTLE_WRITE),
   auditTrail('DELETE', 'EVENT'),
   async (req: Request, res: Response) => {
@@ -374,7 +374,7 @@ router.post(
  */
 router.post(
   '/illness',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   veterinaryDocsUpload.multiple('medicalPhotos', 5),
   processUploadedFiles(FileCategory.VETERINARY_DOCS),
@@ -489,7 +489,7 @@ router.post(
  */
 router.post(
   '/emergency',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   veterinaryPriorityLimit, // Límites especiales para emergencias veterinarias
   createRateLimit(EndpointType.HEALTH),
   cattlePhotosUpload.multiple('emergencyPhotos', 10),
@@ -714,7 +714,7 @@ router.post(
  */
 router.post(
   '/birth',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   cattlePhotosUpload.multiple('birthPhotos', 10),
   processUploadedFiles(FileCategory.CATTLE_PHOTOS),
@@ -773,7 +773,7 @@ router.post(
  */
 router.post(
   '/weaning',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   auditTrail('CREATE', 'WEANING_EVENT'),
   async (req: Request, res: Response) => {
@@ -829,7 +829,7 @@ router.post(
  */
 router.post(
   '/management',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   validate('search'), // TODO: Crear esquema específico para manejo
   auditTrail('CREATE', 'MANAGEMENT_EVENT'),
@@ -885,7 +885,7 @@ router.post(
  */
 router.post(
   '/weighing',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   auditTrail('CREATE', 'WEIGHING_EVENT'),
   async (req: Request, res: Response) => {
@@ -937,7 +937,7 @@ router.post(
  */
 router.post(
   '/transfer',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   auditTrail('CREATE', 'TRANSFER_EVENT'),
   async (req: Request, res: Response) => {
@@ -993,7 +993,7 @@ router.post(
  */
 router.post(
   '/feeding',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   auditTrail('CREATE', 'FEEDING_EVENT'),
   async (req: Request, res: Response) => {
@@ -1178,7 +1178,7 @@ router.put(
 router.put(
   '/:id/complete',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.WORKER, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.WORKER, UserRole.VETERINARIAN),
   createRateLimit(EndpointType.CATTLE_WRITE),
   cattlePhotosUpload.multiple('completionPhotos', 10),
   processUploadedFiles(FileCategory.CATTLE_PHOTOS),
@@ -1261,7 +1261,7 @@ router.put(
 router.put(
   '/:id/start',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.WORKER, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.WORKER, UserRole.VETERINARIAN),
   createRateLimit(EndpointType.CATTLE_WRITE),
   auditTrail('UPDATE', 'EVENT_START'),
   async (req: Request, res: Response) => {
@@ -1297,7 +1297,7 @@ router.put(
  */
 router.post(
   '/bulk-create',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.BULK_OPERATIONS),
   validate('search'), // TODO: Crear esquema específico para operaciones masivas
   auditTrail('CREATE', 'BULK_EVENTS'),
@@ -1333,7 +1333,7 @@ router.post(
  */
 router.put(
   '/bulk-update',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.BULK_OPERATIONS),
   validate('search'), // TODO: Crear esquema específico para actualizaciones masivas
   auditTrail('UPDATE', 'BULK_EVENTS'),
@@ -1407,7 +1407,7 @@ router.put(
 router.post(
   '/:id/attachments',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.WORKER, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.WORKER, UserRole.VETERINARIAN),
   createRateLimit(EndpointType.FILES),
   generalDocsUpload.multiple('files', 15),
   processUploadedFiles(FileCategory.GENERAL_DOCS),
@@ -1484,7 +1484,7 @@ router.delete(
   '/:id/attachments/:attachmentId',
   validateId('id'),
   validateId('attachmentId'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.WORKER, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.WORKER, UserRole.VETERINARIAN),
   createRateLimit(EndpointType.FILES),
   auditTrail('DELETE', 'EVENT_ATTACHMENT'),
   async (req: Request, res: Response) => {

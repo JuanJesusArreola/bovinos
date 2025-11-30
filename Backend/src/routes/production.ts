@@ -2,9 +2,9 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { Op, WhereOptions } from 'sequelize';
 import { 
   authenticateToken, 
-  authorizeRoles, 
-  UserRole
+  authorizeRoles,
 } from '../middleware/auth';
+import { UserRole } from '../models/User';
 import { ProductionController } from '../controllers/production';
 import { logMessage, LogLevel } from '../middleware/logging';
 
@@ -68,7 +68,7 @@ router.get('/',
  */
 router.post('/',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.WORKER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.WORKER),
   auditLog('production.create'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -101,7 +101,7 @@ router.get('/:id',
  */
 router.put('/:id',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.WORKER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.WORKER),
   auditLog('production.update'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -118,7 +118,7 @@ router.put('/:id',
  */
 router.delete('/:id',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   auditLog('production.delete'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -139,7 +139,7 @@ router.delete('/:id',
  */
 router.post('/milk',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.WORKER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.WORKER),
   auditLog('production.milk.create'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -160,7 +160,7 @@ router.post('/milk',
  */
 router.post('/weight',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.WORKER, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.WORKER, UserRole.VETERINARIAN),
   auditLog('production.weight.create'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -197,7 +197,7 @@ router.get('/stats/:bovineId',
  */
 router.get('/reports/:ranchId',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   auditLog('production.reports.ranch'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -214,7 +214,7 @@ router.get('/reports/:ranchId',
  */
 router.get('/comparison/:ranchId',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   auditLog('production.comparison'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

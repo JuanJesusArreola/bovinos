@@ -4,16 +4,19 @@ import {
   authorizeRoles,
   optionalAuth,
   requireActiveSubscription,
-  UserRole,
   generateToken,
   mockUserDatabase
 } from '../middleware/auth';
 import { validate, sanitizeInput, validateId } from '../middleware/validation';
 import { createRateLimit, EndpointType } from '../middleware/rate-limit';
 import { requestLogger, auditTrail } from '../middleware/logging';
+import { UserRole } from '../models/User';
+import {AuthController} from '../controllers/auth';
 
 // Crear instancia del router
 const router = Router();
+
+const authController = new AuthController();
 
 // Aplicar middleware global para todas las rutas de auth
 router.use(requestLogger); // Logging de todas las requests
@@ -30,89 +33,7 @@ router.use(sanitizeInput); // Sanitización de input
  * @body    { email: string, password: string, rememberMe?: boolean }
  */
 router.post(
-  '/login',
-  createRateLimit(EndpointType.AUTH),
-  validate('search'), // Usando el esquema de validación disponible como ejemplo
-  auditTrail('CREATE', 'AUTH_SESSION'),
-  async (req: Request, res: Response) => {
-    try {
-      const { email, password, rememberMe } = req.body;
-
-      // Validar campos requeridos
-      if (!email || !password) {
-        return res.status(400).json({
-          success: false,
-          message: 'Email y contraseña son requeridos',
-          error: 'MISSING_CREDENTIALS'
-        });
-      }
-
-      /*// TODO: Implementar lógica real de autenticación con base de datos
-      // Por ahora, simulamos un login exitoso para pruebas
-      
-      // Simular usuario encontrado
-      const mockUser = {
-        id: 'user_' + Date.now(),
-        email: email,
-        firstName: 'Usuario',
-        lastName: 'Prueba',
-        role: 'USER',
-        isActive: true
-      };
-      
-      // Simular token JWT (en producción usar jwt.sign)
-      const mockToken = 'mock_jwt_token_' + Date.now();
-      
-      res.status(200).json({
-        success: true,
-        message: 'Login exitoso',
-        data: {
-          user: mockUser,
-          accessToken: mockToken,
-          refreshToken: 'mock_refresh_token_' + Date.now(),
-          expiresIn: 3600 // 1 hora
-        }
-      }); */
-
-      // Crear usuario real
-      const userId = 'user_' + Date.now();
-      const mockUser = {
-        id: userId,
-        email: email,
-        firstName: 'Usuario',
-        lastName: 'Prueba',
-        role: UserRole.ADMIN,
-        isActive: true,
-        isEmailVerified: true,
-        lastLoginAt: new Date()
-      };
-
-      // Guardar usuario en mock database para que el middleware lo encuentre
-      mockUserDatabase[userId] = mockUser;
-
-      // Generar JWT real usando la función del middleware
-      const realToken = generateToken(userId, email, UserRole.ADMIN);
-
-      res.status(200).json({
-        success: true,
-        message: 'Login exitoso',
-        data: {
-          user: mockUser,
-          accessToken: realToken,  // ✅ JWT REAL
-          refreshToken: 'mock_refresh_token_' + Date.now(),
-          expiresIn: 3600 // 1 hora
-        }
-      });
-    } catch (error) {
-      console.error('Error en login:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error interno del servidor',
-        error: 'INTERNAL_ERROR'
-      });
-    }
-  }
-);
+  '/login', authController.login);
 
 /**
  * @route   POST /auth/register
@@ -125,72 +46,7 @@ router.post(
   createRateLimit(EndpointType.AUTH),
   validate('search'), // Usando esquema disponible como placeholder
   auditTrail('CREATE', 'USER'),
-  async (req: Request, res: Response) => {
-    try {
-      const { firstName, lastName, email, password, confirmPassword, phone, role } = req.body;
-
-      // Validar campos requeridos
-      if (!firstName || !lastName || !email || !password || !confirmPassword) {
-        return res.status(400).json({
-          success: false,
-          message: 'Todos los campos son requeridos',
-          error: 'MISSING_FIELDS'
-        });
-      }
-
-      // Validar que las contraseñas coincidan
-      if (password !== confirmPassword) {
-        return res.status(400).json({
-          success: false,
-          message: 'Las contraseñas no coinciden',
-          error: 'PASSWORD_MISMATCH'
-        });
-      }
-
-      // Validar formato de email
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Formato de email inválido',
-          error: 'INVALID_EMAIL'
-        });
-      }
-
-      // TODO: Implementar lógica real de registro con base de datos
-      // Por ahora, simulamos un registro exitoso para pruebas
-
-      // Simular usuario creado
-      const mockUser = {
-        id: 'user_' + Date.now(),
-        email: email,
-        firstName: firstName,
-        lastName: lastName,
-        phone: phone || null,
-        role: role || 'USER',
-        isActive: true,
-        emailVerified: false,
-        createdAt: new Date().toISOString()
-      };
-
-      res.status(201).json({
-        success: true,
-        message: 'Usuario registrado exitosamente. Verifique su email.',
-        data: {
-          userId: mockUser.id,
-          email: mockUser.email,
-          user: mockUser
-        }
-      });
-    } catch (error) {
-      console.error('Error en registro:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Error interno del servidor',
-        error: 'INTERNAL_ERROR'
-      });
-    }
-  }
+  authController.register  
 );
 
 /**
@@ -203,29 +59,7 @@ router.post(
   '/forgot-password',
   createRateLimit(EndpointType.AUTH),
   validate('search'),
-  async (req: Request, res: Response) => {
-    try {
-      // TODO: Implementar lógica de forgot password
-      // const { email } = req.body;
-
-      // Aquí iría la lógica para:
-      // 1. Validar que el email existe
-      // 2. Generar token de reset
-      // 3. Enviar email con instrucciones
-      // 4. Retornar respuesta exitosa
-
-      res.status(200).json({
-        success: true,
-        message: 'Si el email existe, recibirá instrucciones para restablecer su contraseña'
-      });
-    } catch (error) {
-      res.status(400).json({
-        success: false,
-        message: 'Error al procesar solicitud',
-        error: 'FORGOT_PASSWORD_FAILED'
-      });
-    }
-  }
+  authController.forgotPassword
 );
 
 /**
@@ -238,23 +72,7 @@ router.post(
   '/reset-password',
   createRateLimit(EndpointType.AUTH),
   validate('search'),
-  async (req: Request, res: Response) => {
-    try {
-      // TODO: Implementar lógica de reset password
-      // const { token, password, confirmPassword } = req.body;
-
-      res.status(200).json({
-        success: true,
-        message: 'Contraseña restablecida exitosamente'
-      });
-    } catch (error) {
-      res.status(400).json({
-        success: false,
-        message: 'Token inválido o expirado',
-        error: 'INVALID_RESET_TOKEN'
-      });
-    }
-  }
+  authController.resetPassword
 );
 
 /**
@@ -266,23 +84,7 @@ router.post(
 router.post(
   '/verify-email',
   createRateLimit(EndpointType.AUTH),
-  async (req: Request, res: Response) => {
-    try {
-      // TODO: Implementar lógica de verificación de email
-      // const { token } = req.body;
-
-      res.status(200).json({
-        success: true,
-        message: 'Email verificado exitosamente'
-      });
-    } catch (error) {
-      res.status(400).json({
-        success: false,
-        message: 'Token de verificación inválido',
-        error: 'INVALID_VERIFICATION_TOKEN'
-      });
-    }
-  }
+  authController.verifyEmail
 );
 
 /**
@@ -294,27 +96,7 @@ router.post(
 router.post(
   '/refresh',
   createRateLimit(EndpointType.AUTH),
-  async (req: Request, res: Response) => {
-    try {
-      // TODO: Implementar lógica de refresh token
-      // const { refreshToken } = req.body;
-
-      res.status(200).json({
-        success: true,
-        message: 'Token refrescado exitosamente',
-        data: {
-          // accessToken: newAccessToken,
-          // refreshToken: newRefreshToken
-        }
-      });
-    } catch (error) {
-      res.status(401).json({
-        success: false,
-        message: 'Refresh token inválido',
-        error: 'INVALID_REFRESH_TOKEN'
-      });
-    }
-  }
+  authController.refreshToken
 );
 
 // ============================================================================
@@ -329,28 +111,8 @@ router.post(
  */
 router.post(
   '/logout',
-  authenticateToken,
   auditTrail('DELETE', 'AUTH_SESSION'),
-  async (req: Request, res: Response) => {
-    try {
-      // TODO: Implementar lógica de logout
-      // Aquí iría la lógica para:
-      // 1. Invalidar tokens
-      // 2. Limpiar sesiones activas
-      // 3. Log de logout
-
-      res.status(200).json({
-        success: true,
-        message: 'Sesión cerrada exitosamente'
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: 'Error al cerrar sesión',
-        error: 'LOGOUT_FAILED'
-      });
-    }
-  }
+  authenticateToken, authController.logout
 );
 
 /**
@@ -361,39 +123,8 @@ router.post(
  */
 router.get(
   '/profile',
-  authenticateToken,
   auditTrail('READ', 'USER_PROFILE'),
-  async (req: Request, res: Response) => {
-    try {
-      // El usuario está disponible en req.user gracias al middleware authenticateToken
-      const user = req.user;
-
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: 'Usuario no encontrado',
-          error: 'USER_NOT_FOUND'
-        });
-      }
-
-      // Remover información sensible antes de enviar
-      const { ...safeUserData } = user;
-
-      res.status(200).json({
-        success: true,
-        message: 'Perfil obtenido exitosamente',
-        data: {
-          user: safeUserData
-        }
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: 'Error al obtener perfil',
-        error: 'PROFILE_FETCH_FAILED'
-      });
-    }
-  }
+  authenticateToken, authController.getProfile
 );
 
 /**
@@ -408,26 +139,7 @@ router.put(
   authenticateToken,
   validate('search'), // Usar esquema apropiado cuando esté disponible
   auditTrail('UPDATE', 'USER_PROFILE'),
-  async (req: Request, res: Response) => {
-    try {
-      // TODO: Implementar lógica de actualización de perfil
-      // const { firstName, lastName, phone } = req.body;
-
-      res.status(200).json({
-        success: true,
-        message: 'Perfil actualizado exitosamente',
-        data: {
-          // updatedUser: updatedUserData
-        }
-      });
-    } catch (error) {
-      res.status(400).json({
-        success: false,
-        message: 'Error al actualizar perfil',
-        error: 'PROFILE_UPDATE_FAILED'
-      });
-    }
-  }
+  authController.updateProfile
 );
 
 /**
@@ -443,23 +155,7 @@ router.post(
   createRateLimit(EndpointType.AUTH),
   validate('search'), // Usar esquema apropiado cuando esté disponible
   auditTrail('UPDATE', 'USER_PASSWORD'),
-  async (req: Request, res: Response) => {
-    try {
-      // TODO: Implementar lógica de cambio de contraseña
-      // const { currentPassword, newPassword, confirmPassword } = req.body;
-
-      res.status(200).json({
-        success: true,
-        message: 'Contraseña cambiada exitosamente'
-      });
-    } catch (error) {
-      res.status(400).json({
-        success: false,
-        message: 'Error al cambiar contraseña',
-        error: 'PASSWORD_CHANGE_FAILED'
-      });
-    }
-  }
+  authController.changePassword
 );
 
 /**
@@ -474,23 +170,7 @@ router.delete(
   authenticateToken,
   createRateLimit(EndpointType.AUTH),
   auditTrail('DELETE', 'USER_ACCOUNT'),
-  async (req: Request, res: Response) => {
-    try {
-      // TODO: Implementar lógica de eliminación de cuenta
-      // const { password, confirmation } = req.body;
-
-      res.status(200).json({
-        success: true,
-        message: 'Cuenta eliminada exitosamente'
-      });
-    } catch (error) {
-      res.status(400).json({
-        success: false,
-        message: 'Error al eliminar cuenta',
-        error: 'ACCOUNT_DELETION_FAILED'
-      });
-    }
-  }
+  authController.deleteAccount
 );
 
 // ============================================================================
@@ -507,7 +187,7 @@ router.delete(
 router.get(
   '/users',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.OWNER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
   validate('search'),
   auditTrail('READ', 'USER_LIST'),
   async (req: Request, res: Response) => {
@@ -543,7 +223,7 @@ router.get(
 router.put(
   '/users/:userId/role',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.OWNER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
   validateId('userId'),
   auditTrail('UPDATE', 'USER_ROLE'),
   async (req: Request, res: Response) => {
@@ -576,7 +256,7 @@ router.put(
 router.put(
   '/users/:userId/status',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.OWNER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
   validateId('userId'),
   auditTrail('UPDATE', 'USER_STATUS'),
   async (req: Request, res: Response) => {
@@ -631,13 +311,12 @@ router.get(
           user: {
             id: user.id,
             email: user.email,
-            firstName: user.firstName,
-            lastName: user.lastName,
+            firstName: user.personalInfo.firstName,
+            lastName: user.personalInfo.lastName,
             role: user.role,
             isActive: user.isActive,
-            isEmailVerified: user.isEmailVerified,
-            lastLoginAt: user.lastLoginAt,
-            farm: user.farm
+            isEmailVerified: user.emailVerified,
+            lastLoginAt: user.lastLoginAt
           }
         }
       });

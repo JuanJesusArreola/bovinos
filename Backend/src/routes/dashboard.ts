@@ -3,9 +3,9 @@ import {
   authenticateToken, 
   authorizeRoles, 
   checkPermission, 
-  requireActiveSubscription,
-  UserRole 
+  requireActiveSubscription
 } from '../middleware/auth';
+import { UserRole } from '../models/User';
 import { validate, sanitizeInput, validateId } from '../middleware/validation';
 import { createRateLimit, EndpointType } from '../middleware/rate-limit';
 import { 

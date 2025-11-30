@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { UserRole } from './auth';
+import { UserRole } from '../models/User';
 import { logMessage, LogLevel } from './logging';
 
 // Interface para configuración de límites
@@ -40,80 +40,90 @@ const RATE_LIMIT_CONFIGS: Record<EndpointType, Record<UserRole, RateLimitConfig>
     [UserRole.WORKER]: { windowMs: 15 * 60 * 1000, maxRequests: 15 },      // 15 intentos/15min
     [UserRole.VETERINARIAN]: { windowMs: 15 * 60 * 1000, maxRequests: 20 }, // 20 intentos/15min
     [UserRole.MANAGER]: { windowMs: 15 * 60 * 1000, maxRequests: 25 },     // 25 intentos/15min
-    [UserRole.ADMIN]: { windowMs: 15 * 60 * 1000, maxRequests: 50 },       // 50 intentos/15min
-    [UserRole.OWNER]: { windowMs: 15 * 60 * 1000, maxRequests: 100 }       // 100 intentos/15min
+    [UserRole.SUPER_ADMIN]: { windowMs: 15 * 60 * 1000, maxRequests: 50 },       // 50 intentos/15min
+    [UserRole.OWNER]: { windowMs: 15 * 60 * 1000, maxRequests: 100 },       // 100 intentos/15min,
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60000, maxRequests: 45 },
   },
   [EndpointType.CATTLE_READ]: {
     [UserRole.VIEWER]: { windowMs: 60 * 1000, maxRequests: 30 },           // 30 req/min
     [UserRole.WORKER]: { windowMs: 60 * 1000, maxRequests: 60 },           // 60 req/min
     [UserRole.VETERINARIAN]: { windowMs: 60 * 1000, maxRequests: 100 },    // 100 req/min
     [UserRole.MANAGER]: { windowMs: 60 * 1000, maxRequests: 150 },         // 150 req/min
-    [UserRole.ADMIN]: { windowMs: 60 * 1000, maxRequests: 300 },           // 300 req/min
-    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 500 }            // 500 req/min
+    [UserRole.SUPER_ADMIN]: { windowMs: 60 * 1000, maxRequests: 300 },           // 300 req/min
+    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 500 },            // 500 req/min
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60 * 1000, maxRequests: 200},
   },
   [EndpointType.CATTLE_WRITE]: {
     [UserRole.VIEWER]: { windowMs: 60 * 1000, maxRequests: 0 },            // Sin acceso
     [UserRole.WORKER]: { windowMs: 60 * 1000, maxRequests: 20 },           // 20 req/min
     [UserRole.VETERINARIAN]: { windowMs: 60 * 1000, maxRequests: 40 },     // 40 req/min
     [UserRole.MANAGER]: { windowMs: 60 * 1000, maxRequests: 80 },          // 80 req/min
-    [UserRole.ADMIN]: { windowMs: 60 * 1000, maxRequests: 150 },           // 150 req/min
-    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 300 }            // 300 req/min
+    [UserRole.SUPER_ADMIN]: { windowMs: 60 * 1000, maxRequests: 150 },           // 150 req/min
+    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 300 },            // 300 req/min
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60 * 1000, maxRequests: 100 },
   },
   [EndpointType.HEALTH]: {
     [UserRole.VIEWER]: { windowMs: 60 * 1000, maxRequests: 10 },           // 10 req/min
     [UserRole.WORKER]: { windowMs: 60 * 1000, maxRequests: 15 },           // 15 req/min
     [UserRole.VETERINARIAN]: { windowMs: 60 * 1000, maxRequests: 60 },     // 60 req/min (prioritario)
     [UserRole.MANAGER]: { windowMs: 60 * 1000, maxRequests: 40 },          // 40 req/min
-    [UserRole.ADMIN]: { windowMs: 60 * 1000, maxRequests: 80 },            // 80 req/min
-    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 120 }            // 120 req/min
+    [UserRole.SUPER_ADMIN]: { windowMs: 60 * 1000, maxRequests: 80 },            // 80 req/min
+    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 120 },            // 120 req/min
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60 * 1000, maxRequests: 60 },
   },
   [EndpointType.VACCINATION]: {
     [UserRole.VIEWER]: { windowMs: 60 * 1000, maxRequests: 5 },            // 5 req/min
     [UserRole.WORKER]: { windowMs: 60 * 1000, maxRequests: 20 },           // 20 req/min
     [UserRole.VETERINARIAN]: { windowMs: 60 * 1000, maxRequests: 50 },     // 50 req/min (prioritario)
     [UserRole.MANAGER]: { windowMs: 60 * 1000, maxRequests: 30 },          // 30 req/min
-    [UserRole.ADMIN]: { windowMs: 60 * 1000, maxRequests: 60 },            // 60 req/min
-    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 100 }            // 100 req/min
+    [UserRole.SUPER_ADMIN]: { windowMs: 60 * 1000, maxRequests: 60 },            // 60 req/min
+    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 100 },            // 100 req/min
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60 * 1000, maxRequests: 50  },
   },
   [EndpointType.REPORTS]: {
     [UserRole.VIEWER]: { windowMs: 60 * 60 * 1000, maxRequests: 5 },       // 5 reportes/hora
     [UserRole.WORKER]: { windowMs: 60 * 60 * 1000, maxRequests: 10 },      // 10 reportes/hora
     [UserRole.VETERINARIAN]: { windowMs: 60 * 60 * 1000, maxRequests: 20 }, // 20 reportes/hora
     [UserRole.MANAGER]: { windowMs: 60 * 60 * 1000, maxRequests: 50 },     // 50 reportes/hora
-    [UserRole.ADMIN]: { windowMs: 60 * 60 * 1000, maxRequests: 100 },      // 100 reportes/hora
-    [UserRole.OWNER]: { windowMs: 60 * 60 * 1000, maxRequests: 200 }       // 200 reportes/hora
+    [UserRole.SUPER_ADMIN]: { windowMs: 60 * 60 * 1000, maxRequests: 100 },      // 100 reportes/hora
+    [UserRole.OWNER]: { windowMs: 60 * 60 * 1000, maxRequests: 200 },       // 200 reportes/hora
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60 * 60 * 1000, maxRequests: 60 },
   },
   [EndpointType.MAPS]: {
     [UserRole.VIEWER]: { windowMs: 60 * 1000, maxRequests: 20 },           // 20 req/min
     [UserRole.WORKER]: { windowMs: 60 * 1000, maxRequests: 40 },           // 40 req/min
     [UserRole.VETERINARIAN]: { windowMs: 60 * 1000, maxRequests: 80 },     // 80 req/min
     [UserRole.MANAGER]: { windowMs: 60 * 1000, maxRequests: 100 },         // 100 req/min
-    [UserRole.ADMIN]: { windowMs: 60 * 1000, maxRequests: 150 },           // 150 req/min
-    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 200 }            // 200 req/min
+    [UserRole.SUPER_ADMIN]: { windowMs: 60 * 1000, maxRequests: 150 },           // 150 req/min
+    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 200 },            // 200 req/min
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60 * 1000, maxRequests: 100}
   },
   [EndpointType.FILES]: {
     [UserRole.VIEWER]: { windowMs: 60 * 60 * 1000, maxRequests: 2 },       // 2 uploads/hora
     [UserRole.WORKER]: { windowMs: 60 * 60 * 1000, maxRequests: 10 },      // 10 uploads/hora
     [UserRole.VETERINARIAN]: { windowMs: 60 * 60 * 1000, maxRequests: 25 }, // 25 uploads/hora
     [UserRole.MANAGER]: { windowMs: 60 * 60 * 1000, maxRequests: 50 },     // 50 uploads/hora
-    [UserRole.ADMIN]: { windowMs: 60 * 60 * 1000, maxRequests: 100 },      // 100 uploads/hora
-    [UserRole.OWNER]: { windowMs: 60 * 60 * 1000, maxRequests: 200 }       // 200 uploads/hora
+    [UserRole.SUPER_ADMIN]: { windowMs: 60 * 60 * 1000, maxRequests: 100 },      // 100 uploads/hora
+    [UserRole.OWNER]: { windowMs: 60 * 60 * 1000, maxRequests: 200 },       // 200 uploads/hora
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60 * 60 * 1000, maxRequests: 50}
   },
   [EndpointType.BULK_OPERATIONS]: {
     [UserRole.VIEWER]: { windowMs: 60 * 60 * 1000, maxRequests: 0 },       // Sin acceso
     [UserRole.WORKER]: { windowMs: 60 * 60 * 1000, maxRequests: 2 },       // 2 operaciones/hora
     [UserRole.VETERINARIAN]: { windowMs: 60 * 60 * 1000, maxRequests: 5 }, // 5 operaciones/hora
     [UserRole.MANAGER]: { windowMs: 60 * 60 * 1000, maxRequests: 10 },     // 10 operaciones/hora
-    [UserRole.ADMIN]: { windowMs: 60 * 60 * 1000, maxRequests: 20 },       // 20 operaciones/hora
-    [UserRole.OWNER]: { windowMs: 60 * 60 * 1000, maxRequests: 50 }        // 50 operaciones/hora
+    [UserRole.SUPER_ADMIN]: { windowMs: 60 * 60 * 1000, maxRequests: 20 },       // 20 operaciones/hora
+    [UserRole.OWNER]: { windowMs: 60 * 60 * 1000, maxRequests: 50 },        // 50 operaciones/hora
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60 * 60 * 1000, maxRequests: 10}
   },
   [EndpointType.EXTERNAL_API]: {
     [UserRole.VIEWER]: { windowMs: 60 * 1000, maxRequests: 5 },            // 5 req/min
     [UserRole.WORKER]: { windowMs: 60 * 1000, maxRequests: 10 },           // 10 req/min
     [UserRole.VETERINARIAN]: { windowMs: 60 * 1000, maxRequests: 15 },     // 15 req/min
     [UserRole.MANAGER]: { windowMs: 60 * 1000, maxRequests: 25 },          // 25 req/min
-    [UserRole.ADMIN]: { windowMs: 60 * 1000, maxRequests: 50 },            // 50 req/min
-    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 100 }            // 100 req/min
+    [UserRole.SUPER_ADMIN]: { windowMs: 60 * 1000, maxRequests: 50 },            // 50 req/min
+    [UserRole.OWNER]: { windowMs: 60 * 1000, maxRequests: 100 },            // 100 req/min
+    [UserRole.RANCH_MANAGER]:{ windowMs: 60 * 1000, maxRequests: 25}
   }
 };
 

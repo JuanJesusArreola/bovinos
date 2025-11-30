@@ -80,7 +80,7 @@ app.get('/api/test-db', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error en prueba de BD',
-      error: error.message
+      error: error
     });
   }
 });

@@ -6,9 +6,8 @@ import { Op, WhereOptions } from 'sequelize';
 import { 
   authenticateToken, 
   authorizeRoles,
-  UserRole
 } from '../middleware/auth';
-
+import { UserRole } from '../models/User';
 import { 
   createRateLimit,
   EndpointType
@@ -364,7 +363,7 @@ router.get('/mating-records',
  */
 router.post('/mating-records',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.WORKER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.WORKER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   requireModulePermission('reproduction', 'create'),
   sanitizeInput,
@@ -546,7 +545,7 @@ router.get('/artificial-insemination',
  */
 router.post('/artificial-insemination',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.VETERINARIAN),
   requireVeterinaryAccess,
   createRateLimit(EndpointType.CATTLE_WRITE),
   requireModulePermission('reproduction', 'create'),
@@ -835,7 +834,7 @@ router.get('/pregnancy-tracking',
  */
 router.post('/pregnancy-check',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.VETERINARIAN),
   requireVeterinaryAccess,
   createRateLimit(EndpointType.HEALTH),
   requireModulePermission('reproduction', 'create'),
@@ -1092,7 +1091,7 @@ router.get('/birth-records',
  */
 router.post('/birth-records',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   requireModulePermission('reproduction', 'create'),
   sanitizeInput,
@@ -1366,7 +1365,7 @@ router.get('/breeders/:id/performance',
  */
 router.put('/breeders/:id/status',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
   createRateLimit(EndpointType.CATTLE_WRITE),
   requireModulePermission('reproduction', 'update'),
   validateId('id'),
@@ -1481,7 +1480,7 @@ router.get('/analysis/efficiency',
  */
 router.get('/analysis/genetic-diversity',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.VETERINARIAN),
   createRateLimit(EndpointType.REPORTS),
   requireModulePermission('reproduction', 'read'),
   query('includeInbreeding')

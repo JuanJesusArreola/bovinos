@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { UserRole } from './auth';
+import { UserRole } from '../models/User';
 
 // Niveles de logging
 export enum LogLevel {

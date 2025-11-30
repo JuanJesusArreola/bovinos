@@ -3,9 +3,9 @@ import {
   authenticateToken, 
   authorizeRoles, 
   checkPermission,
-  requireActiveSubscription,
-  UserRole 
+  requireActiveSubscription, 
 } from '../middleware/auth';
+import { UserRole } from '../models/User';
 import { validate, sanitizeInput, validateId } from '../middleware/validation';
 import { createRateLimit, EndpointType, veterinaryPriorityLimit } from '../middleware/rate-limit';
 import { 
@@ -51,7 +51,7 @@ router.use(authenticateToken);
  */
 router.get(
   '/records',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   validate('search'),
   async (req: Request, res: Response) => {
@@ -114,7 +114,7 @@ router.get(
  */
 router.post(
   '/records',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   veterinaryDocsUpload.multiple('medicalFiles', 15), // documentos médicos, rayos X, etc.
   processUploadedFiles(FileCategory.VETERINARY_DOCS),
@@ -164,7 +164,7 @@ router.post(
 router.get(
   '/records/:id',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -242,7 +242,7 @@ router.put(
 router.delete(
   '/records/:id',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -277,7 +277,7 @@ router.delete(
  */
 router.get(
   '/vaccinations',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.VACCINATION),
   async (req: Request, res: Response) => {
     try {
@@ -318,7 +318,7 @@ router.get(
  */
 router.post(
   '/vaccinations',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.VACCINATION),
   vaccinationRecordsUpload.multiple('vaccinationCertificates', 10), // certificados oficiales
   processUploadedFiles(FileCategory.VACCINATION_RECORDS),
@@ -489,7 +489,7 @@ router.get(
  */
 router.get(
   '/vaccinations/overdue',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.VACCINATION),
   async (req: Request, res: Response) => {
     try {
@@ -572,7 +572,7 @@ router.post(
  */
 router.get(
   '/illnesses',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -614,7 +614,7 @@ router.get(
  */
 router.post(
   '/illnesses',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   cattlePhotosUpload.multiple('diagnosticImages', 20), // imágenes diagnósticas, rayos X
   processUploadedFiles(FileCategory.CATTLE_PHOTOS),
@@ -827,7 +827,7 @@ router.post(
  */
 router.get(
   '/treatment-plans',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -955,7 +955,7 @@ router.put(
 router.post(
   '/treatment-plans/:id/medication',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -1000,7 +1000,7 @@ router.post(
 router.get(
   '/treatment-plans/:id/progress',
   validateId('id'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -1083,7 +1083,7 @@ router.post(
  */
 router.post(
   '/emergency',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   veterinaryPriorityLimit, // Límites especiales para emergencias veterinarias
   createRateLimit(EndpointType.HEALTH),
   cattlePhotosUpload.multiple('emergencyPhotos', 15), // fotos de la emergencia
@@ -1130,7 +1130,7 @@ router.post(
  */
 router.get(
   '/emergency/active',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -1213,7 +1213,7 @@ router.put(
  */
 router.get(
   '/emergency/protocols',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -1471,7 +1471,7 @@ router.get(
  */
 router.get(
   '/pharmacy/inventory',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -1511,7 +1511,7 @@ router.get(
  */
 router.post(
   '/pharmacy/inventory',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.MANAGER),
   createRateLimit(EndpointType.HEALTH),
   veterinaryDocsUpload.multiple('medicationDocuments', 10), // facturas, certificados
   processUploadedFiles(FileCategory.VETERINARY_DOCS),
@@ -1599,7 +1599,7 @@ router.post(
  */
 router.get(
   '/pharmacy/prescriptions',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -1640,7 +1640,7 @@ router.get(
 router.post(
   '/pharmacy/dispense/:prescriptionId',
   validateId('prescriptionId'),
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.MANAGER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -1680,7 +1680,7 @@ router.post(
  */
 router.get(
   '/pharmacy/alerts',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.MANAGER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -1886,7 +1886,7 @@ router.post(
  */
 router.get(
   '/biosecurity/protocols',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -1924,7 +1924,7 @@ router.get(
  */
 router.post(
   '/biosecurity/breach',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   cattlePhotosUpload.multiple('breachEvidence', 10),
   processUploadedFiles(FileCategory.CATTLE_PHOTOS),
@@ -2325,7 +2325,7 @@ router.get(
  */
 router.get(
   '/parasite-control',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -2366,7 +2366,7 @@ router.get(
  */
 router.post(
   '/parasite-control/treatment',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   validate('search'), // TODO: Crear esquema específico para tratamientos parasitarios
   async (req: Request, res: Response) => {
@@ -2493,7 +2493,7 @@ router.get(
  */
 router.get(
   '/biometrics',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -2533,7 +2533,7 @@ router.get(
  */
 router.post(
   '/biometrics',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   validate('search'), // TODO: Crear esquema específico para datos biométricos
   async (req: Request, res: Response) => {
@@ -2616,7 +2616,7 @@ router.get(
  */
 router.get(
   '/biometrics/alerts',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -2861,7 +2861,7 @@ router.get(
  */
 router.get(
   '/dashboard',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.WORKER),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {
@@ -2935,7 +2935,7 @@ router.get(
  */
 router.put(
   '/settings',
-  authorizeRoles(UserRole.OWNER, UserRole.ADMIN),
+  authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.HEALTH),
   async (req: Request, res: Response) => {
     try {

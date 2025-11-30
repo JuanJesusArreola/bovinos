@@ -3,7 +3,7 @@ import multer, { FileFilterCallback, MulterError } from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
-import { UserRole } from './auth';
+import { UserRole } from '../models/User';
 import { logMessage, LogLevel, logCattleEvent, CattleEventType } from './logging';
 
 // Tipos de archivos permitidos por categoría
@@ -36,7 +36,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 10 * 1024 * 1024, // 10MB
     maxFiles: 10, // Máximo 10 fotos por bovino
     requiresAuth: true,
-    allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: false
   },
   [FileCategory.VETERINARY_DOCS]: {
@@ -45,7 +45,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 25 * 1024 * 1024, // 25MB
     maxFiles: 5,
     requiresAuth: true,
-    allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
   },
   [FileCategory.VACCINATION_RECORDS]: {
@@ -54,7 +54,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 15 * 1024 * 1024, // 15MB
     maxFiles: 3,
     requiresAuth: true,
-    allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
   },
   [FileCategory.HEALTH_REPORTS]: {
@@ -63,7 +63,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 20 * 1024 * 1024, // 20MB
     maxFiles: 5,
     requiresAuth: true,
-    allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
   },
   [FileCategory.BREEDING_DOCS]: {
@@ -72,7 +72,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 15 * 1024 * 1024, // 15MB
     maxFiles: 8,
     requiresAuth: true,
-    allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: false
   },
   [FileCategory.PRODUCTION_DATA]: {
@@ -81,7 +81,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 50 * 1024 * 1024, // 50MB para datos grandes
     maxFiles: 1,
     requiresAuth: true,
-    allowedRoles: [UserRole.WORKER, UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.WORKER, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
   },
   [FileCategory.FEED_REPORTS]: {
@@ -90,7 +90,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 10 * 1024 * 1024, // 10MB
     maxFiles: 3,
     requiresAuth: true,
-    allowedRoles: [UserRole.WORKER, UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.WORKER, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: false
   },
   [FileCategory.FINANCIAL_DOCS]: {
@@ -99,7 +99,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 30 * 1024 * 1024, // 30MB
     maxFiles: 2,
     requiresAuth: true,
-    allowedRoles: [UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
   },
   [FileCategory.GENERAL_DOCS]: {
@@ -108,7 +108,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 20 * 1024 * 1024, // 20MB
     maxFiles: 5,
     requiresAuth: true,
-    allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: false
   },
   [FileCategory.SYSTEM_BACKUPS]: {
@@ -117,7 +117,7 @@ const FILE_CONFIGS: Record<FileCategory, {
     maxSize: 500 * 1024 * 1024, // 500MB para backups
     maxFiles: 1,
     requiresAuth: true,
-    allowedRoles: [UserRole.ADMIN, UserRole.OWNER],
+    allowedRoles: [UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
   }
 };

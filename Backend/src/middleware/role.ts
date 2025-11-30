@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { UserRole } from './auth';
+import  { UserRole } from '../models/User';
 
 // Clase personalizada para errores de autorización
 export class AuthorizationError extends Error {
@@ -16,11 +16,12 @@ export class AuthorizationError extends Error {
 // Jerarquía de roles de mayor a menor privilegio
 const ROLE_HIERARCHY: Record<UserRole, number> = {
   [UserRole.OWNER]: 6,        // Máximo privilegio
-  [UserRole.ADMIN]: 5,        // Administrador completo
-  [UserRole.MANAGER]: 4,      // Gerente de operaciones
-  [UserRole.VETERINARIAN]: 3, // Veterinario especializado
-  [UserRole.WORKER]: 2,       // Trabajador de campo
-  [UserRole.VIEWER]: 1        // Solo lectura
+  [UserRole.SUPER_ADMIN]: 5,        // Administrador completo
+  [UserRole.RANCH_MANAGER]: 4,  // Administador de rancho
+  [UserRole.MANAGER]: 3,      // Gerente de operaciones
+  [UserRole.VETERINARIAN]: 2, // Veterinario especializado
+  [UserRole.WORKER]: 1,       // Trabajador de campo
+  [UserRole.VIEWER]: 0        // Solo lectura
 };
 
 // Definición de permisos por módulo del sistema ganadero
@@ -53,7 +54,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, ModulePermissions> = {
     users: ['create', 'read', 'update', 'delete', 'invite', 'suspend'],
     ranch: ['create', 'read', 'update', 'delete', 'configure']
   },
-  [UserRole.ADMIN]: {
+  [UserRole.SUPER_ADMIN]: {
     cattle: ['create', 'read', 'update', 'delete', 'export'],
     health: ['create', 'read', 'update', 'delete', 'diagnose'],
     vaccinations: ['create', 'read', 'update', 'delete', 'schedule', 'administer'],
@@ -65,6 +66,19 @@ const DEFAULT_ROLE_PERMISSIONS: Record<UserRole, ModulePermissions> = {
     maps: ['create', 'read', 'update', 'track'],
     users: ['create', 'read', 'update', 'invite'],
     ranch: ['read', 'update', 'configure']
+  },
+  [UserRole.RANCH_MANAGER]: {
+    cattle: ['create', 'read', 'update', 'export'],
+    health: ['create', 'read', 'update'],
+    vaccinations: ['create', 'read', 'update', 'schedule'],
+    reproduction: ['create', 'read', 'update', 'track'],
+    production: ['create', 'read', 'update', 'analyze'],
+    inventory: ['create', 'read', 'update'],
+    finances: ['read', 'budget'],
+    reports: ['create', 'read', 'export'],
+    maps: ['read', 'update', 'track'],
+    users: ['read'],
+    ranch: ['read', 'update']
   },
   [UserRole.MANAGER]: {
     cattle: ['create', 'read', 'update', 'export'],
@@ -204,7 +218,7 @@ export const requireVeterinaryAccess = (req: Request, res: Response, next: NextF
   const veterinaryRoles: UserRole[] = [
     UserRole.VETERINARIAN,
     UserRole.MANAGER,
-    UserRole.ADMIN,
+    UserRole.SUPER_ADMIN,
     UserRole.OWNER
   ];
 
@@ -229,7 +243,7 @@ export const requireFinancialAccess = (req: Request, res: Response, next: NextFu
 
   const financialRoles: UserRole[] = [
     UserRole.MANAGER,
-    UserRole.ADMIN,
+    UserRole.SUPER_ADMIN,
     UserRole.OWNER
   ];
 
@@ -253,7 +267,7 @@ export const requireUserManagementAccess = (req: Request, res: Response, next: N
   }
 
   const managementRoles: UserRole[] = [
-    UserRole.ADMIN,
+    UserRole.SUPER_ADMIN,
     UserRole.OWNER
   ];
 
@@ -324,7 +338,7 @@ export const requireComplexRole = (conditions: {
     // Verificar acceso veterinario
     if (conditions.veterinaryAccess) {
       const veterinaryRoles: UserRole[] = [
-        UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER
+        UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER
       ];
       
       if (!veterinaryRoles.includes(req.userRole)) {
@@ -337,7 +351,7 @@ export const requireComplexRole = (conditions: {
 
     // Verificar acceso financiero
     if (conditions.financialAccess) {
-      const financialRoles: UserRole[] = [UserRole.MANAGER, UserRole.ADMIN, UserRole.OWNER];
+      const financialRoles: UserRole[] = [UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER];
       
       if (!financialRoles.includes(req.userRole)) {
         return next(new AuthorizationError(
@@ -349,7 +363,7 @@ export const requireComplexRole = (conditions: {
 
     // Verificar gestión de usuarios
     if (conditions.userManagementAccess) {
-      const managementRoles: UserRole[] = [UserRole.ADMIN, UserRole.OWNER];
+      const managementRoles: UserRole[] = [UserRole.SUPER_ADMIN, UserRole.OWNER];
       
       if (!managementRoles.includes(req.userRole)) {
         return next(new AuthorizationError(

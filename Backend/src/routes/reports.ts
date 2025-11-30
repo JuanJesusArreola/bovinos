@@ -4,9 +4,9 @@ import { Op, WhereOptions } from 'sequelize';
 // Importaciones de middleware
 import { 
   authenticateToken, 
-  authorizeRoles, 
-  UserRole
+  authorizeRoles,
 } from '../middleware/auth';
+import { UserRole } from '../models/User';
 
 // Importaciones de controladores
 import ReportsController from '../controllers/reports';
@@ -897,7 +897,7 @@ router.get('/production/efficiency',
  */
 router.get('/financial/veterinary-costs',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'startDate',
@@ -959,7 +959,7 @@ router.get('/financial/veterinary-costs',
  */
 router.get('/financial/roi-analysis',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'startDate',
@@ -1146,7 +1146,7 @@ router.get('/geographic/risk-zones',
  */
 router.get('/export/:reportType',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN),
   validateFields([
     {
       field: 'reportType',
@@ -1251,7 +1251,7 @@ router.get('/export/:reportType',
  */
 router.post('/generate-custom',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.VETERINARIAN),
   rateLimitByUserId(10, 60), // 10 reportes personalizados por hora
   validateFields([
     {

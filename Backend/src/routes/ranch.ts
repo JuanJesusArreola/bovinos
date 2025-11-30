@@ -5,8 +5,8 @@ import { Op, WhereOptions } from 'sequelize';
 import { 
   authenticateToken, 
   authorizeRoles, 
-  UserRole
 } from '../middleware/auth';
+import { UserRole } from '../models/User';
 
 // Importaciones de controladores
 import RanchController from '../controllers/ranch';
@@ -317,7 +317,7 @@ router.get('/',
         totalArea: 100,
         owner: {
           id: userId,
-          name: req.user?.firstName + ' ' + req.user?.lastName
+          name: req.user?.personalInfo.firstName + ' ' + req.user?.personalInfo.lastName
         }
       };
 
@@ -338,7 +338,7 @@ router.get('/',
  */
 router.post('/',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.OWNER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER),
   validateFields([
     {
       field: 'name',
@@ -418,7 +418,7 @@ router.post('/',
  */
 router.put('/:id',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.OWNER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER),
   validateFields([
     {
       field: 'id',
@@ -578,7 +578,7 @@ router.get('/facilities',
  */
 router.post('/facilities',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'name',
@@ -694,7 +694,7 @@ router.get('/documents',
  */
 router.post('/documents/upload',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.OWNER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER),
   validateFields([
     {
       field: 'type',
@@ -762,7 +762,7 @@ router.post('/documents/upload',
  */
 router.delete('/documents/:id',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.OWNER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER),
   validateFields([
     {
       field: 'id',
@@ -885,7 +885,7 @@ router.get('/staff',
  */
 router.post('/staff',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'firstName',
@@ -977,7 +977,7 @@ router.post('/staff',
  */
 router.put('/staff/:id',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'id',
@@ -1064,7 +1064,7 @@ router.put('/staff/:id',
  */
 router.get('/staff/:id/performance',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'id',
@@ -1117,7 +1117,7 @@ router.get('/staff/:id/performance',
  */
 router.get('/reports/compliance',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'includeExpiring',
@@ -1184,7 +1184,7 @@ router.get('/reports/compliance',
  */
 router.get('/reports/operational',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'startDate',

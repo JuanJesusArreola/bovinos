@@ -5,10 +5,10 @@ import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { 
   authenticateToken, 
-  authorizeRoles, 
-  UserRole
+  authorizeRoles,
 } from '../middleware/auth';
 import { logMessage, LogLevel } from '../middleware/logging';
+import { UserRole } from '../models/User';
 
 const router = Router();
 
@@ -251,7 +251,7 @@ router.get('/files/:id',
  */
 router.delete('/files/:id',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.OWNER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER),
   auditLog('upload.file.delete'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -433,7 +433,7 @@ router.get('/bovines/:bovineId/photos',
  */
 router.post('/ranch/documents',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER, UserRole.OWNER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER),
   upload.array('documents', 10),
   auditLog('upload.ranch_documents.create'),
   async (req: Request, res: Response, next: NextFunction) => {
@@ -560,7 +560,7 @@ router.get('/storage/stats',
  */
 router.post('/cleanup',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN),
+  authorizeRoles(UserRole.SUPER_ADMIN),
   auditLog('upload.cleanup'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

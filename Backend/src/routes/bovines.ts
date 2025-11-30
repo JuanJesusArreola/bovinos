@@ -4,7 +4,7 @@ import { authenticateToken as authMiddleware } from '../middleware/auth';
 import { validate as validationMiddleware } from '../middleware/validation';
 import { createRateLimit, EndpointType } from '../middleware/rate-limit';
 import { requireMinimumRole as roleMiddleware } from '../middleware/role';
-import { UserRole } from '../middleware/auth'; // Importar UserRole desde auth
+import { UserRole } from '../models/User';
 import { createUploadMiddleware, processUploadedFiles, handleUploadErrors, FileCategory } from '../middleware/upload';
 
 // Crear instancia del router
@@ -93,7 +93,7 @@ router.put(
  */
 router.delete(
   '/:id',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.BULK_OPERATIONS),
   bovinesController.deleteBovine
 );
@@ -423,7 +423,7 @@ router.get(
  */
 router.put(
   '/bulk-update',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.BULK_OPERATIONS),
   validationMiddleware('search'),
   (req: Request, res: Response) => {
@@ -439,7 +439,7 @@ router.put(
  */
 router.delete(
   '/bulk-delete',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.BULK_OPERATIONS),
   validationMiddleware('search'),
   (req: Request, res: Response) => {
@@ -491,7 +491,7 @@ router.post(
  */
 router.post(
   '/import',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.FILES),
   createUploadMiddleware(FileCategory.PRODUCTION_DATA).single('file'),
   processUploadedFiles(FileCategory.PRODUCTION_DATA),

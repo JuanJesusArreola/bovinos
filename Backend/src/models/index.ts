@@ -14,6 +14,12 @@ import Medication from './Medication';
 import Production from './Production';
 import Reproduction from './Reproduction';
 
+// Nuevos modelos de autenticación
+import EmailVerificationToken from './EmailVerificationToken';
+import PasswordResetToken from './PasswordResetToken';
+import TokenBlacklist from './TokenBlacklist';
+import SecurityEvent from './SecurityEvent';
+
 // Interface para configuración de la base de datos
 interface DatabaseConfig {
   sync: boolean;
@@ -59,6 +65,10 @@ class Database {
     Medication: typeof Medication;
     Production: typeof Production;
     Reproduction: typeof Reproduction;
+    EmailVerificationToken: typeof EmailVerificationToken;
+    PasswordResetToken: typeof PasswordResetToken;
+    TokenBlacklist: typeof TokenBlacklist;
+    SecurityEvent: typeof SecurityEvent;
   };
 
   constructor() {
@@ -74,7 +84,11 @@ class Database {
       Inventory,
       Medication,
       Production,
-      Reproduction
+      Reproduction,
+      EmailVerificationToken,
+      PasswordResetToken,
+      TokenBlacklist,
+      SecurityEvent,
     };
 
     // Establecer las relaciones entre modelos
@@ -880,7 +894,11 @@ export {
   Inventory,
   Medication,
   Production,
-  Reproduction
+  Reproduction,
+  EmailVerificationToken,
+  PasswordResetToken,
+  TokenBlacklist,
+  SecurityEvent
 };
 
 // Función de inicialización para usar en la aplicación

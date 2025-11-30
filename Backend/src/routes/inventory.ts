@@ -5,8 +5,8 @@ import { Op, WhereOptions } from 'sequelize';
 import { 
   authenticateToken, 
   authorizeRoles, 
-  UserRole
 } from '../middleware/auth';
+import { UserRole } from '../models/User';
 
 import { validate, validateId, sanitizeInput } from '../middleware/validation';
 
@@ -347,7 +347,7 @@ router.get('/medicines/:id',
  */
 router.post('/medicines',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'name',
@@ -413,7 +413,7 @@ router.post('/medicines',
  */
 router.put('/medicines/:id',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'id',
@@ -468,7 +468,7 @@ router.put('/medicines/:id',
  */
 router.delete('/medicines/:id',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'id',
@@ -556,7 +556,7 @@ router.get('/stock/levels',
  */
 router.post('/stock/movement',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   validateFields([
     {
       field: 'medicineId',
@@ -789,7 +789,7 @@ router.put('/alerts/:id/resolve',
  */
 router.get('/reports/stock-valuation',
   authenticateToken,
-  authorizeRoles(UserRole.ADMIN, UserRole.MANAGER),
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
   auditLog('inventory.reports.stock_valuation'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

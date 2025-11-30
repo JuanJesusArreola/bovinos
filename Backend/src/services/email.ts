@@ -1,12 +1,8 @@
-// Interfaces temporales para nodemailer
-interface MockTransporter {
-  sendMail: (options: any) => Promise<{ messageId: string }>;
-}
+import nodemailer from 'nodemailer';
+import handlebars from 'handlebars';
+import logger from '../utils/logger';
 
-interface MockNodemailer {
-  createTransporter: (config: any) => MockTransporter;
-}
-
+/*
 // Mock temporal de nodemailer
 const nodemailer: MockNodemailer = {
   createTransporter: (config: any) => ({
@@ -29,16 +25,13 @@ const handlebars = {
     };
   }
 };
-
-// Usar el sistema de logging real
-import { logInfo, logError, logWarn } from '../utils/logger';
-
-// Logger adaptador para mantener compatibilidad
+*/
+/* Logger adaptador para mantener compatibilidad
 const logger = {
   info: (message: string, metadata?: any) => logInfo(message, metadata, 'EmailService'),
   error: (message: string, error?: any) => logError(message, { error }, error as Error, 'EmailService'),
   warn: (message: string, metadata?: any) => logWarn(message, metadata, 'EmailService')
-};
+};*/
 
 // Enums para tipos de email
 enum EmailType {
@@ -51,7 +44,8 @@ enum EmailType {
   EMERGENCY_ALERT = 'emergency_alert',
   REGISTRATION_CONFIRMATION = 'registration_confirmation',
   ACCOUNT_LOCKED = 'account_locked',
-  PROFILE_UPDATED = 'profile_updated'
+  PROFILE_UPDATED = 'profile_updated',
+   EMAIL_VERIFICATION = 'email_verification'
 }
 
 enum EmailPriority {
@@ -192,17 +186,28 @@ interface WeeklyReportData {
 }
 
 class EmailService {
-  private transporter!: MockTransporter; // Usamos definite assignment assertion
+  private transporter!: nodemailer.Transporter; // Usamos definite assignment assertion
   private emailQueue: EmailQueueItem[] = [];
   private templates: Map<EmailType, EmailTemplate> = new Map();
   private isProcessingQueue = false;
   private config!: EmailConfig; // También para config
 
   constructor() {
-    this.initializeConfig();
-    this.initializeTransporter();
-    this.loadEmailTemplates();
-    this.startQueueProcessor();
+    //Inicializa en segundo plano
+    this.initialize();
+  }
+
+  private async initialize(): Promise<void> {
+    try {
+      this.initializeConfig();
+      await this.initializeTransporter();
+      await this.loadEmailTemplates();
+      this.startQueueProcessor();
+
+      logger.info('Servicio de correo inicializado completamente', 'EmailService');
+    } catch (error) {
+      logger.error('Error al inicializar EmailService', 'EmailService', {}, error as Error);
+    }
   }
 
   /**
@@ -225,7 +230,7 @@ class EmailService {
    */
   private initializeTransporter(): void {
     try {
-      this.transporter = nodemailer.createTransporter({
+      this.transporter = nodemailer.createTransport({
         host: this.config.host,
         port: this.config.port,
         secure: this.config.secure,
@@ -238,13 +243,28 @@ class EmailService {
         }
       });
 
-      logger.info('Transportador de email inicializado correctamente', {
-        host: this.config.host,
-        port: this.config.port,
-        secure: this.config.secure
+      // Prueba de conexión SMTP en segundo plano
+      this.transporter.verify((error, success) => {
+        if (error) {
+          logger.error('Error al conectar con el servidor SMTP', 'EmailService', {
+            host: this.config.host,
+            user: this.config.user,
+            error: error.message
+          });
+        } else {
+          logger.info('Conexión SMTP verificada correctamente', 'EmailService', {
+            host: this.config.host,
+            port: this.config.port,
+            secure: this.config.secure
+          });
+        }
       });
+
     } catch (error) {
-      logger.error('Error inicializando transportador de email', error);
+      logger.error('Error inicializando transportador de email', 'EmailService', {
+        host: this.config.host,
+        user: this.config.user
+      }, error as Error);
       throw error;
     }
   }
@@ -290,14 +310,37 @@ class EmailService {
         variables: {}
       });
 
-      logger.info('Plantillas de email cargadas correctamente', {
+      this.templates.set(EmailType.EMAIL_VERIFICATION, {
+        subject: 'Verifica tu cuenta - Sistema Ganadero UJAT',
+        html: this.getEmailVerificationTemplate(),
+        text: 'Hola {{firstName}}, verifica tu cuenta usando este enlace: {{verificationLink}}',
+        variables: {}
+      });
+
+      logger.info('Plantillas de email cargadas correctamente', 'EmailService', {
         templateCount: this.templates.size
       });
     } catch (error) {
-      logger.error('Error cargando plantillas de email', error);
+      logger.error('Error cargando plantillas de email', 'EmailService', { email: this.config.user }, error as Error);
       throw error;
     }
   }
+
+  /**
+ * Convierte la prioridad interna a la prioridad de Nodemailer, evita conflictos con el tipo de prioridad de Nodemailer
+ */
+  private mapPriority(priority?: EmailPriority): 'low' | 'normal' | 'high' | undefined {
+    switch (priority) {
+      case EmailPriority.CRITICAL:
+      case EmailPriority.HIGH:
+        return 'high';
+      case EmailPriority.LOW:
+        return 'low';
+      default:
+        return 'normal';
+    }
+  }
+
 
   /**
    * Envía un email de bienvenida al usuario
@@ -321,10 +364,10 @@ class EmailService {
       };
 
       await this.queueEmail(EmailType.WELCOME, emailOptions);
-      logger.info(`Email de bienvenida encolado para ${email}`, { firstName });
+      logger.info(`Email de bienvenida encolado para ${email}`, 'EmailService', { email, firstName });
 
     } catch (error) {
-      logger.error(`Error enviando email de bienvenida a ${email}`, error);
+      logger.error(`Error enviando email de bienvenida a ${email}`, 'EmailService', { email }, error as Error);
       throw error;
     }
   }
@@ -354,13 +397,57 @@ class EmailService {
       };
 
       await this.queueEmail(EmailType.PASSWORD_RESET, emailOptions);
-      logger.info(`Email de reset de contraseña encolado para ${email}`, { firstName, resetToken: 'hidden' });
+      logger.info(`Email de reset de contraseña encolado para ${email}`, 'EmailService', { email, firstName, resetToken: 'hidden' });
 
     } catch (error) {
-      logger.error(`Error enviando email de reset de contraseña a ${email}`, error);
+      logger.error(`Error enviando email de reset de contraseña a ${email}`, 'EmailService', { email }, error as Error);
       throw error;
     }
   }
+
+  /**
+ * Envía email de verificación de cuenta
+ * @param email - Email del destinatario
+ * @param verificationToken - Token de verificación
+ * @param firstName - Nombre del usuario
+ * @returns Promise<void>
+ */
+async sendEmailVerification(email: string, verificationToken: string, firstName: string): Promise<void> {
+  try {
+    const template = this.templates.get(EmailType.EMAIL_VERIFICATION);
+    if (!template) {
+      throw new Error('Plantilla de verificación de email no encontrada');
+    }
+
+    const verificationLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/verify-email?token=${verificationToken}`;
+
+    const emailOptions: EmailOptions = {
+      to: email,
+      subject: template.subject,
+      html: this.processTemplate(template.html, { 
+        firstName, 
+        verificationLink,
+        year: new Date().getFullYear()
+      }),
+      text: this.processTemplate(template.text, { 
+        firstName, 
+        verificationLink 
+      }),
+      priority: EmailPriority.HIGH
+    };
+
+    await this.sendEmailImmediate(emailOptions);
+    logger.info(`Email de verificación encolado para ${email}`, 'EmailService', { 
+      email, 
+      firstName, 
+      token: 'hidden' 
+    });
+
+  } catch (error) {
+    logger.error(`Error enviando email de verificación a ${email}`, 'EmailService', { email }, error as Error);
+    throw error;
+  }
+}
 
   /**
    * Envía recordatorio de vacunación
@@ -400,14 +487,14 @@ class EmailService {
       };
 
       await this.queueEmail(EmailType.VACCINATION_REMINDER, emailOptions);
-      logger.info(`Recordatorio de vacunación encolado para ${email}`, {
+      logger.info(`Recordatorio de vacunación encolado para ${email}`, 'EmailService', {
         bovineEarTag: reminderData.bovineEarTag,
         vaccineType: reminderData.vaccineType,
         daysUntilDue
       });
 
     } catch (error) {
-      logger.error(`Error enviando recordatorio de vacunación a ${email}`, error);
+      logger.error(`Error enviando recordatorio de vacunación a ${email}`, 'EmailService', { email }, error as Error);
       throw error;
     }
   }
@@ -442,14 +529,14 @@ class EmailService {
 
       // Las alertas críticas se envían inmediatamente
       await this.sendEmailImmediate(emailOptions);
-      logger.info(`Alerta de salud enviada inmediatamente a ${email}`, {
+      logger.info(`Alerta de salud enviada inmediatamente a ${email}`, 'EmailService', {
         bovineEarTag: alertData.bovineEarTag,
         severity: alertData.severity,
         healthStatus: alertData.healthStatus
       });
 
     } catch (error) {
-      logger.error(`Error enviando alerta de salud a ${email}`, error);
+      logger.error(`Error enviando alerta de salud a ${email}`, 'EmailService', { email }, error as Error);
       throw error;
     }
   }
@@ -467,7 +554,7 @@ class EmailService {
         throw new Error('Plantilla de reporte semanal no encontrada');
       }
 
-      const healthPercentage = reportData.statistics.totalBovines > 0 
+      const healthPercentage = reportData.statistics.totalBovines > 0
         ? Math.round((reportData.statistics.healthyBovines / reportData.statistics.totalBovines) * 100)
         : 0;
 
@@ -487,14 +574,13 @@ class EmailService {
       };
 
       await this.queueEmail(EmailType.WEEKLY_REPORT, emailOptions);
-      logger.info(`Reporte semanal encolado para ${email}`, {
-        ranchName: reportData.ranchName,
+      logger.info(`Reporte semanal encolado para ${email}`, 'EmailService', {
         totalBovines: reportData.statistics.totalBovines,
         healthPercentage
       });
 
     } catch (error) {
-      logger.error(`Error enviando reporte semanal a ${email}`, error);
+      logger.error(`Error enviando reporte semanal a ${email}`, 'EmailService', { email }, error as Error);
       throw error;
     }
   }
@@ -513,7 +599,7 @@ class EmailService {
 
       for (const recipient of bulkOptions.recipients) {
         const variables = { ...bulkOptions.variables, ...recipient.variables };
-        
+
         const emailOptions: EmailOptions = {
           to: recipient.email,
           subject: this.processTemplate(template.subject, variables),
@@ -529,14 +615,14 @@ class EmailService {
         }
       }
 
-      logger.info(`${bulkOptions.recipients.length} emails en lote encolados`, {
+      logger.info(`${bulkOptions.recipients.length} emails en lote encolados`, 'EmailService', {
         template: bulkOptions.template,
         recipientCount: bulkOptions.recipients.length,
         scheduledFor: bulkOptions.sendAt
       });
 
     } catch (error) {
-      logger.error('Error enviando emails en lote', error);
+      logger.error('Error enviando emails en lote', 'EmailService', { bulkOptions }, error as Error);
       throw error;
     }
   }
@@ -596,17 +682,18 @@ class EmailService {
     try {
       const mailOptions = {
         from: `${this.config.fromName} <${this.config.fromEmail}>`,
-        ...options
+        ...options,
+        priority: this.mapPriority(options.priority)
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      logger.info(`Email enviado inmediatamente a ${options.to}`, {
+      logger.info(`Email enviado inmediatamente a ${options.to}`, 'EmailService', {
         messageId: result.messageId,
         subject: options.subject
       });
 
     } catch (error) {
-      logger.error(`Error enviando email inmediato a ${options.to}`, error);
+      logger.error(`Error enviando email inmediato a ${options.to}`, 'EmailService', { email: options.to }, error as Error);
       throw error;
     }
   }
@@ -639,7 +726,7 @@ class EmailService {
           .slice(-1000);
 
       } catch (error) {
-        logger.error('Error procesando cola de emails', error);
+        logger.error('Error procesando cola de emails', 'EmailService', {}, error as Error);
       }
 
       // Procesar cada 30 segundos
@@ -661,13 +748,15 @@ class EmailService {
 
       const mailOptions = {
         from: `${this.config.fromName} <${this.config.fromEmail}>`,
-        ...item.options
+        ...item.options,
+        priority: this.mapPriority(item.options.priority)
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      
+
       item.status = 'sent';
-      logger.info(`Email enviado desde cola a ${item.options.to}`, {
+      logger.info(`Email enviado desde cola a ${item.options.to}`, 'EmailService', {
+        email: item.options.to,
         messageId: result.messageId,
         type: item.type,
         attempts: item.attempts
@@ -675,12 +764,12 @@ class EmailService {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      logger.error(`Error enviando email desde cola (intento ${item.attempts})`, {
+      logger.error(`Error enviando email desde cola (intento ${item.attempts})`, 'EmailService', {
         error: errorMessage,
         emailTo: item.options.to,
         type: item.type
       });
-      
+
       if (item.attempts >= item.maxAttempts) {
         item.status = 'failed';
         item.error = errorMessage;
@@ -710,16 +799,16 @@ class EmailService {
    */
   async getEmailStatistics(days: number = 7): Promise<EmailStatistics> {
     const cutoffDate = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
-    
+
     const recentEmails = this.emailQueue.filter(item => item.createdAt >= cutoffDate);
-    
+
     const totalSent = recentEmails.filter(item => item.status === 'sent').length;
     const totalFailed = recentEmails.filter(item => item.status === 'failed').length;
     const totalPending = recentEmails.filter(item => item.status === 'pending').length;
-    
+
     const totalEmails = recentEmails.length;
     const deliveryRate = totalEmails > 0 ? (totalSent / totalEmails) * 100 : 0;
-    
+
     const lastSentEmail = recentEmails
       .filter(item => item.status === 'sent')
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
@@ -837,6 +926,71 @@ class EmailService {
             <li>💉 Vacunaciones vencidas: {{alerts.vaccinationsDue}}</li>
             <li>🏥 Problemas de salud: {{alerts.healthConcerns}}</li>
           </ul>
+        </div>
+      </div>
+    `;
+  }
+
+  private getEmailVerificationTemplate(): string {
+    return `
+      <div style="max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif;">
+        <div style="background: linear-gradient(135deg, #16a34a 0%, #059669 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h1 style="color: white; margin: 0; font-size: 28px;">🐄 Sistema Ganadero UJAT</h1>
+          <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Verifica tu cuenta</p>
+        </div>
+        
+        <div style="background: white; padding: 40px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          <h2 style="color: #16a34a; margin-top: 0;">¡Hola {{firstName}}! 👋</h2>
+          
+          <p style="font-size: 16px; line-height: 1.6; color: #374151;">
+            Gracias por registrarte en el <strong>Sistema Ganadero UJAT</strong>. 
+            Para completar tu registro y acceder a todas las funcionalidades, 
+            necesitas verificar tu dirección de email.
+          </p>
+  
+          <div style="text-align: center; margin: 40px 0;">
+            <a href="{{verificationLink}}" 
+               style="background: linear-gradient(135deg, #16a34a 0%, #059669 100%); 
+                      color: white; 
+                      padding: 15px 30px; 
+                      text-decoration: none; 
+                      border-radius: 8px; 
+                      font-weight: bold; 
+                      font-size: 16px;
+                      display: inline-block;
+                      box-shadow: 0 4px 6px rgba(22, 163, 74, 0.3);">
+              ✅ Verificar mi cuenta
+            </a>
+          </div>
+  
+          <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin: 30px 0;">
+            <p style="margin: 0; font-size: 14px; color: #6b7280;">
+              <strong>¿El botón no funciona?</strong><br>
+              Copia y pega este enlace en tu navegador:
+            </p>
+            <p style="word-break: break-all; color: #16a34a; font-family: monospace; font-size: 12px; margin: 10px 0 0 0;">
+              {{verificationLink}}
+            </p>
+          </div>
+  
+          <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
+            <p style="font-size: 14px; color: #6b7280; margin: 0;">
+              <strong>⏰ Importante:</strong> Este enlace expira en <strong>24 horas</strong> por seguridad.
+            </p>
+            <p style="font-size: 14px; color: #6b7280; margin: 10px 0 0 0;">
+              <strong>❓ ¿No creaste esta cuenta?</strong> Puedes ignorar este email de forma segura.
+            </p>
+          </div>
+        </div>
+  
+        <div style="text-align: center; padding: 20px; color: #6b7280; font-size: 12px;">
+          <p style="margin: 0;">
+            © {{year}} Universidad Juárez Autónoma de Tabasco<br>
+            Sistema Ganadero UJAT - Gestión Inteligente de Ganado
+          </p>
+          <p style="margin: 10px 0 0 0;">
+            Este es un email automático, por favor no respondas a este mensaje.
+          </p>
         </div>
       </div>
     `;

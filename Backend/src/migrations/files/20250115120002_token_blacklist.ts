@@ -23,7 +23,7 @@ export const up = async (queryInterface: QueryInterface): Promise<void> => {
     },
     user_id: {
       type: DataTypes.UUID,
-      allowNull: true,
+      allowNull: false,
       references: {
         model: 'users',
         key: 'id'

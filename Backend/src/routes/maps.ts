@@ -3,7 +3,7 @@ import { authenticateToken } from '../middleware/auth';
 import { validate as validationMiddleware } from '../middleware/validation';
 import { createRateLimit, EndpointType } from '../middleware/rate-limit';
 import { requireMinimumRole as roleMiddleware } from '../middleware/role';
-import { UserRole } from '../middleware/auth';
+import { UserRole } from '../models/User';
 
 // ===================================================================
 // EXTENDER EL TIPO REQUEST PARA PROPIEDADES DE MAPAS
@@ -574,7 +574,7 @@ router.get('/geofences',
  * Crea una nueva geocerca
  */
 router.post('/geofences',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.CATTLE_WRITE),
   validateCoordinates,
   validationMiddleware('search'),
@@ -721,7 +721,7 @@ router.get('/movement-patterns',
  * Exporta datos geográficos en diferentes formatos
  */
 router.get('/export-data',
-  roleMiddleware(UserRole.ADMIN),
+  roleMiddleware(UserRole.SUPER_ADMIN),
   createRateLimit(EndpointType.REPORTS),
   validationMiddleware('search'),
   (req: Request, res: Response) => {

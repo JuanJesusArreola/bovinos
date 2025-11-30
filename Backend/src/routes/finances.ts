@@ -4,8 +4,8 @@ import {
   authorizeRoles, 
   checkPermission, 
   requireActiveSubscription,
-  UserRole 
 } from '../middleware/auth';
+import { UserRole } from '../models/User';
 import { validate, sanitizeInput, validateId } from '../middleware/validation';
 import { createRateLimit, EndpointType } from '../middleware/rate-limit';
 import { 
@@ -1321,7 +1321,7 @@ router.get('/transactions', requireFinancialAccess, createRateLimit(EndpointType
 router.post('/transactions', requireModulePermission('finances', 'create'), createRateLimit(EndpointType.CATTLE_WRITE), financialUpload.multiple('receipts', 10), processUploadedFiles(FileCategory.FINANCIAL_DOCS), simulateMiddleware('accounting'), simulateMiddleware('taxCalculation'), simulateMiddleware('budgetControl'), simulateMiddleware('exchangeRate'), validate('search'), financesController.createTransaction);
 router.get('/transactions/:id', validateId('id'), requireFinancialAccess, createRateLimit(EndpointType.CATTLE_READ), financesController.getTransactionById);
 router.put('/transactions/:id', validateId('id'), requireFinancialAccess, createRateLimit(EndpointType.CATTLE_WRITE), financialUpload.multiple('receipts', 10), processUploadedFiles(FileCategory.FINANCIAL_DOCS), simulateMiddleware('accounting'), simulateMiddleware('taxCalculation'), validate('search'), financesController.updateTransaction);
-router.delete('/transactions/:id', validateId('id'), requireExactRoles(UserRole.OWNER, UserRole.ADMIN), createRateLimit(EndpointType.CATTLE_WRITE), financesController.deleteTransaction);
+router.delete('/transactions/:id', validateId('id'), requireExactRoles(UserRole.OWNER, UserRole.SUPER_ADMIN), createRateLimit(EndpointType.CATTLE_WRITE), financesController.deleteTransaction);
 
 router.get('/income', requireFinancialAccess, createRateLimit(EndpointType.REPORTS), financesController.getIncomeOverview);
 router.post('/income/sale', requireFinancialAccess, createRateLimit(EndpointType.CATTLE_WRITE), financialUpload.multiple('saleDocuments', 15), processUploadedFiles(FileCategory.FINANCIAL_DOCS), simulateMiddleware('accounting'), simulateMiddleware('taxCalculation'), financesController.recordSale);
@@ -1389,7 +1389,7 @@ router.get('/kpis', requireFinancialAccess, createRateLimit(EndpointType.CATTLE_
 router.get('/alerts', requireFinancialAccess, createRateLimit(EndpointType.CATTLE_READ), financesController.getFinancialAlerts);
 
 router.get('/settings', requireFinancialAccess, createRateLimit(EndpointType.CATTLE_READ), financesController.getFinancialSettings);
-router.put('/settings', requireExactRoles(UserRole.OWNER, UserRole.ADMIN), createRateLimit(EndpointType.CATTLE_WRITE), financesController.updateFinancialSettings);
+router.put('/settings', requireExactRoles(UserRole.OWNER, UserRole.SUPER_ADMIN), createRateLimit(EndpointType.CATTLE_WRITE), financesController.updateFinancialSettings);
 router.post('/export', requireFinancialAccess, createRateLimit(EndpointType.FILES), financesController.exportFinancialData);
 router.get('/export/:exportId/download', validateId('exportId'), requireFinancialAccess, createRateLimit(EndpointType.FILES), financesController.downloadFinancialExport);
 
