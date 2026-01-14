@@ -9,7 +9,8 @@ import Bovine, {
   ReproductiveInfo,
   TrackingConfig,
   BovineAttributes,
-  BovineCreationAttributes
+  BovineCreationAttributes,
+  DiseaseEventData
 } from '../models/Bovine';
 
 // Importaciones correctas usando export default
@@ -28,7 +29,7 @@ const bovineLogger = {
   warn: (message: string, metadata?: any) => logger.warn(message, 'BovineService', metadata)
 };
 // Enums para eventos (mantenemos esto por ahora hasta usar el modelo Event real)
-enum EventType {
+/*enum EventType {
   VACCINATION = "vaccination",
   ILLNESS = "illness",
   REPRODUCTIVE = "reproductive",
@@ -40,13 +41,13 @@ enum EventType {
   PREGNANCY_CHECK = "pregnancy_check",
   BIRTH = "birth",
   DEATH = "death"
-}
+}*/
 
 enum IllnessSeverity {
-  MILD = "mild",
-  MODERATE = "moderate",
-  SEVERE = "severe",
-  CRITICAL = "critical"
+  MILD = "MILD",
+  MODERATE = "MODERATE",
+  SEVERE = "SEVERE",
+  CRITICAL = "CRITICAL"
 }
 
 // Interfaces que usan los tipos del modelo real
