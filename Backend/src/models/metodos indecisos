@@ -1,0 +1,397 @@
+/**
+   * Verifica si la ubicación necesita inspección
+   * @returns True si necesita inspección
+   */
+  public needsInspection(): boolean {
+    if (!this.nextInspectionDate) return true;
+    return new Date() >= new Date(this.nextInspectionDate);
+  }
+
+  /**
+   * Obtiene la capacidad disponible de animales
+   * @returns Capacidad disponible
+   */
+  public getAvailableCapacity(): number {
+    if (!this.capacity?.maxAnimals) return 0;
+    const current = this.capacity.currentAnimals || 0;
+    return Math.max(0, this.capacity.maxAnimals - current);
+  }
+
+  /**
+   * Verifica si la ubicación está en capacidad máxima
+   * @returns True si está en capacidad máxima
+   */
+  public isAtCapacity(): boolean {
+    return this.getAvailableCapacity() === 0;
+  }
+
+  /**
+   * Calcula el porcentaje de ocupación
+   * @returns Porcentaje de ocupación (0-100)
+   */
+  public getOccupancyPercentage(): number {
+    if (!this.capacity?.maxAnimals) return 0;
+    const current = this.capacity.currentAnimals || 0;
+    return Math.min((current / this.capacity.maxAnimals) * 100, 100);
+  }
+
+  /**
+   * Obtiene la dirección completa formateada
+   * @returns Dirección completa
+   */
+  public getFullAddress(): string {
+    const parts = [
+      this.address,
+      this.city,
+      this.state,
+      this.country,
+      this.postalCode
+    ].filter(Boolean);
+    
+    return parts.join(', ');
+  }
+
+  /**
+   * Verifica si la ubicación está operativa
+   * @returns True si está operativa
+   */
+  public isOperational(): boolean {
+    return this.isActive && 
+           this.status === LocationStatus.ACTIVE &&
+           !this.hasAlerts;
+  }
+
+  /**
+   * Obtiene los contactos de emergencia disponibles
+   * @returns Contactos de emergencia disponibles 24h
+   */
+  public getAvailableEmergencyContacts(): Array<{
+    name: string;
+    phone: string;
+    role: string;
+  }> {
+    if (!this.emergencyInfo?.emergencyContacts) return [];
+    
+    return this.emergencyInfo.emergencyContacts
+      .filter(contact => contact.isAvailable24h)
+      .map(contact => ({
+        name: contact.name,
+        phone: contact.phone,
+        role: contact.role
+      }));
+  }
+
+  /**
+   * Verifica si la ubicación está abierta en un horario específico
+   * @param date Fecha a verificar
+   * @returns True si está abierta
+   */
+  public isOpenAt(date: Date): boolean {
+    if (!this.services?.operatingHours) return true; // Si no hay horarios definidos, asumimos que está abierta
+    
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayName = dayNames[date.getDay()] as keyof typeof this.services.operatingHours;
+    const dayHours = this.services.operatingHours[dayName];
+    
+    if (!dayHours) return false;
+    
+    const currentTime = date.getHours() * 60 + date.getMinutes();
+    const [openHour, openMinute] = dayHours.open.split(':').map(Number);
+    const [closeHour, closeMinute] = dayHours.close.split(':').map(Number);
+    const openTime = openHour * 60 + openMinute;
+    const closeTime = closeHour * 60 + closeMinute;
+    
+    return currentTime >= openTime && currentTime <= closeTime;
+  }
+
+  
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'Descripción detallada de la ubicación'
+    },
+
+    
+    status: {
+      type: DataTypes.ENUM(...Object.values(LocationStatus)),
+      allowNull: false,
+      defaultValue: LocationStatus.ACTIVE,
+      comment: 'Estado de la ubicación'
+    },
+
+    
+    address: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+      comment: 'Dirección física'
+    },
+    city: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      comment: 'Ciudad'
+    },
+    state: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      comment: 'Estado o provincia'
+    },
+    country: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      defaultValue: 'México',
+      comment: 'País'
+    },
+    postalCode: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+      comment: 'Código postal'
+    },
+
+    
+    status: {
+      type: DataTypes.ENUM(...Object.values(LocationStatus)),
+      allowNull: false,
+      defaultValue: LocationStatus.ACTIVE,
+      comment: 'Estado de la ubicación'
+    },
+
+    
+    timezone: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      defaultValue: 'America/Mexico_City',
+      comment: 'Zona horaria'
+    },
+
+    
+    capacity: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      comment: 'Capacidad y características de la ubicación'
+    },
+    accessLevel: {
+      type: DataTypes.ENUM(...Object.values(AccessLevel)),
+      allowNull: false,
+      defaultValue: AccessLevel.PRIVATE,
+      comment: 'Nivel de acceso a la ubicación'
+    },
+
+    
+    relatedLocations: {
+      type: DataTypes.ARRAY(DataTypes.UUID),
+      allowNull: true,
+      defaultValue: [],
+      comment: 'IDs de ubicaciones relacionadas'
+    },
+    
+    emergencyInfo: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      comment: 'Información de emergencia'
+    },
+    services: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      comment: 'Servicios y facilidades disponibles'
+    },
+
+    
+    lastInspectionDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'Fecha de la última inspección'
+    },
+    nextInspectionDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'Fecha de la próxima inspección'
+    },
+    inspectionNotes: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'Notas de la última inspección'
+    },
+    images: {
+      type: DataTypes.ARRAY(DataTypes.STRING),
+      allowNull: true,
+      defaultValue: [],
+      comment: 'URLs de imágenes de la ubicación'
+    },
+    documents: {
+      type: DataTypes.ARRAY(DataTypes.STRING),
+      allowNull: true,
+      defaultValue: [],
+      comment: 'URLs de documentos relacionados'
+    },
+    videos: {
+      type: DataTypes.ARRAY(DataTypes.STRING),
+      allowNull: true,
+      defaultValue: [],
+      comment: 'URLs de videos de la ubicación'
+    },
+    maps: {
+      type: DataTypes.ARRAY(DataTypes.STRING),
+      allowNull: true,
+      defaultValue: [],
+      comment: 'URLs de mapas específicos'
+    },
+    tags: {
+      type: DataTypes.ARRAY(DataTypes.STRING),
+      allowNull: true,
+      defaultValue: [],
+      comment: 'Etiquetas para categorización'
+    },
+    notes: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'Notas adicionales sobre la ubicación'
+    },
+
+    
+    isMonitored: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      comment: 'Si la ubicación está siendo monitoreada'
+    },
+    hasAlerts: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      comment: 'Si tiene alertas activas'
+    },
+    lastAlertDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'Fecha de la última alerta'
+    },
+    farmId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: 'ID de la finca principal'
+    },
+    ownerId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: 'ID del propietario'
+    },
+    managerId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: 'ID del administrador'
+    },
+
+    // Validar que las fechas de inspección sean coherentes
+    if (location.lastInspectionDate && location.nextInspectionDate) {
+      if (location.nextInspectionDate <= location.lastInspectionDate) {
+        throw new Error('La próxima inspección debe ser posterior a la última inspección');
+      }
+    }
+
+    // Validar capacidad si está definida
+    if (location.capacity?.maxAnimals && location.capacity?.currentAnimals) {
+      if (location.capacity.currentAnimals > location.capacity.maxAnimals) {
+        throw new Error('Los animales actuales no pueden exceder la capacidad máxima');
+      }
+    }
+
+    // Interface para capacidad y características
+export interface LocationCapacity {
+  maxAnimals?: number;                   // Máximo número de animales
+  currentAnimals?: number;               // Número actual de animales
+  area?: number;                         // Área en metros cuadrados
+  areaUnit?: 'M2' | 'HA' | 'ACRE';      // Unidad de área
+  capacity?: number;                     // Capacidad general
+  capacityUnit?: string;                 // Unidad de capacidad
+  carryingCapacity?: number;             // Capacidad de carga (animales/ha)
+  waterSources?: number;                 // Número de fuentes de agua
+  feedingStations?: number;              // Número de estaciones de alimentación
+  shelters?: number;                     // Número de refugios
+  hasElectricity?: boolean;              // Si tiene electricidad
+  hasWater?: boolean;                    // Si tiene agua
+  hasInternet?: boolean;                 // Si tiene internet
+  hasRoadAccess?: boolean;               // Si tiene acceso por carretera
+  securityLevel?: 'LOW' | 'MEDIUM' | 'HIGH'; // Nivel de seguridad
+}
+
+// Interface para información de contacto de emergencia
+export interface EmergencyInfo {
+  emergencyContacts?: Array<{            // Contactos de emergencia
+    name: string;
+    phone: string;
+    role: string;
+    isAvailable24h: boolean;
+  }>;
+  nearestHospital?: {                    // Hospital más cercano
+    name: string;
+    address: string;
+    phone: string;
+    distance: number;                    // Distancia en km
+  };
+  nearestVeterinary?: {                  // Veterinaria más cercana
+    name: string;
+    address: string;
+    phone: string;
+    distance: number;
+  };
+  emergencyProcedures?: string[];        // Procedimientos de emergencia
+  evacuationPlan?: string;               // Plan de evacuación
+  assemblyPoint?: Coordinates;           // Punto de reunión
+}
+
+// Interface para servicios y facilidades
+export interface LocationServices {
+  services: string[];                    // Servicios disponibles
+  facilities: string[];                 // Instalaciones disponibles
+  equipment: string[];                   // Equipos disponibles
+  operatingHours?: {                     // Horarios de operación
+    monday?: { open: string; close: string; };
+    tuesday?: { open: string; close: string; };
+    wednesday?: { open: string; close: string; };
+    thursday?: { open: string; close: string; };
+    friday?: { open: string; close: string; };
+    saturday?: { open: string; close: string; };
+    sunday?: { open: string; close: string; };
+  };
+  maintenance?: {                        // Información de mantenimiento
+    lastMaintenance?: Date;
+    nextMaintenance?: Date;
+    maintenanceSchedule?: string;
+    responsiblePerson?: string;
+  };
+  costs?: {                             // Costos asociados
+    rentCost?: number;
+    maintenanceCost?: number;
+    utilityCost?: number;
+    securityCost?: number;
+    currency?: string;
+  };
+}
+
+export enum AccessLevel {
+  PUBLIC = 'PUBLIC',                     // Público
+  RESTRICTED = 'RESTRICTED',             // Restringido
+  PRIVATE = 'PRIVATE',                   // Privado
+  AUTHORIZED_ONLY = 'AUTHORIZED_ONLY',   // Solo autorizados
+  EMERGENCY_ONLY = 'EMERGENCY_ONLY',     // Solo emergencias
+  STAFF_ONLY = 'STAFF_ONLY',             // Solo personal
+  VETERINARY_ONLY = 'VETERINARY_ONLY',   // Solo veterinarios
+  OWNER_ONLY = 'OWNER_ONLY'              // Solo propietarios
+}
+
+export enum GeometryType {
+  MULTIPOINT = 'MULTIPOINT',
+  MULTIPOLYGON = 'MULTIPOLYGON',
+  MULTILINESTRING = 'MULTILINESTRING',
+  GEOMETRYCOLLECTION = 'GEOMETRYCOLLECTION'
+}
+
+public lastInspectionDate?: Date;
+    public nextInspectionDate?: Date;
+    public inspectionNotes?: string;
+    public monitoringMode: 'MANUAL' | 'AUTOMATED' | 'HYBRID';
+    public lastUpdatedBy?: string;
+
+    public parentLocationId?: string;
+  public relatedLocations?: string[];
+  public relationType: 'CONTAINS' | 'ADJACENT' | 'CONNECTED';

@@ -1,5 +1,6 @@
 import { DataTypes, Model, Optional, Op } from 'sequelize';
 import sequelize from '../config/database';
+import { Geometry } from 'geojson';
 
 // Enums para tipos de ubicaciones
 export enum LocationType {
@@ -66,17 +67,6 @@ export enum AlertTrigger {
   EMERGENCY = 'EMERGENCY'                // Emergencia
 }
 
-export enum AccessLevel {
-  PUBLIC = 'PUBLIC',                     // Público
-  RESTRICTED = 'RESTRICTED',             // Restringido
-  PRIVATE = 'PRIVATE',                   // Privado
-  AUTHORIZED_ONLY = 'AUTHORIZED_ONLY',   // Solo autorizados
-  EMERGENCY_ONLY = 'EMERGENCY_ONLY',     // Solo emergencias
-  STAFF_ONLY = 'STAFF_ONLY',             // Solo personal
-  VETERINARY_ONLY = 'VETERINARY_ONLY',   // Solo veterinarios
-  OWNER_ONLY = 'OWNER_ONLY'              // Solo propietarios
-}
-
 // Interface para coordenadas geográficas
 export interface Coordinates {
   latitude: number;                      // Latitud
@@ -115,106 +105,24 @@ export interface GeofenceConfig {
   alertRecipients?: string[];            // IDs de usuarios a notificar
 }
 
-// Interface para capacidad y características
-export interface LocationCapacity {
-  maxAnimals?: number;                   // Máximo número de animales
-  currentAnimals?: number;               // Número actual de animales
-  area?: number;                         // Área en metros cuadrados
-  areaUnit?: 'M2' | 'HA' | 'ACRE';      // Unidad de área
-  capacity?: number;                     // Capacidad general
-  capacityUnit?: string;                 // Unidad de capacidad
-  carryingCapacity?: number;             // Capacidad de carga (animales/ha)
-  waterSources?: number;                 // Número de fuentes de agua
-  feedingStations?: number;              // Número de estaciones de alimentación
-  shelters?: number;                     // Número de refugios
-  hasElectricity?: boolean;              // Si tiene electricidad
-  hasWater?: boolean;                    // Si tiene agua
-  hasInternet?: boolean;                 // Si tiene internet
-  hasRoadAccess?: boolean;               // Si tiene acceso por carretera
-  securityLevel?: 'LOW' | 'MEDIUM' | 'HIGH'; // Nivel de seguridad
-}
-
-// Interface para información de contacto de emergencia
-export interface EmergencyInfo {
-  emergencyContacts?: Array<{            // Contactos de emergencia
-    name: string;
-    phone: string;
-    role: string;
-    isAvailable24h: boolean;
-  }>;
-  nearestHospital?: {                    // Hospital más cercano
-    name: string;
-    address: string;
-    phone: string;
-    distance: number;                    // Distancia en km
-  };
-  nearestVeterinary?: {                  // Veterinaria más cercana
-    name: string;
-    address: string;
-    phone: string;
-    distance: number;
-  };
-  emergencyProcedures?: string[];        // Procedimientos de emergencia
-  evacuationPlan?: string;               // Plan de evacuación
-  assemblyPoint?: Coordinates;           // Punto de reunión
-}
-
-// Interface para servicios y facilidades
-export interface LocationServices {
-  services: string[];                    // Servicios disponibles
-  facilities: string[];                 // Instalaciones disponibles
-  equipment: string[];                   // Equipos disponibles
-  operatingHours?: {                     // Horarios de operación
-    monday?: { open: string; close: string; };
-    tuesday?: { open: string; close: string; };
-    wednesday?: { open: string; close: string; };
-    thursday?: { open: string; close: string; };
-    friday?: { open: string; close: string; };
-    saturday?: { open: string; close: string; };
-    sunday?: { open: string; close: string; };
-  };
-  maintenance?: {                        // Información de mantenimiento
-    lastMaintenance?: Date;
-    nextMaintenance?: Date;
-    maintenanceSchedule?: string;
-    responsiblePerson?: string;
-  };
-  costs?: {                             // Costos asociados
-    rentCost?: number;
-    maintenanceCost?: number;
-    utilityCost?: number;
-    securityCost?: number;
-    currency?: string;
-  };
-}
-
 // Atributos del modelo Location
 export interface LocationAttributes {
   id: string;
   locationCode: string;                  // Código único de la ubicación
   name: string;                          // Nombre de la ubicación
-  description?: string;                  // Descripción detallada
-  type: LocationType;                    // Tipo de ubicación
-  status: LocationStatus;                // Estado de la ubicación
-  coordinates: Coordinates;              // Coordenadas geográficas principales
-  address?: string;                      // Dirección física
-  city?: string;                         // Ciudad
-  state?: string;                        // Estado/Provincia
-  country?: string;                      // País
-  postalCode?: string;                   // Código postal
-  timezone?: string;                     // Zona horaria
+  ranchId: string;           // FK a Ranch (OBLIGATORIO)
+  type: LocationType;        // PASTURE, CORRAL, BARN, etc. (SIN FARM)
+
+  parentLocationId?: string; // Auto-relación (sub-ubicaciones)
+
+  geom: Geometry;
+  coordinates: Coordinates;
   geofenceConfig?: GeofenceConfig;       // Configuración de geofencing
-  capacity?: LocationCapacity;           // Capacidad y características
-  accessLevel: AccessLevel;              // Nivel de acceso
-  parentLocationId?: string;             // ID de ubicación padre
-  relatedLocations?: string[];           // IDs de ubicaciones relacionadas
-  emergencyInfo?: EmergencyInfo;         // Información de emergencia
-  services?: LocationServices;           // Servicios y facilidades
-  weatherStationId?: string;             // ID de estación meteorológica
-  soilType?: string;                     // Tipo de suelo
-  elevation?: number;                    // Elevación en metros
-  slope?: number;                        // Pendiente en grados
-  vegetation?: string[];                 // Tipos de vegetación
+
+  soilType?: string;               // ✓ Tipo de suelo (no cambia)
+  elevation?: number;              // ✓ Elevación (permanente)
+  slope?: number;                  // ✓ Pendiente (permanente)
+  vegetation?: string[];           // ✓ Vegetación predominante
   waterSources?: Array<{                 // Fuentes de agua
     type: 'WELL' | 'RIVER' | 'POND' | 'STREAM' | 'SPRING' | 'TANK';
     name: string;
@@ -223,66 +131,42 @@ export interface LocationAttributes {
     quality?: 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR';
   }>;
   pastureQuality?: 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR'; // Calidad del pastizal
-  lastInspectionDate?: Date;             // Fecha de última inspección
-  nextInspectionDate?: Date;             // Fecha de próxima inspección
-  inspectionNotes?: string;              // Notas de inspección
-  images?: string[];                     // URLs de imágenes
-  documents?: string[];                  // URLs de documentos
-  videos?: string[];                     // URLs de videos
-  maps?: string[];                       // URLs de mapas
-  tags?: string[];                       // Etiquetas para categorización
-  notes?: string;                        // Notas adicionales
-  isActive: boolean;                     // Si la ubicación está activa
-  isMonitored: boolean;                  // Si está siendo monitoreada
-  hasAlerts: boolean;                    // Si tiene alertas activas
-  lastAlertDate?: Date;                  // Fecha de última alerta
-  farmId?: string;                       // ID de la finca principal
-  ownerId?: string;                      // ID del propietario
-  managerId?: string;                    // ID del administrador
-  createdBy: string;                     // ID del usuario que creó
-  updatedBy?: string;                    // ID del usuario que actualizó
+  weatherStationId?: string;             // ID de estación meteorológica
+
+  status: LocationStatus;          // ✓ ACTIVE, INACTIVE, MAINTENANCE
+  isActive: boolean;                // ✓ Soft delete flag
+
+  createdBy: string;
+  updatedBy?: string;
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;
+
 }
 
 // Atributos opcionales al crear una nueva ubicación
-export interface LocationCreationAttributes 
-  extends Optional<LocationAttributes, 
-    'id' | 'description' | 'address' | 'city' | 'state' | 'country' | 
-    'postalCode' | 'timezone' | 'geofenceConfig' | 'capacity' | 
-    'parentLocationId' | 'relatedLocations' | 'emergencyInfo' | 'services' | 
-    'weatherStationId' | 'soilType' | 'elevation' | 'slope' | 'vegetation' | 
-    'waterSources' | 'pastureQuality' | 'lastInspectionDate' | 
-    'nextInspectionDate' | 'inspectionNotes' | 'images' | 'documents' | 
-    'videos' | 'maps' | 'tags' | 'notes' | 'lastAlertDate' | 'farmId' | 
-    'ownerId' | 'managerId' | 'updatedBy' | 'createdAt' | 'updatedAt' | 
+export interface LocationCreationAttributes
+  extends Optional<LocationAttributes,
+    'id' | 'geofenceConfig' | 'parentLocationId' | 'weatherStationId'
+    | 'soilType' | 'elevation' | 'slope' | 'vegetation' |
+    'waterSources' | 'pastureQuality' | 'updatedBy' | 'createdAt' | 'updatedAt' |
     'deletedAt'
-  > {}
+  > { }
 
 // Clase del modelo Location
-class Location extends Model<LocationAttributes, LocationCreationAttributes> 
+class Location extends Model<LocationAttributes, LocationCreationAttributes>
   implements LocationAttributes {
   public id!: string;
   public locationCode!: string;
   public name!: string;
-  public description?: string;
+  public ranchId!: string;
   public type!: LocationType;
+  public geom!: Geometry;
   public status!: LocationStatus;
   public coordinates!: Coordinates;
-  public address?: string;
-  public city?: string;
-  public state?: string;
-  public country?: string;
-  public postalCode?: string;
-  public timezone?: string;
+
   public geofenceConfig?: GeofenceConfig;
-  public capacity?: LocationCapacity;
-  public accessLevel!: AccessLevel;
   public parentLocationId?: string;
-  public relatedLocations?: string[];
-  public emergencyInfo?: EmergencyInfo;
-  public services?: LocationServices;
   public weatherStationId?: string;
   public soilType?: string;
   public elevation?: number;
@@ -296,29 +180,16 @@ class Location extends Model<LocationAttributes, LocationCreationAttributes>
     quality?: 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR';
   }>;
   public pastureQuality?: 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR';
-  public lastInspectionDate?: Date;
-  public nextInspectionDate?: Date;
-  public inspectionNotes?: string;
-  public images?: string[];
-  public documents?: string[];
-  public videos?: string[];
-  public maps?: string[];
-  public tags?: string[];
-  public notes?: string;
+
+
   public isActive!: boolean;
-  public isMonitored!: boolean;
-  public hasAlerts!: boolean;
-  public lastAlertDate?: Date;
-  public farmId?: string;
-  public ownerId?: string;
-  public managerId?: string;
+
   public createdBy!: string;
   public updatedBy?: string;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public deletedAt?: Date;
-  static FARM: LocationType;
-  bovine: null | undefined 
+
 
   // Métodos de instancia
 
@@ -389,16 +260,16 @@ class Location extends Model<LocationAttributes, LocationCreationAttributes>
    */
   public calculateDistanceTo(otherLocation: Coordinates | Location): number {
     const coords = 'coordinates' in otherLocation ? otherLocation.coordinates : otherLocation;
-    
+
     const R = 6371; // Radio de la Tierra en km
     const dLat = this.toRadians(coords.latitude - this.coordinates.latitude);
     const dLon = this.toRadians(coords.longitude - this.coordinates.longitude);
-    
+
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(this.toRadians(this.coordinates.latitude)) * 
-              Math.cos(this.toRadians(coords.latitude)) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    
+      Math.cos(this.toRadians(this.coordinates.latitude)) *
+      Math.cos(this.toRadians(coords.latitude)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
@@ -433,9 +304,9 @@ class Location extends Model<LocationAttributes, LocationCreationAttributes>
       case GeofenceType.RECTANGULAR:
         if (!boundingBox) return false;
         return point.latitude >= boundingBox.south &&
-               point.latitude <= boundingBox.north &&
-               point.longitude >= boundingBox.west &&
-               point.longitude <= boundingBox.east;
+          point.latitude <= boundingBox.north &&
+          point.longitude >= boundingBox.west &&
+          point.longitude <= boundingBox.east;
 
       case GeofenceType.POLYGON:
         if (!polyCoords || polyCoords.length < 3) return false;
@@ -460,123 +331,17 @@ class Location extends Model<LocationAttributes, LocationCreationAttributes>
    */
   private isPointInPolygon(point: Coordinates, polygon: Coordinates[]): boolean {
     let inside = false;
-    
+
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
       if (((polygon[i].latitude > point.latitude) !== (polygon[j].latitude > point.latitude)) &&
-          (point.longitude < (polygon[j].longitude - polygon[i].longitude) * 
-           (point.latitude - polygon[i].latitude) / 
-           (polygon[j].latitude - polygon[i].latitude) + polygon[i].longitude)) {
+        (point.longitude < (polygon[j].longitude - polygon[i].longitude) *
+          (point.latitude - polygon[i].latitude) /
+          (polygon[j].latitude - polygon[i].latitude) + polygon[i].longitude)) {
         inside = !inside;
       }
     }
-    
+
     return inside;
-  }
-
-  /**
-   * Verifica si la ubicación necesita inspección
-   * @returns True si necesita inspección
-   */
-  public needsInspection(): boolean {
-    if (!this.nextInspectionDate) return true;
-    return new Date() >= new Date(this.nextInspectionDate);
-  }
-
-  /**
-   * Obtiene la capacidad disponible de animales
-   * @returns Capacidad disponible
-   */
-  public getAvailableCapacity(): number {
-    if (!this.capacity?.maxAnimals) return 0;
-    const current = this.capacity.currentAnimals || 0;
-    return Math.max(0, this.capacity.maxAnimals - current);
-  }
-
-  /**
-   * Verifica si la ubicación está en capacidad máxima
-   * @returns True si está en capacidad máxima
-   */
-  public isAtCapacity(): boolean {
-    return this.getAvailableCapacity() === 0;
-  }
-
-  /**
-   * Calcula el porcentaje de ocupación
-   * @returns Porcentaje de ocupación (0-100)
-   */
-  public getOccupancyPercentage(): number {
-    if (!this.capacity?.maxAnimals) return 0;
-    const current = this.capacity.currentAnimals || 0;
-    return Math.min((current / this.capacity.maxAnimals) * 100, 100);
-  }
-
-  /**
-   * Obtiene la dirección completa formateada
-   * @returns Dirección completa
-   */
-  public getFullAddress(): string {
-    const parts = [
-      this.address,
-      this.city,
-      this.state,
-      this.country,
-      this.postalCode
-    ].filter(Boolean);
-    
-    return parts.join(', ');
-  }
-
-  /**
-   * Verifica si la ubicación está operativa
-   * @returns True si está operativa
-   */
-  public isOperational(): boolean {
-    return this.isActive && 
-           this.status === LocationStatus.ACTIVE &&
-           !this.hasAlerts;
-  }
-
-  /**
-   * Obtiene los contactos de emergencia disponibles
-   * @returns Contactos de emergencia disponibles 24h
-   */
-  public getAvailableEmergencyContacts(): Array<{
-    name: string;
-    phone: string;
-    role: string;
-  }> {
-    if (!this.emergencyInfo?.emergencyContacts) return [];
-    
-    return this.emergencyInfo.emergencyContacts
-      .filter(contact => contact.isAvailable24h)
-      .map(contact => ({
-        name: contact.name,
-        phone: contact.phone,
-        role: contact.role
-      }));
-  }
-
-  /**
-   * Verifica si la ubicación está abierta en un horario específico
-   * @param date Fecha a verificar
-   * @returns True si está abierta
-   */
-  public isOpenAt(date: Date): boolean {
-    if (!this.services?.operatingHours) return true; // Si no hay horarios definidos, asumimos que está abierta
-    
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const dayName = dayNames[date.getDay()] as keyof typeof this.services.operatingHours;
-    const dayHours = this.services.operatingHours[dayName];
-    
-    if (!dayHours) return false;
-    
-    const currentTime = date.getHours() * 60 + date.getMinutes();
-    const [openHour, openMinute] = dayHours.open.split(':').map(Number);
-    const [closeHour, closeMinute] = dayHours.close.split(':').map(Number);
-    const openTime = openHour * 60 + openMinute;
-    const closeTime = closeHour * 60 + closeMinute;
-    
-    return currentTime >= openTime && currentTime <= closeTime;
   }
 
   /**
@@ -587,22 +352,17 @@ class Location extends Model<LocationAttributes, LocationCreationAttributes>
     name: string;
     type: string;
     status: string;
-    occupancy: number;
-    needsInspection: boolean;
-    hasAlerts: boolean;
-    isOperational: boolean;
-    emergencyContactsAvailable: number;
-    distanceFromMain?: number;
+    locationCode: string;
+    coordinates: Coordinates;
+    geofenceActive: boolean;
   } {
     return {
       name: this.name,
       type: this.getLocationTypeLabel(),
       status: this.getStatusLabel(),
-      occupancy: this.getOccupancyPercentage(),
-      needsInspection: this.needsInspection(),
-      hasAlerts: this.hasAlerts,
-      isOperational: this.isOperational(),
-      emergencyContactsAvailable: this.getAvailableEmergencyContacts().length
+      locationCode: this.locationCode,
+      coordinates: this.coordinates,
+      geofenceActive: this.geofenceConfig?.isActive || false
     };
   }
 
@@ -667,21 +427,18 @@ Location.init(
       },
       comment: 'Nombre de la ubicación'
     },
-    description: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      comment: 'Descripción detallada de la ubicación'
+    ranchId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: 'ranches',
+        key: 'id'
+      }
     },
     type: {
       type: DataTypes.ENUM(...Object.values(LocationType)),
       allowNull: false,
       comment: 'Tipo de ubicación'
-    },
-    status: {
-      type: DataTypes.ENUM(...Object.values(LocationStatus)),
-      allowNull: false,
-      defaultValue: LocationStatus.ACTIVE,
-      comment: 'Estado de la ubicación'
     },
     coordinates: {
       type: DataTypes.JSONB,
@@ -701,53 +458,21 @@ Location.init(
       },
       comment: 'Coordenadas geográficas principales'
     },
-    address: {
-      type: DataTypes.STRING(500),
-      allowNull: true,
-      comment: 'Dirección física'
-    },
-    city: {
-      type: DataTypes.STRING(100),
-      allowNull: true,
-      comment: 'Ciudad'
-    },
-    state: {
-      type: DataTypes.STRING(100),
-      allowNull: true,
-      comment: 'Estado o provincia'
-    },
-    country: {
-      type: DataTypes.STRING(100),
-      allowNull: true,
-      defaultValue: 'México',
-      comment: 'País'
-    },
-    postalCode: {
-      type: DataTypes.STRING(20),
-      allowNull: true,
-      comment: 'Código postal'
-    },
-    timezone: {
-      type: DataTypes.STRING(50),
-      allowNull: true,
-      defaultValue: 'America/Mexico_City',
-      comment: 'Zona horaria'
+    status: {
+      type: DataTypes.ENUM(...Object.values(LocationStatus)),
+      allowNull: false,
+      defaultValue: LocationStatus.ACTIVE,
+      comment: 'Estado de la ubicación'
     },
     geofenceConfig: {
       type: DataTypes.JSONB,
       allowNull: true,
       comment: 'Configuración de geofencing'
     },
-    capacity: {
-      type: DataTypes.JSONB,
-      allowNull: true,
-      comment: 'Capacidad y características de la ubicación'
-    },
-    accessLevel: {
-      type: DataTypes.ENUM(...Object.values(AccessLevel)),
+    geom: {
+      type: DataTypes.GEOMETRY,
       allowNull: false,
-      defaultValue: AccessLevel.PRIVATE,
-      comment: 'Nivel de acceso a la ubicación'
+      comment: 'Geometría'
     },
     parentLocationId: {
       type: DataTypes.UUID,
@@ -757,22 +482,6 @@ Location.init(
         key: 'id'
       },
       comment: 'ID de la ubicación padre'
-    },
-    relatedLocations: {
-      type: DataTypes.ARRAY(DataTypes.UUID),
-      allowNull: true,
-      defaultValue: [],
-      comment: 'IDs de ubicaciones relacionadas'
-    },
-    emergencyInfo: {
-      type: DataTypes.JSONB,
-      allowNull: true,
-      comment: 'Información de emergencia'
-    },
-    services: {
-      type: DataTypes.JSONB,
-      allowNull: true,
-      comment: 'Servicios y facilidades disponibles'
     },
     weatherStationId: {
       type: DataTypes.STRING(50),
@@ -805,102 +514,34 @@ Location.init(
       comment: 'Tipos de vegetación presentes'
     },
     waterSources: {
-      type: DataTypes.JSONB,
-      allowNull: true,
-      comment: 'Fuentes de agua disponibles'
+  type: DataTypes.JSONB,
+  allowNull: true,
+  validate: {
+    isValidWaterSources(value: any) {
+      if (value !== undefined && value !== null) {
+        if (!Array.isArray(value)) {
+          throw new Error('waterSources debe ser un array');
+        }
+        // Validar estructura de cada fuente
+        value.forEach((source, index) => {
+          if (!source.type || !source.name || !source.coordinates) {
+            throw new Error(`Fuente de agua en índice ${index} incompleta`);
+              }
+            });
+          }
+        }
+      }
     },
     pastureQuality: {
       type: DataTypes.ENUM('EXCELLENT', 'GOOD', 'FAIR', 'POOR'),
       allowNull: true,
       comment: 'Calidad del pastizal'
     },
-    lastInspectionDate: {
-      type: DataTypes.DATE,
-      allowNull: true,
-      comment: 'Fecha de la última inspección'
-    },
-    nextInspectionDate: {
-      type: DataTypes.DATE,
-      allowNull: true,
-      comment: 'Fecha de la próxima inspección'
-    },
-    inspectionNotes: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      comment: 'Notas de la última inspección'
-    },
-    images: {
-      type: DataTypes.ARRAY(DataTypes.STRING),
-      allowNull: true,
-      defaultValue: [],
-      comment: 'URLs de imágenes de la ubicación'
-    },
-    documents: {
-      type: DataTypes.ARRAY(DataTypes.STRING),
-      allowNull: true,
-      defaultValue: [],
-      comment: 'URLs de documentos relacionados'
-    },
-    videos: {
-      type: DataTypes.ARRAY(DataTypes.STRING),
-      allowNull: true,
-      defaultValue: [],
-      comment: 'URLs de videos de la ubicación'
-    },
-    maps: {
-      type: DataTypes.ARRAY(DataTypes.STRING),
-      allowNull: true,
-      defaultValue: [],
-      comment: 'URLs de mapas específicos'
-    },
-    tags: {
-      type: DataTypes.ARRAY(DataTypes.STRING),
-      allowNull: true,
-      defaultValue: [],
-      comment: 'Etiquetas para categorización'
-    },
-    notes: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      comment: 'Notas adicionales sobre la ubicación'
-    },
     isActive: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: true,
       comment: 'Si la ubicación está activa'
-    },
-    isMonitored: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
-      comment: 'Si la ubicación está siendo monitoreada'
-    },
-    hasAlerts: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
-      comment: 'Si tiene alertas activas'
-    },
-    lastAlertDate: {
-      type: DataTypes.DATE,
-      allowNull: true,
-      comment: 'Fecha de la última alerta'
-    },
-    farmId: {
-      type: DataTypes.UUID,
-      allowNull: true,
-      comment: 'ID de la finca principal'
-    },
-    ownerId: {
-      type: DataTypes.UUID,
-      allowNull: true,
-      comment: 'ID del propietario'
-    },
-    managerId: {
-      type: DataTypes.UUID,
-      allowNull: true,
-      comment: 'ID del administrador'
     },
     createdBy: {
       type: DataTypes.UUID,
@@ -935,10 +576,12 @@ Location.init(
     timestamps: true,
     paranoid: true, // Habilita soft delete
     indexes: [
-      // Índices para optimizar consultas
       {
         unique: true,
         fields: ['location_code']
+      },
+      {
+        fields: ['ranch_id']
       },
       {
         fields: ['type']
@@ -947,59 +590,25 @@ Location.init(
         fields: ['status']
       },
       {
-        fields: ['access_level']
-      },
-      {
         fields: ['is_active']
-      },
-      {
-        fields: ['is_monitored']
-      },
-      {
-        fields: ['has_alerts']
-      },
-      {
-        fields: ['farm_id']
-      },
-      {
-        fields: ['owner_id']
       },
       {
         fields: ['parent_location_id']
       },
       {
-        fields: ['next_inspection_date']
+        name: 'locations_ranch_type',
+        fields: ['ranch_id', 'type']
       },
       {
-        name: 'locations_coordinates_gin',
-        fields: ['coordinates'],
-        using: 'gin'
-      },
-      {
-        name: 'locations_type_status',
-        fields: ['type', 'status']
-      },
-      {
-        name: 'locations_farm_type',
-        fields: ['farm_id', 'type']
+        name: 'locations_geom_gist',
+        fields: ['geom'],
+        using: 'gist'
       }
     ],
     hooks: {
       // Hook para validaciones antes de guardar
       beforeSave: async (location: Location) => {
-        // Validar que las fechas de inspección sean coherentes
-        if (location.lastInspectionDate && location.nextInspectionDate) {
-          if (location.nextInspectionDate <= location.lastInspectionDate) {
-            throw new Error('La próxima inspección debe ser posterior a la última inspección');
-          }
-        }
-
-        // Validar capacidad si está definida
-        if (location.capacity?.maxAnimals && location.capacity?.currentAnimals) {
-          if (location.capacity.currentAnimals > location.capacity.maxAnimals) {
-            throw new Error('Los animales actuales no pueden exceder la capacidad máxima');
-          }
-        }
+        
 
         // Validar geofence circular
         if (location.geofenceConfig?.type === GeofenceType.CIRCULAR) {
