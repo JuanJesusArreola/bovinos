@@ -4,7 +4,7 @@ import { Geometry } from 'geojson';
 
 // Enums para tipos de ubicaciones
 export enum LocationType {
-  FARM = 'FARM',                         // Finca/Rancho
+  //FARM = 'FARM',                         // Finca/Rancho
   PASTURE = 'PASTURE',                   // Pastizal
   CORRAL = 'CORRAL',                     // Corral
   BARN = 'BARN',                         // Establo
@@ -190,212 +190,6 @@ class Location extends Model<LocationAttributes, LocationCreationAttributes>
   public readonly updatedAt!: Date;
   public deletedAt?: Date;
 
-
-  // Métodos de instancia
-
-  /**
-   * Obtiene el tipo de ubicación en español
-   * @returns Tipo de ubicación traducido
-   */
-  public getLocationTypeLabel(): string {
-    const labels = {
-      [LocationType.FARM]: 'Finca/Rancho',
-      [LocationType.PASTURE]: 'Pastizal',
-      [LocationType.CORRAL]: 'Corral',
-      [LocationType.BARN]: 'Establo',
-      [LocationType.MILKING_PARLOR]: 'Sala de Ordeño',
-      [LocationType.FEED_AREA]: 'Área de Alimentación',
-      [LocationType.WATER_SOURCE]: 'Fuente de Agua',
-      [LocationType.VETERINARY_CLINIC]: 'Clínica Veterinaria',
-      [LocationType.QUARANTINE_AREA]: 'Área de Cuarentena',
-      [LocationType.LOADING_AREA]: 'Área de Carga',
-      [LocationType.STORAGE]: 'Almacén',
-      [LocationType.OFFICE]: 'Oficina',
-      [LocationType.RESIDENTIAL]: 'Área Residencial',
-      [LocationType.PROCESSING_PLANT]: 'Planta de Procesamiento',
-      [LocationType.MARKET]: 'Mercado',
-      [LocationType.SLAUGHTERHOUSE]: 'Rastro',
-      [LocationType.BREEDING_CENTER]: 'Centro de Reproducción',
-      [LocationType.LABORATORY]: 'Laboratorio',
-      [LocationType.WASTE_MANAGEMENT]: 'Manejo de Residuos',
-      [LocationType.EQUIPMENT_SHED]: 'Bodega de Equipos',
-      [LocationType.REPAIR_SHOP]: 'Taller de Reparaciones',
-      [LocationType.FUEL_STATION]: 'Estación de Combustible',
-      [LocationType.ENTRANCE_GATE]: 'Puerta de Entrada',
-      [LocationType.SECURITY_POST]: 'Puesto de Seguridad',
-      [LocationType.EMERGENCY_POINT]: 'Punto de Emergencia',
-      [LocationType.RESTRICTED_AREA]: 'Área Restringida',
-      [LocationType.DANGER_ZONE]: 'Zona de Peligro',
-      [LocationType.SAFE_ZONE]: 'Zona Segura',
-      [LocationType.ROUTE]: 'Ruta',
-      [LocationType.CHECKPOINT]: 'Punto de Control',
-      [LocationType.OTHER]: 'Otro'
-    };
-    return labels[this.type];
-  }
-
-  /**
-   * Obtiene el estado de la ubicación en español
-   * @returns Estado traducido
-   */
-  public getStatusLabel(): string {
-    const labels = {
-      [LocationStatus.ACTIVE]: 'Activa',
-      [LocationStatus.INACTIVE]: 'Inactiva',
-      [LocationStatus.UNDER_CONSTRUCTION]: 'En Construcción',
-      [LocationStatus.UNDER_MAINTENANCE]: 'En Mantenimiento',
-      [LocationStatus.QUARANTINED]: 'En Cuarentena',
-      [LocationStatus.FLOODED]: 'Inundada',
-      [LocationStatus.DAMAGED]: 'Dañada',
-      [LocationStatus.CLOSED]: 'Cerrada',
-      [LocationStatus.RESTRICTED]: 'Restringida'
-    };
-    return labels[this.status];
-  }
-
-  /**
-   * Calcula la distancia a otra ubicación usando la fórmula de Haversine
-   * @param otherLocation Otra ubicación o coordenadas
-   * @returns Distancia en kilómetros
-   */
-  public calculateDistanceTo(otherLocation: Coordinates | Location): number {
-    const coords = 'coordinates' in otherLocation ? otherLocation.coordinates : otherLocation;
-
-    const R = 6371; // Radio de la Tierra en km
-    const dLat = this.toRadians(coords.latitude - this.coordinates.latitude);
-    const dLon = this.toRadians(coords.longitude - this.coordinates.longitude);
-
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(this.toRadians(this.coordinates.latitude)) *
-      Math.cos(this.toRadians(coords.latitude)) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }
-
-  /**
-   * Convierte grados a radianes
-   * @param degrees Grados
-   * @returns Radianes
-   */
-  private toRadians(degrees: number): number {
-    return degrees * (Math.PI / 180);
-  }
-
-  /**
-   * Verifica si un punto está dentro del geofence
-   * @param point Coordenadas del punto
-   * @returns True si está dentro del geofence
-   */
-  public isPointInsideGeofence(point: Coordinates): boolean {
-    if (!this.geofenceConfig || !this.geofenceConfig.isActive) {
-      return false;
-    }
-
-    const { type, center, radius, boundingBox, coordinates: polyCoords } = this.geofenceConfig;
-
-    switch (type) {
-      case GeofenceType.CIRCULAR:
-        if (!center || !radius) return false;
-        const distance = this.calculateDistanceTo(point) * 1000; // Convertir a metros
-        return distance <= radius;
-
-      case GeofenceType.RECTANGULAR:
-        if (!boundingBox) return false;
-        return point.latitude >= boundingBox.south &&
-          point.latitude <= boundingBox.north &&
-          point.longitude >= boundingBox.west &&
-          point.longitude <= boundingBox.east;
-
-      case GeofenceType.POLYGON:
-        if (!polyCoords || polyCoords.length < 3) return false;
-        return this.isPointInPolygon(point, polyCoords);
-
-      case GeofenceType.CORRIDOR:
-        // Implementación simplificada para corredor
-        if (!polyCoords || polyCoords.length < 2) return false;
-        // Aquí se implementaría la lógica para verificar si está dentro del corredor
-        return false;
-
-      default:
-        return false;
-    }
-  }
-
-  /**
-   * Verifica si un punto está dentro de un polígono usando el algoritmo Ray Casting
-   * @param point Punto a verificar
-   * @param polygon Coordenadas del polígono
-   * @returns True si está dentro del polígono
-   */
-  private isPointInPolygon(point: Coordinates, polygon: Coordinates[]): boolean {
-    let inside = false;
-
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      if (((polygon[i].latitude > point.latitude) !== (polygon[j].latitude > point.latitude)) &&
-        (point.longitude < (polygon[j].longitude - polygon[i].longitude) *
-          (point.latitude - polygon[i].latitude) /
-          (polygon[j].latitude - polygon[i].latitude) + polygon[i].longitude)) {
-        inside = !inside;
-      }
-    }
-
-    return inside;
-  }
-
-  /**
-   * Obtiene un resumen del estado de la ubicación
-   * @returns Resumen del estado
-   */
-  public getLocationSummary(): {
-    name: string;
-    type: string;
-    status: string;
-    locationCode: string;
-    coordinates: Coordinates;
-    geofenceActive: boolean;
-  } {
-    return {
-      name: this.name,
-      type: this.getLocationTypeLabel(),
-      status: this.getStatusLabel(),
-      locationCode: this.locationCode,
-      coordinates: this.coordinates,
-      geofenceActive: this.geofenceConfig?.isActive || false
-    };
-  }
-
-  /**
-   * Genera coordenadas del centro del geofence
-   * @returns Coordenadas del centro
-   */
-  public getGeofenceCenter(): Coordinates | null {
-    if (!this.geofenceConfig) return null;
-
-    switch (this.geofenceConfig.type) {
-      case GeofenceType.CIRCULAR:
-        return this.geofenceConfig.center || null;
-
-      case GeofenceType.RECTANGULAR:
-        if (!this.geofenceConfig.boundingBox) return null;
-        const { north, south, east, west } = this.geofenceConfig.boundingBox;
-        return {
-          latitude: (north + south) / 2,
-          longitude: (east + west) / 2
-        };
-
-      case GeofenceType.POLYGON:
-        if (!this.geofenceConfig.coordinates || this.geofenceConfig.coordinates.length === 0) return null;
-        const coords = this.geofenceConfig.coordinates;
-        const centerLat = coords.reduce((sum, coord) => sum + coord.latitude, 0) / coords.length;
-        const centerLon = coords.reduce((sum, coord) => sum + coord.longitude, 0) / coords.length;
-        return { latitude: centerLat, longitude: centerLon };
-
-      default:
-        return null;
-    }
-  }
 }
 
 // Definición del modelo en Sequelize
@@ -411,7 +205,6 @@ Location.init(
     locationCode: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      unique: true,
       validate: {
         notEmpty: true,
         len: [3, 50]
@@ -438,7 +231,6 @@ Location.init(
     type: {
       type: DataTypes.ENUM(...Object.values(LocationType)),
       allowNull: false,
-      comment: 'Tipo de ubicación'
     },
     coordinates: {
       type: DataTypes.JSONB,
@@ -462,7 +254,6 @@ Location.init(
       type: DataTypes.ENUM(...Object.values(LocationStatus)),
       allowNull: false,
       defaultValue: LocationStatus.ACTIVE,
-      comment: 'Estado de la ubicación'
     },
     geofenceConfig: {
       type: DataTypes.JSONB,
@@ -514,18 +305,18 @@ Location.init(
       comment: 'Tipos de vegetación presentes'
     },
     waterSources: {
-  type: DataTypes.JSONB,
-  allowNull: true,
-  validate: {
-    isValidWaterSources(value: any) {
-      if (value !== undefined && value !== null) {
-        if (!Array.isArray(value)) {
-          throw new Error('waterSources debe ser un array');
-        }
-        // Validar estructura de cada fuente
-        value.forEach((source, index) => {
-          if (!source.type || !source.name || !source.coordinates) {
-            throw new Error(`Fuente de agua en índice ${index} incompleta`);
+      type: DataTypes.JSONB,
+      allowNull: true,
+      validate: {
+        isValidWaterSources(value: any) {
+          if (value !== undefined && value !== null) {
+            if (!Array.isArray(value)) {
+              throw new Error('waterSources debe ser un array');
+            }
+            // Validar estructura de cada fuente
+            value.forEach((source, index) => {
+              if (!source.type || !source.name || !source.coordinates) {
+                throw new Error(`Fuente de agua en índice ${index} incompleta`);
               }
             });
           }
@@ -535,7 +326,6 @@ Location.init(
     pastureQuality: {
       type: DataTypes.ENUM('EXCELLENT', 'GOOD', 'FAIR', 'POOR'),
       allowNull: true,
-      comment: 'Calidad del pastizal'
     },
     isActive: {
       type: DataTypes.BOOLEAN,
@@ -577,7 +367,7 @@ Location.init(
     paranoid: true, // Habilita soft delete
     indexes: [
       {
-        unique: true,
+        
         fields: ['location_code']
       },
       {
@@ -603,12 +393,15 @@ Location.init(
         name: 'locations_geom_gist',
         fields: ['geom'],
         using: 'gist'
-      }
+      },
+      { fields: ['soil_type'] },  // Para filtrar por tipo de suelo
+      { fields: ['elevation'] },   // Para filtrar por altura
+      { fields: ['pasture_quality'] } // Consultas frecuentes
     ],
     hooks: {
       // Hook para validaciones antes de guardar
       beforeSave: async (location: Location) => {
-        
+
 
         // Validar geofence circular
         if (location.geofenceConfig?.type === GeofenceType.CIRCULAR) {

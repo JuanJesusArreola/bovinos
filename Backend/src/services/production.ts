@@ -1,1167 +1,435 @@
+// src/services/production/ProductionService.ts
 import { Op, Transaction } from 'sequelize';
-import { logInfo, logError, logWarn } from '../utils/logger';
-
-// Adaptador de logger para mantener compatibilidad
-const logger = {
-  info: (message: string, metadata?: any) => logInfo(message, metadata, 'ProductionService'),
-  error: (message: string, error?: any) => logError(message, { error }, error as Error, 'ProductionService'),
-  warn: (message: string, metadata?: any) => logWarn(message, metadata, 'ProductionService')
-};
-
-// Tipos y enums locales para producción
-export enum ProductionType {
-  MILK = 'MILK',
-  WEIGHT = 'WEIGHT',
-  FEED_INTAKE = 'FEED_INTAKE',
-  GROWTH = 'GROWTH'
-}
-
-export enum EventStatus {
-  PLANNED = 'PLANNED',
-  IN_PROGRESS = 'IN_PROGRESS',
-  COMPLETED = 'COMPLETED',
-  CANCELLED = 'CANCELLED',
-  OVERDUE = 'OVERDUE'
-}
-
-export enum MilkQuality {
-  EXCELLENT = 'EXCELLENT',
-  GOOD = 'GOOD',
-  FAIR = 'FAIR',
-  POOR = 'POOR'
-}
-
-export enum WeighingMethod {
-  SCALE = 'SCALE',
-  TAPE = 'TAPE',
-  VISUAL = 'VISUAL',
-  CALCULATED = 'CALCULATED'
-}
-
-// Interfaces principales
-export interface ProductionRecord {
-  id: string;
-  bovineId: string;
-  type: ProductionType;
-  value: number;
-  unit: string;
-  recordedDate: Date;
-  location?: LocationData;
-  notes?: string;
-  metadata?: Record<string, any>;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface LocationData {
-  latitude: number;
-  longitude: number;
-  accuracy?: number;
-  address?: string;
-}
-
-export interface MilkRecord {
-  id: string;
-  bovineId: string;
-  quantity: number;
-  milkingDate: Date;
-  milkingTime: 'MORNING' | 'AFTERNOON' | 'EVENING';
-  quality?: MilkQuality;
-  fatContent?: number;
-  proteinContent?: number;
-  somaticCellCount?: number;
-  temperature?: number;
-  location?: LocationData;
-  notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface WeightRecord {
-  id: string;
-  bovineId: string;
-  weight: number;
-  weighingDate: Date;
-  method: WeighingMethod;
-  equipment?: string;
-  bodyConditionScore?: number;
-  estimatedWeight?: boolean;
-  location?: LocationData;
-  notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface ProductionMetrics {
-  bovineId: string;
-  period: {
-    startDate: Date;
-    endDate: Date;
-  };
-  totalRecords: number;
-  byType: Partial<Record<ProductionType, {
-    count: number;
-    total: number;
-    average: number;
-    minimum: number;
-    maximum: number;
-    unit: string;
-    lastRecord: Date;
-    trend?: string;
-  }>>;
-}
-
-export interface ProductionSummary {
-  totalRecords: number;
-  byType: Record<ProductionType, number>;
-  averageDaily: Record<ProductionType, number>;
-  trends: Record<ProductionType, 'INCREASING' | 'DECREASING' | 'STABLE'>;
-  topProducers: Array<{
-    bovineId: string;
-    bovineTag: string;
-    totalProduction: number;
-    average: number;
-  }>;
-}
-
-export interface ProductionTrends {
-  period: string;
-  dataPoints: Array<{
-    date: Date;
-    value: number;
-    average: number;
-    count: number;
-  }>;
-  totalRecords: number;
-  averageValue: number;
-}
-
-// Interfaces para los mocks
-interface MockProductionRecord {
-  id: string;
-  bovineId: string;
-  type: ProductionType;
-  value: number;
-  unit: string;
-  recordedDate: Date;
-  recordedBy?: string;
-  metadata?: Record<string, any>;
-  isDeleted?: boolean;
-  location?: LocationData;
-  notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
-  update(updateData: any, options?: any): Promise<MockProductionRecord>;
-  toJSON(): any;
-}
-
-interface MockBovine {
-  id: string;
-  earTag: string;
-  name: string;
-  breed: string;
-}
-
-// Clases de error personalizadas
-export class ApiError extends Error {
-  public statusCode: number;
-  
-  constructor(message: string, statusCode: number = 500) {
-    super(message);
-    this.name = 'ApiError';
-    this.statusCode = statusCode;
-  }
-}
-
-export class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ValidationError';
-  }
-}
-
-// Mocks para modelos que no existen o tienen problemas
-const Production = {
-  create: async (data: any, options?: any): Promise<MockProductionRecord> => {
-    const record = {
-      ...data,
-      id: `prod_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      update: async function(this: MockProductionRecord, updateData: any, options?: any): Promise<MockProductionRecord> {
-        if (updateData && typeof updateData === 'object') {
-          Object.assign(this, updateData, { updatedAt: new Date() });
-        }
-        return this;
-      },
-      toJSON: function(this: MockProductionRecord) {
-        return {
-          id: this.id,
-          bovineId: this.bovineId,
-          type: this.type,
-          value: this.value,
-          unit: this.unit,
-          recordedDate: this.recordedDate,
-          location: this.location,
-          notes: this.notes,
-          metadata: this.metadata,
-          createdAt: this.createdAt,
-          updatedAt: this.updatedAt
-        };
-      }
-    } as MockProductionRecord;
-    
-    return record;
-  },
-
-  findByPk: async (id: string, options?: any): Promise<MockProductionRecord | null> => {
-    if (!id) return null;
-    
-    const record = {
-      id,
-      bovineId: 'bovine_123',
-      type: ProductionType.MILK,
-      value: 15.5,
-      unit: 'LITERS',
-      recordedDate: new Date(),
-      recordedBy: 'user_123',
-      metadata: {},
-      isDeleted: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      update: async function(this: MockProductionRecord, updateData: any, options?: any): Promise<MockProductionRecord> {
-        if (updateData && typeof updateData === 'object') {
-          Object.assign(this, updateData, { updatedAt: new Date() });
-        }
-        return this;
-      },
-      toJSON: function(this: MockProductionRecord) {
-        return {
-          id: this.id,
-          bovineId: this.bovineId,
-          type: this.type,
-          value: this.value,
-          unit: this.unit,
-          recordedDate: this.recordedDate
-        };
-      }
-    } as MockProductionRecord;
-    
-    return record;
-  },
-
-  findAll: async (options?: any): Promise<MockProductionRecord[]> => {
-    return [];
-  },
-
-  findAndCountAll: async (options?: any): Promise<{ rows: MockProductionRecord[]; count: number }> => {
-    return { rows: [], count: 0 };
-  },
-
-  findOne: async (options?: any): Promise<MockProductionRecord | null> => {
-    if (options?.where?.type === ProductionType.WEIGHT) {
-      const record = {
-        id: 'prev_weight_record',
-        bovineId: options.where.bovineId || 'bovine_123',
-        type: ProductionType.WEIGHT,
-        value: 450,
-        unit: 'KG',
-        recordedDate: new Date(),
-        isDeleted: false,
-        recordedBy: 'user_123',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        update: async function(this: MockProductionRecord, updateData: any): Promise<MockProductionRecord> {
-          if (updateData && typeof updateData === 'object') {
-            Object.assign(this, updateData, { updatedAt: new Date() });
-          }
-          return this;
-        },
-        toJSON: function(this: MockProductionRecord) {
-          return {
-            id: this.id,
-            bovineId: this.bovineId,
-            type: this.type,
-            value: this.value,
-            unit: this.unit,
-            recordedDate: this.recordedDate
-          };
-        }
-      } as MockProductionRecord;
-      
-      return record;
-    }
-    return null;
-  },
-
-  update: async (data: any, options: any): Promise<[number]> => [1]
-};
-
-const Bovine = {
-  findByPk: async (id: string, options?: any): Promise<MockBovine | null> => {
-    if (!id) return null;
-    
-    return {
-      id,
-      earTag: `TAG_${id}`,
-      name: `Bovine_${id}`,
-      breed: 'Holstein'
-    };
-  },
-
-  update: async (updateData: any, options: any): Promise<[number]> => {
-    return [1];
-  }
-};
-
-const Event = {
-  create: async (data: any, options?: any): Promise<any> => ({
-    ...data,
-    id: `event_${Date.now()}`,
-    createdAt: new Date(),
-    updatedAt: new Date()
-  })
-};
-
-const sequelize = {
-  transaction: async (): Promise<Transaction> => ({
-    commit: async () => {},
-    rollback: async () => {}
-  } as Transaction)
-};
-
-// Mock de servicios
-class LocationService {
-  async getCurrentLocation(): Promise<LocationData> {
-    return {
-      latitude: 19.4326,
-      longitude: -99.1332,
-      accuracy: 10
-    };
-  }
-}
-
-class NotificationService {
-  async createNotification(notification: {
-    userId: string;
-    title: string;
-    message: string;
-    type: string;
-    relatedId: string;
-    relatedType: string;
-  }): Promise<void> {
-    console.log(`📢 Notificación creada: ${notification.title}`);
-  }
-}
+import sequelize from '../config/database';
+import Production, { ProductionAttributes, ProductionCreationAttributes, ProductionType, ProductionStatus } from '../models/Production';
+import Bovine from '../models/Bovine';
+import { ValidationError } from '../utils/errorUtils';
+import { NotificationType, NotificationPriority } from '../models/Notification';
 
 export class ProductionService {
-  private locationService: LocationService;
-  private notificationService: NotificationService;
+  constructor(
+    private productionModel: typeof Production,
+    private bovineModel: typeof Bovine,
+    private notificationService?: any // Opcional, si quieres enviar notificaciones
+  ) { }
 
-  constructor() {
-    this.locationService = new LocationService();
-    this.notificationService = new NotificationService();
-  }
-
-  // ============================================================================
-  // MÉTODOS PRINCIPALES - CRUD DE REGISTROS DE PRODUCCIÓN
-  // ============================================================================
+  // ==========================================================================
+  // CRUD principal
+  // ==========================================================================
 
   /**
-   * Crear nuevo registro de producción
+   * Crea un nuevo registro de producción
    */
-  public async createProductionRecord(
-    productionData: Omit<ProductionRecord, 'id' | 'createdAt' | 'updatedAt'>,
-    userId: string
-  ): Promise<ProductionRecord> {
-    const transaction: Transaction = await sequelize.transaction();
-    
+  async createProduction(
+    data: Omit<ProductionCreationAttributes, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>,
+    userId: string,
+    transaction?: Transaction
+  ): Promise<Production> {
+    const t = transaction || await sequelize.transaction();
     try {
-      // Validar datos de entrada
-      await this.validateProductionData(productionData);
-
       // Verificar que el bovino existe
-      const bovine = await Bovine.findByPk(productionData.bovineId);
-      if (!bovine) {
-        throw new ValidationError('El bovino especificado no existe');
+      const bovine = await this.bovineModel.findByPk(data.bovineId, { transaction: t });
+      if (!bovine) throw new ValidationError(`Bovino con ID ${data.bovineId} no encontrado`);
+
+      // Crear registro
+      const production = await this.productionModel.create(
+        { ...data, createdBy: userId },
+        { transaction: t }
+      );
+
+      if (!transaction) await t.commit();
+
+      // Opcional: enviar notificación si hay alertas (ej. baja producción)
+      if (this.notificationService) {
+        await this.checkProductionAlerts(production);
       }
 
-      // Obtener ubicación actual si no se proporciona
-      let location = productionData.location;
-      if (!location?.latitude || !location?.longitude) {
-        location = await this.locationService.getCurrentLocation();
-      }
-
-      // Crear registro de producción
-      const productionRecord = await Production.create({
-        ...productionData,
-        location,
-        recordedBy: userId,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-
-      // Crear evento relacionado
-      await Event.create({
-        type: 'PRODUCTION_RECORD',
-        title: `Registro de ${productionData.type.toLowerCase()}`,
-        description: this.generateProductionDescription(productionData),
-        bovineId: productionData.bovineId,
-        location,
-        scheduledDate: new Date(),
-        status: EventStatus.COMPLETED,
-        createdBy: userId
-      });
-
-      // Actualizar métricas del bovino si es necesario
-      await this.updateBovineMetrics(productionData.bovineId, transaction);
-
-      // Verificar alertas y umbrales
-      await this.checkProductionAlerts(productionRecord.id.toString(), transaction);
-
-      await transaction.commit();
-
-      logger.info('✅ Registro de producción creado exitosamente', {
-        productionId: productionRecord.id,
-        bovineId: productionData.bovineId,
-        type: productionData.type,
-        userId
-      });
-
-      return this.formatProductionRecord(productionRecord);
-
+      return production;
     } catch (error) {
-      await transaction.rollback();
-      logger.error('❌ Error creando registro de producción', { error, productionData });
+      if (!transaction) await t.rollback();
       throw error;
     }
   }
 
   /**
-   * Obtener registros de producción por bovino
+   * Obtiene un registro de producción por ID
    */
-  public async getProductionByBovine(
-    bovineId: string,
-    options: {
-      type?: ProductionType;
-      startDate?: Date;
-      endDate?: Date;
-      limit?: number;
-      offset?: number;
-      includeMetrics?: boolean;
-    } = {}
-  ): Promise<{ records: ProductionRecord[], total: number, metrics?: ProductionMetrics }> {
-    try {
-      // Construir filtros de búsqueda
-      const whereClause: any = { bovineId };
-      
-      if (options.type) {
-        whereClause.type = options.type;
-      }
-      
-      if (options.startDate || options.endDate) {
-        whereClause.recordedDate = {};
-        if (options.startDate) {
-          whereClause.recordedDate[Op.gte] = options.startDate;
-        }
-        if (options.endDate) {
-          whereClause.recordedDate[Op.lte] = options.endDate;
-        }
-      }
-
-      // Realizar consulta
-      const { rows: productions, count: total } = await Production.findAndCountAll({
-        where: whereClause,
-        include: [
-          {
-            model: Bovine,
-            attributes: ['id', 'earTag', 'name', 'breed']
-          }
-        ],
-        order: [['recordedDate', 'DESC']],
-        limit: options.limit || 50,
-        offset: options.offset || 0
-      });
-
-      const records = productions.map(prod => this.formatProductionRecord(prod));
-
-      // Calcular métricas si se solicitan
-      let metrics;
-      if (options.includeMetrics && records.length > 0) {
-        metrics = await this.calculateProductionMetrics(bovineId, options);
-      }
-
-      return { records, total, metrics };
-
-    } catch (error) {
-      logger.error('❌ Error obteniendo registros de producción por bovino', { error, bovineId });
-      throw new ApiError('Error obteniendo registros de producción', 500);
-    }
+  async getProductionById(id: string): Promise<Production | null> {
+    return await this.productionModel.findByPk(id);
   }
 
   /**
-   * Actualizar registro de producción
+   * Lista registros de producción con filtros
    */
-  public async updateProductionRecord(
-    recordId: string,
-    updateData: Partial<Omit<ProductionRecord, 'id' | 'createdAt'>>,
-    userId: string
-  ): Promise<ProductionRecord> {
-    const transaction: Transaction = await sequelize.transaction();
+  async getProductions(filters: {
+    bovineId?: string;
+    productionType?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ rows: Production[]; count: number }> {
+    const where: any = {};
 
-    try {
-      const existingRecord = await Production.findByPk(recordId);
-      if (!existingRecord) {
-        throw new ValidationError('Registro de producción no encontrado');
-      }
-
-      // Validar datos actualizados
-      if (updateData.type || updateData.value || updateData.unit) {
-        const recordData = existingRecord.toJSON();
-        await this.validateProductionData({
-          ...recordData,
-          ...updateData
-        } as ProductionRecord);
-      }
-
-      // Preparar datos de actualización seguros
-      const safeUpdateData = {
-        ...(updateData || {}),
-        updatedAt: new Date(),
-        lastModifiedBy: userId
-      };
-
-      // Actualizar registro
-      await existingRecord.update(safeUpdateData);
-
-      // Recalcular métricas del bovino
-      await this.updateBovineMetrics(existingRecord.bovineId, transaction);
-
-      await transaction.commit();
-
-      logger.info('✅ Registro de producción actualizado', {
-        recordId,
-        bovineId: existingRecord.bovineId,
-        userId
-      });
-
-      return this.formatProductionRecord(existingRecord);
-
-    } catch (error) {
-      await transaction.rollback();
-      logger.error('❌ Error actualizando registro de producción', { error, recordId });
-      throw error;
+    if (filters.bovineId) where.bovineId = filters.bovineId;
+    if (filters.productionType) where.productionType = filters.productionType;
+    if (filters.startDate || filters.endDate) {
+      where.productionDate = {};
+      if (filters.startDate) where.productionDate[Op.gte] = filters.startDate;
+      if (filters.endDate) where.productionDate[Op.lte] = filters.endDate;
     }
+
+    const limit = filters.limit || 50;
+    const offset = filters.offset || 0;
+
+    const { rows, count } = await this.productionModel.findAndCountAll({
+      where,
+      limit,
+      offset,
+      order: [['productionDate', 'DESC']],
+    });
+
+    return { rows, count };
   }
 
   /**
-   * Eliminar registro de producción
+   * Obtiene todos los registros de producción de un rancho (todos sus bovinos)
    */
-  public async deleteProductionRecord(
-    recordId: string, 
-    userId: string
-  ): Promise<boolean> {
-    const transaction: Transaction = await sequelize.transaction();
+  async getProductionsByRanch(
+    ranchId: string,
+    filters?: { productionType?: string; startDate?: Date; endDate?: Date; limit?: number; offset?: number }
+  ): Promise<{ rows: Production[]; count: number }> {
+    const where: any = {};
 
-    try {
-      const record = await Production.findByPk(recordId);
-      if (!record) {
-        throw new ValidationError('Registro de producción no encontrado');
-      }
-
-      const bovineId = record.bovineId;
-
-      // Marcar como eliminado (soft delete)
-      await record.update({ 
-        isDeleted: true,
-        deletedAt: new Date(),
-        deletedBy: userId
-      });
-
-      // Recalcular métricas sin incluir registros eliminados
-      await this.updateBovineMetrics(bovineId, transaction);
-
-      await transaction.commit();
-
-      logger.info('✅ Registro de producción eliminado', {
-        recordId,
-        bovineId,
-        userId
-      });
-
-      return true;
-
-    } catch (error) {
-      await transaction.rollback();
-      logger.error('❌ Error eliminando registro de producción', { error, recordId });
-      throw error;
-    }
-  }
-
-  // ============================================================================
-  // MÉTODOS DE MÉTRICAS Y ANÁLISIS
-  // ============================================================================
-
-  /**
-   * Calcular métricas de producción para un bovino
-   */
-  public async calculateProductionMetrics(
-    bovineId: string,
-    options: {
-      type?: ProductionType;
-      startDate?: Date;
-      endDate?: Date;
-      includeTrends?: boolean;
-    } = {}
-  ): Promise<ProductionMetrics> {
-    try {
-      const whereClause: any = { 
-        bovineId,
-        isDeleted: false
-      };
-
-      if (options.type) {
-        whereClause.type = options.type;
-      }
-
-      if (options.startDate || options.endDate) {
-        whereClause.recordedDate = {};
-        if (options.startDate) {
-          whereClause.recordedDate[Op.gte] = options.startDate;
-        }
-        if (options.endDate) {
-          whereClause.recordedDate[Op.lte] = options.endDate;
-        }
-      }
-
-      const records = await Production.findAll({
-        where: whereClause,
-        order: [['recordedDate', 'ASC']]
-      });
-
-      if (records.length === 0) {
-        return this.createEmptyMetrics(bovineId);
-      }
-
-      // Agrupar por tipo de producción
-      const recordsByType = records.reduce((acc: Record<string, MockProductionRecord[]>, record: MockProductionRecord) => {
-        if (!acc[record.type]) {
-          acc[record.type] = [];
-        }
-        acc[record.type].push(record);
-        return acc;
-      }, {} as Record<string, MockProductionRecord[]>);
-
-      const metrics: ProductionMetrics = {
-        bovineId,
-        period: {
-          startDate: options.startDate || records[0].recordedDate,
-          endDate: options.endDate || records[records.length - 1].recordedDate
-        },
-        totalRecords: records.length,
-        byType: {}
-      };
-
-      // Calcular métricas por tipo
-      for (const [type, typeRecords] of Object.entries(recordsByType)) {
-        const values = typeRecords.map(r => r.value);
-        const unit = typeRecords[0]?.unit || 'UNIT';
-
-        const productionType = type as ProductionType;
-        metrics.byType[productionType] = {
-          count: typeRecords.length,
-          total: values.reduce((sum: number, val: number) => sum + val, 0),
-          average: values.reduce((sum: number, val: number) => sum + val, 0) / values.length,
-          minimum: Math.min(...values),
-          maximum: Math.max(...values),
-          unit,
-          lastRecord: typeRecords[typeRecords.length - 1]?.recordedDate || new Date(),
-          trend: options.includeTrends ? 
-            await this.calculateTrend(typeRecords) : undefined
-        };
-      }
-
-      return metrics;
-
-    } catch (error) {
-      logger.error('❌ Error calculando métricas de producción', { error, bovineId });
-      throw new ApiError('Error calculando métricas de producción', 500);
-    }
-  }
-
-  /**
-   * Obtener tendencias de producción
-   */
-  public async getProductionTrends(
-    bovineIds?: string[],
-    type?: ProductionType,
-    period: 'week' | 'month' | 'quarter' | 'year' = 'month'
-  ): Promise<ProductionTrends> {
-    try {
-      const whereClause: any = { isDeleted: false };
-      
-      if (bovineIds && bovineIds.length > 0) {
-        whereClause.bovineId = { [Op.in]: bovineIds };
-      }
-      
-      if (type) {
-        whereClause.type = type;
-      }
-
-      // Calcular fecha de inicio según el período
-      const endDate = new Date();
-      const startDate = this.calculateStartDate(endDate, period);
-      
-      whereClause.recordedDate = {
-        [Op.gte]: startDate,
-        [Op.lte]: endDate
-      };
-
-      const records = await Production.findAll({
-        where: whereClause,
-        include: [{
-          model: Bovine,
-          attributes: ['id', 'earTag', 'name']
-        }],
-        order: [['recordedDate', 'ASC']]
-      });
-
-      return this.processTrendsData(records, period);
-
-    } catch (error) {
-      logger.error('❌ Error obteniendo tendencias de producción', { error });
-      throw new ApiError('Error obteniendo tendencias de producción', 500);
-    }
-  }
-
-  // ============================================================================
-  // MÉTODOS ESPECÍFICOS POR TIPO DE PRODUCCIÓN
-  // ============================================================================
-
-  /**
-   * Registrar producción de leche
-   */
-  public async recordMilkProduction(
-    milkData: Omit<MilkRecord, 'id' | 'createdAt' | 'updatedAt'>,
-    userId: string
-  ): Promise<MilkRecord> {
-    try {
-      // Validaciones específicas para leche
-      await this.validateMilkProduction(milkData);
-
-      const productionData: Omit<ProductionRecord, 'id' | 'createdAt' | 'updatedAt'> = {
-        bovineId: milkData.bovineId,
-        type: ProductionType.MILK,
-        value: milkData.quantity,
-        unit: 'LITERS',
-        recordedDate: milkData.milkingDate,
-        location: milkData.location,
-        notes: milkData.notes,
-        metadata: {
-          milkingTime: milkData.milkingTime,
-          quality: milkData.quality,
-          fatContent: milkData.fatContent,
-          proteinContent: milkData.proteinContent,
-          somaticCellCount: milkData.somaticCellCount,
-          temperature: milkData.temperature
-        }
-      };
-
-      const record = await this.createProductionRecord(productionData, userId);
-      
-      return {
-        id: record.id,
-        bovineId: record.bovineId,
-        quantity: record.value,
-        milkingDate: record.recordedDate,
-        milkingTime: record.metadata?.milkingTime || 'MORNING',
-        quality: record.metadata?.quality,
-        fatContent: record.metadata?.fatContent,
-        proteinContent: record.metadata?.proteinContent,
-        somaticCellCount: record.metadata?.somaticCellCount,
-        temperature: record.metadata?.temperature,
-        location: record.location,
-        notes: record.notes,
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt
-      };
-
-    } catch (error) {
-      logger.error('❌ Error registrando producción de leche', { error, milkData });
-      throw error;
-    }
-  }
-
-  /**
-   * Registrar peso del bovino
-   */
-  public async recordWeight(
-    weightData: Omit<WeightRecord, 'id' | 'createdAt' | 'updatedAt'>,
-    userId: string
-  ): Promise<WeightRecord> {
-    try {
-      // Validaciones específicas para peso
-      await this.validateWeightRecord(weightData);
-
-      const productionData: Omit<ProductionRecord, 'id' | 'createdAt' | 'updatedAt'> = {
-        bovineId: weightData.bovineId,
-        type: ProductionType.WEIGHT,
-        value: weightData.weight,
-        unit: 'KG',
-        recordedDate: weightData.weighingDate,
-        location: weightData.location,
-        notes: weightData.notes,
-        metadata: {
-          method: weightData.method,
-          equipment: weightData.equipment,
-          bodyConditionScore: weightData.bodyConditionScore,
-          estimatedWeight: weightData.estimatedWeight
-        }
-      };
-
-      const record = await this.createProductionRecord(productionData, userId);
-      
-      return {
-        id: record.id,
-        bovineId: record.bovineId,
-        weight: record.value,
-        weighingDate: record.recordedDate,
-        method: record.metadata?.method || WeighingMethod.SCALE,
-        equipment: record.metadata?.equipment,
-        bodyConditionScore: record.metadata?.bodyConditionScore,
-        estimatedWeight: record.metadata?.estimatedWeight || false,
-        location: record.location,
-        notes: record.notes,
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt
-      };
-
-    } catch (error) {
-      logger.error('❌ Error registrando peso', { error, weightData });
-      throw error;
-    }
-  }
-
-  // ============================================================================
-  // MÉTODOS DE SOPORTE Y UTILIDADES
-  // ============================================================================
-
-  /**
-   * Validar datos de producción
-   */
-  private async validateProductionData(
-    data: Omit<ProductionRecord, 'id' | 'createdAt' | 'updatedAt'>
-  ): Promise<void> {
-    if (!data.bovineId) {
-      throw new ValidationError('El ID del bovino es requerido');
+    if (filters?.productionType) where.productionType = filters.productionType;
+    if (filters?.startDate || filters?.endDate) {
+      where.productionDate = {};
+      if (filters.startDate) where.productionDate[Op.gte] = filters.startDate;
+      if (filters.endDate) where.productionDat[Op.lte] = filters.endDate;
     }
 
-    if (!data.type || !Object.values(ProductionType).includes(data.type)) {
-      throw new ValidationError('Tipo de producción inválido');
-    }
+    // Configurar paginación
+    const limit = filters?.limit || 50;
+    const offset = filters?.offset || 0;
 
-    if (!data.value || data.value <= 0) {
-      throw new ValidationError('El valor debe ser mayor a 0');
-    }
-
-    if (!data.unit) {
-      throw new ValidationError('La unidad de medida es requerida');
-    }
-
-    if (!data.recordedDate) {
-      throw new ValidationError('La fecha de registro es requerida');
-    }
-
-    // Validar que la fecha no sea futura
-    if (data.recordedDate > new Date()) {
-      throw new ValidationError('La fecha de registro no puede ser futura');
-    }
-  }
-
-  /**
-   * Validar producción de leche
-   */
-  private async validateMilkProduction(
-    data: Omit<MilkRecord, 'id' | 'createdAt' | 'updatedAt'>
-  ): Promise<void> {
-    if (!data.quantity || data.quantity <= 0) {
-      throw new ValidationError('La cantidad de leche debe ser mayor a 0');
-    }
-
-    if (data.quantity > 100) { // Límite razonable para producción diaria
-      throw new ValidationError('La cantidad de leche parece excesiva');
-    }
-
-    if (data.fatContent && (data.fatContent < 0 || data.fatContent > 10)) {
-      throw new ValidationError('El contenido de grasa debe estar entre 0-10%');
-    }
-
-    if (data.proteinContent && (data.proteinContent < 0 || data.proteinContent > 5)) {
-      throw new ValidationError('El contenido de proteína debe estar entre 0-5%');
-    }
-  }
-
-  /**
-   * Validar registro de peso
-   */
-  private async validateWeightRecord(
-    data: Omit<WeightRecord, 'id' | 'createdAt' | 'updatedAt'>
-  ): Promise<void> {
-    if (!data.weight || data.weight <= 0) {
-      throw new ValidationError('El peso debe ser mayor a 0');
-    }
-
-    if (data.weight < 50 || data.weight > 2000) { // Límites razonables
-      throw new ValidationError('El peso parece estar fuera del rango normal');
-    }
-
-    if (data.bodyConditionScore && (data.bodyConditionScore < 1 || data.bodyConditionScore > 5)) {
-      throw new ValidationError('La condición corporal debe estar entre 1-5');
-    }
-  }
-
-  /**
-   * Formatear registro de producción para respuesta
-   */
-  private formatProductionRecord(record: MockProductionRecord): ProductionRecord {
-    return {
-      id: record.id,
-      bovineId: record.bovineId,
-      type: record.type,
-      value: record.value,
-      unit: record.unit,
-      recordedDate: record.recordedDate,
-      location: record.location,
-      notes: record.notes,
-      metadata: record.metadata || {},
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt
-    };
-  }
-
-  /**
-   * Generar descripción del registro de producción
-   */
-  private generateProductionDescription(
-    data: Omit<ProductionRecord, 'id' | 'createdAt' | 'updatedAt'>
-  ): string {
-    const typeLabels = {
-      [ProductionType.MILK]: 'leche',
-      [ProductionType.WEIGHT]: 'peso',
-      [ProductionType.FEED_INTAKE]: 'consumo de alimento',
-      [ProductionType.GROWTH]: 'crecimiento'
-    };
-
-    return `Registro de ${typeLabels[data.type]}: ${data.value} ${data.unit}`;
-  }
-
-  /**
-   * Actualizar métricas del bovino
-   */
-  private async updateBovineMetrics(
-    bovineId: string, 
-    transaction: Transaction
-  ): Promise<void> {
-    try {
-      const metrics = await this.calculateProductionMetrics(bovineId);
-      
-      // Actualizar campos relevantes en el modelo Bovine usando método auxiliar
-      await this.safeBovineUpdate(bovineId, {
-        lastProductionUpdate: new Date(),
-        productionMetrics: JSON.stringify(metrics)
-      });
-
-    } catch (error) {
-      logger.warn('⚠️ Error actualizando métricas del bovino', { error, bovineId });
-      // No lanzar error para no interrumpir el flujo principal
-    }
-  }
-
-  /**
-   * Verificar alertas de producción
-   */
-  private async checkProductionAlerts(
-    recordId: string, 
-    transaction: Transaction
-  ): Promise<void> {
-    try {
-      const record = await Production.findByPk(recordId);
-      if (!record) return;
-
-      // Implementar lógica de alertas según el tipo de producción
-      if (record.type === ProductionType.MILK && record.value < 5) {
-        await this.notificationService.createNotification({
-          userId: record.recordedBy || 'unknown',
-          title: 'Baja producción de leche',
-          message: `Producción de leche por debajo del promedio: ${record.value}L`,
-          type: 'WARNING',
-          relatedId: record.bovineId,
-          relatedType: 'BOVINE'
-        });
-      }
-
-      if (record.type === ProductionType.WEIGHT) {
-        // Verificar cambios drásticos de peso
-        const lastWeight = await Production.findOne({
+    // Realizar la consulta con JOIN a Bovine
+    const { rows, count } = await this.productionModel.findAndCountAll({
+      include: [
+        {
+          model: this.bovineModel,
+          as: 'bovine',          // Usa el alias correcto definido en la asociación
           where: {
-            bovineId: record.bovineId,
-            type: ProductionType.WEIGHT,
-            // Excluir el registro actual
-            id: { [Op.ne]: recordId }
+            ranchId,
+            isActive: true,
           },
-          order: [['recordedDate', 'DESC']]
-        });
+          attributes: [],        // No necesitamos traer datos del bovino en la consulta
+          required: true,        // Solo producciones de bovinos activos del rancho
+        },
+      ],
+      where,
+      limit,
+      offset,
+      order: [['productionDate', 'DESC']],
+    });
 
-        if (lastWeight) {
-          const weightChange = Math.abs(record.value - lastWeight.value);
-          const percentChange = (weightChange / lastWeight.value) * 100;
-          
-          if (percentChange > 10) {
-            await this.notificationService.createNotification({
-              userId: record.recordedBy || 'unknown',
-              title: 'Cambio significativo de peso',
-              message: `Cambio de peso de ${percentChange.toFixed(1)}% detectado`,
-              type: 'WARNING',
-              relatedId: record.bovineId,
-              relatedType: 'BOVINE'
-            });
-          }
-        }
-      }
-
-    } catch (error) {
-      logger.warn('⚠️ Error verificando alertas de producción', { error, recordId });
-    }
+    return { rows, count };
   }
 
   /**
-   * Calcular tendencia de registros
+   * Actualiza un registro de producción
    */
-  private async calculateTrend(records: MockProductionRecord[]): Promise<string> {
-    if (records.length < 2) return 'STABLE';
-
-    const values = records.map(r => r.value);
-    const firstHalf = values.slice(0, Math.floor(values.length / 2));
-    const secondHalf = values.slice(Math.floor(values.length / 2));
-
-    const firstAvg = firstHalf.reduce((sum: number, val: number) => sum + val, 0) / firstHalf.length;
-    const secondAvg = secondHalf.reduce((sum: number, val: number) => sum + val, 0) / secondHalf.length;
-
-    const change = ((secondAvg - firstAvg) / firstAvg) * 100;
-
-    if (change > 5) return 'INCREASING';
-    if (change < -5) return 'DECREASING';
-    return 'STABLE';
-  }
-
-  /**
-   * Crear métricas vacías
-   */
-  private createEmptyMetrics(bovineId: string): ProductionMetrics {
-    return {
-      bovineId,
-      period: { startDate: new Date(), endDate: new Date() },
-      totalRecords: 0,
-      byType: {}
-    };
-  }
-
-  /**
-   * Actualizar métricas del bovino de forma segura
-   */
-  private async safeBovineUpdate(bovineId: string, updateData: any): Promise<void> {
+  async updateProduction(
+    id: string,
+    data: Partial<ProductionAttributes>,
+    userId: string,
+    transaction?: Transaction
+  ): Promise<Production> {
+    const t = transaction || await sequelize.transaction();
     try {
-      if (updateData && typeof updateData === 'object') {
-        await Bovine.update(updateData, { 
-          where: { id: bovineId }
-        });
-      }
+      const production = await this.productionModel.findByPk(id, { transaction: t });
+      if (!production) throw new ValidationError(`Producción con ID ${id} no encontrada`);
+
+      await production.update({ ...data, updatedBy: userId }, { transaction: t });
+      if (!transaction) await t.commit();
+
+      return production;
     } catch (error) {
-      logger.warn('⚠️ Error actualizando bovino', { error, bovineId });
+      if (!transaction) await t.rollback();
+      throw error;
     }
   }
 
   /**
-   * Calcular fecha de inicio según período
+   * Elimina (soft delete) un registro de producción
    */
-  private calculateStartDate(endDate: Date, period: string): Date {
-    const start = new Date(endDate);
-    
-    switch (period) {
-      case 'week':
-        start.setDate(start.getDate() - 7);
-        break;
-      case 'month':
-        start.setMonth(start.getMonth() - 1);
-        break;
-      case 'quarter':
-        start.setMonth(start.getMonth() - 3);
-        break;
-      case 'year':
-        start.setFullYear(start.getFullYear() - 1);
-        break;
+  async deleteProduction(id: string, userId: string, transaction?: Transaction): Promise<void> {
+    const t = transaction || await sequelize.transaction();
+    try {
+      const production = await this.productionModel.findByPk(id, { transaction: t });
+      if (!production) throw new ValidationError(`Producción con ID ${id} no encontrada`);
+
+      await production.destroy({ transaction: t });
+      if (!transaction) await t.commit();
+    } catch (error) {
+      if (!transaction) await t.rollback();
+      throw error;
     }
-    
-    return start;
   }
 
-  /**
-   * Procesar datos de tendencias
-   */
-  private processTrendsData(records: MockProductionRecord[], period: string): ProductionTrends {
-    // Implementar lógica de procesamiento de tendencias
-    const groupedData = records.reduce((acc: Record<string, MockProductionRecord[]>, record: MockProductionRecord) => {
-      const key = this.getDateKey(record.recordedDate, period);
-      if (!acc[key]) {
-        acc[key] = [];
-      }
-      acc[key].push(record);
-      return acc;
-    }, {} as Record<string, MockProductionRecord[]>);
+  // ==========================================================================
+  // Métricas y análisis
+  // ==========================================================================
 
-    const trends: ProductionTrends = {
-      period,
-      dataPoints: [],
+  /**
+   * Calcula métricas de producción para un bovino
+   */
+  async getProductionMetrics(
+    bovineId: string,
+    options?: { productionType?: string; startDate?: Date; endDate?: Date }
+  ): Promise<{
+    totalRecords: number;
+    totalQuantity: number;        // ← cambiado
+    averageQuantity: number;      // ← cambiado
+    minQuantity: number;          // ← cambiado
+    maxQuantity: number;          // ← cambiado
+    unit: string;
+    lastDate?: Date;
+  } | null> {
+    const where: any = { bovineId };
+    if (options?.productionType) where.productionType = options.productionType;
+    if (options?.startDate || options?.endDate) {
+      where.productionDate = {};
+      if (options.startDate) where.productionDate[Op.gte] = options.startDate;
+      if (options.endDate) where.productionDate[Op.lte] = options.endDate;
+    }
+
+    const records = await this.productionModel.findAll({ where, order: [['productionDate', 'ASC']] });
+    if (records.length === 0) return null;
+
+    const totalQuantity = records.reduce((sum, r) => sum + r.quantity, 0);
+    const quantities = records.map(r => r.quantity);
+    const unit = records[0].unit;
+    const lastDate = records[records.length - 1].productionDate;
+
+    return {
       totalRecords: records.length,
-      averageValue: records.length > 0 ? 
-        records.reduce((sum: number, r: MockProductionRecord) => sum + r.value, 0) / records.length : 0
+      totalQuantity,
+      averageQuantity: totalQuantity / records.length,
+      minQuantity: Math.min(...quantities),
+      maxQuantity: Math.max(...quantities),
+      unit,
+      lastDate,
     };
+  }
 
-    for (const [dateKey, dayRecords] of Object.entries(groupedData)) {
-      const totalValue = dayRecords.reduce((sum: number, r: MockProductionRecord) => sum + r.value, 0);
-      const avgValue = totalValue / dayRecords.length;
-      
-      trends.dataPoints.push({
-        date: new Date(dateKey),
-        value: totalValue,
-        average: avgValue,
-        count: dayRecords.length
+  /**
+   * Obtiene tendencias de producción (agrupadas por período)
+   */
+  async getProductionTrends(
+    bovineId: string,
+    productionType: string,
+    period: 'day' | 'week' | 'month' = 'day'
+  ): Promise<{ date: Date; total: number; average: number; count: number }[]> {
+    const records = await this.productionModel.findAll({
+      where: { bovineId, productionType },
+      order: [['productionDate', 'ASC']],
+    });
+
+    if (records.length === 0) return [];
+
+    // Agrupar según el período
+    const groups = new Map<string, { total: number; count: number; date: Date }>();
+
+    records.forEach(record => {
+      let key: string;
+      const date = new Date(record.productionDate);
+      switch (period) {
+        case 'week':
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          key = weekStart.toISOString().split('T')[0];
+          break;
+        case 'month':
+          key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+          break;
+        default: // day
+          key = date.toISOString().split('T')[0];
+      }
+
+      if (!groups.has(key)) {
+        groups.set(key, { total: 0, count: 0, date });
+      }
+      const group = groups.get(key)!;
+      group.total += record.quantity;
+      group.count++;
+    });
+
+    return Array.from(groups.entries()).map(([key, group]) => ({
+      date: group.date,
+      total: group.total,
+      average: group.total / group.count,
+      count: group.count,
+    }));
+  }
+
+  // ==========================================================================
+  // Métodos específicos para tipos de producción (ej. leche, peso)
+  // ==========================================================================
+  private generateProductionCode(): string {
+    return `PROD-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+  }
+  /**
+   * Registra producción de leche (conveniencia)
+   */
+  async recordMilkProduction(
+    bovineId: string,
+    liters: number,
+    productionDate: Date,
+    userId: string,
+  ): Promise<Production> {
+    return this.createProduction(
+      {
+        bovineId,
+        productionType: ProductionType.MILK,
+        quantity: liters,
+        unit: 'L',
+        productionDate,
+        productionCode: this.generateProductionCode(),
+        status: ProductionStatus.PLANNED,
+        createdBy: userId,
+        isCompleted: false,
+        isApproved: false,
+        isActive: true,
+      },
+      userId
+    );
+  }
+
+  /**
+   * Registra peso del bovino
+   */
+  async recordWeight(
+    bovineId: string,
+    weightKg: number,
+    productionDate: Date,
+    userId: string,
+  ): Promise<Production> {
+    return this.createProduction(
+      {
+        bovineId,
+        productionType: ProductionType.MEAT,
+        quantity: weightKg,
+        unit: 'KG',
+        productionDate,
+        productionCode: this.generateProductionCode(),
+        status: ProductionStatus.PLANNED,
+        createdBy: userId,
+        isCompleted: false,
+        isApproved: false,
+        isActive: true,
+      },
+      userId
+    );
+  }
+
+  // ==========================================================================
+  // Alertas (opcional, si se inyecta notificationService)
+  // ==========================================================================
+
+  private async checkProductionAlerts(production: Production): Promise<void> {
+    if (!this.notificationService) return;
+
+    // Alerta de baja producción de leche
+    if (production.productionType === ProductionType.MILK && production.quantity < 5) {
+
+      let ranchId: string | undefined;
+      const bovine = await this.bovineModel.findByPk(production.bovineId);
+      if (bovine) {
+        ranchId = bovine.ranchId;
+      }
+      await this.notificationService.sendNotification({
+        userId: production.createdBy,
+        type: NotificationType.PRODUCTION_ALERT, // agregar al enum enun futuro este tipo de notificaciones
+        priority: NotificationPriority.HIGH,
+        title: 'Baja producción de leche',
+        content: `Producción de leche por debajo del promedio: ${production.quantity}L para el bovino ${production.bovineId}`,
+        data: {
+          bovineId: production.bovineId,
+          quantity: production.quantity,
+          unit: production.unit,
+          productionDate: production.productionDate,
+        },
+        metadata: {
+          bovineId: production.bovineId,
+          ranchId: ranchId, // Si no tienes ranchId en production, obténlo del bovino
+        },
       });
     }
 
-    // Ordenar por fecha
-    trends.dataPoints.sort((a, b) => a.date.getTime() - b.date.getTime());
-
-    return trends;
+    // Aquí puedes añadir más alertas según necesidades
   }
 
+
   /**
-   * Obtener clave de fecha según período
-   */
-  private getDateKey(date: Date, period: string): string {
-    switch (period) {
-      case 'week':
-      case 'month':
-        return date.toISOString().split('T')[0]; // YYYY-MM-DD
-      case 'quarter':
-        return `${date.getFullYear()}-Q${Math.ceil((date.getMonth() + 1) / 3)}`;
-      case 'year':
-        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      default:
-        return date.toISOString().split('T')[0];
+ * Obtiene los bovinos con mayor producción total en un rancho durante un período.
+ * @param ranchId ID del rancho
+ * @param startDate Fecha de inicio
+ * @param endDate Fecha de fin
+ * @param limit Número máximo de resultados (por defecto 10)
+ * @returns Lista de bovinos con su producción total, unidad y arete
+ */
+  async getTopProducersByRanch(
+    ranchId: string,
+    startDate: Date,
+    endDate: Date,
+    limit: number = 10
+  ): Promise<Array<{ bovineId: string; earTag: string; total: number; unit: string }>> {
+    // 1. Obtener todos los bovinos activos del rancho
+    const bovines = await this.bovineModel.findAll({
+      where: { ranchId, isActive: true },
+      attributes: ['id', 'earTag'],
+    });
+
+    const bovineIds = bovines.map(b => b.id);
+    if (bovineIds.length === 0) return [];
+
+    // 2. Obtener todos los registros de producción de esos bovinos en el período
+    const records = await this.productionModel.findAll({
+      where: {
+        bovineId: { [Op.in]: bovineIds },
+        productionDate: { [Op.between]: [startDate, endDate] },
+      },
+      attributes: ['bovineId', 'quantity', 'unit'],
+    });
+
+    // 3. Agrupar por bovineId y sumar cantidades
+    const grouped = records.reduce((acc, record) => {
+      const id = record.bovineId;
+      if (!acc[id]) {
+        acc[id] = { total: 0, unit: record.unit, earTag: '' };
+      }
+      acc[id].total += record.quantity;
+      // La unidad se asume consistente para el mismo tipo de producción
+      // Si hay mezcla de unidades (raro), se tomaría la primera; pero en la práctica suele ser igual.
+      return acc;
+    }, {} as Record<string, { total: number; unit: string; earTag: string }>);
+
+    // 4. Agregar el earTag desde la lista de bovinos
+    for (const bovine of bovines) {
+      if (grouped[bovine.id]) {
+        grouped[bovine.id].earTag = bovine.earTag;
+      }
     }
+
+    // 5. Convertir a array, ordenar y limitar
+    const producers = Object.entries(grouped).map(([bovineId, data]) => ({
+      bovineId,
+      earTag: data.earTag,
+      total: data.total,
+      unit: data.unit,
+    }));
+
+    producers.sort((a, b) => b.total - a.total);
+    return producers.slice(0, limit);
   }
 }
-
-// Exportar instancia única del servicio
-export const productionService = new ProductionService();

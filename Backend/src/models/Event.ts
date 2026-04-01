@@ -1,33 +1,43 @@
-import { DataTypes, Model, Optional, Op } from 'sequelize';
+// PROPÓSITO: Eventos PROGRAMADOS para bovinos (AGENDA)
+import { DataTypes, Model, Optional } from 'sequelize';
 import sequelize from '../config/database';
-import { LocationData } from './Bovine';
+import { LocationData, HealthStatus } from './Bovine';
 
-// Enums para tipos de eventos
+// =============================================
+// ENUMS PARA EVENTOS PROGRAMADOS
+// =============================================
+
 export enum EventType {
-  VACCINATION = 'VACCINATION',
-  DISEASE = 'DISEASE',
-  HEALTH_CHECK = 'HEALTH_CHECK',
-  TREATMENT = 'TREATMENT',
-  REPRODUCTION = 'REPRODUCTION',
-  MOVEMENT = 'MOVEMENT',
-  FEEDING = 'FEEDING',
-  WEIGHING = 'WEIGHING',
-  BIRTH = 'BIRTH',
-  DEATH = 'DEATH',
-  INJURY = 'INJURY',
-  QUARANTINE = 'QUARANTINE',
-  MEDICATION = 'MEDICATION',
-  SURGERY = 'SURGERY',
+  // Salud (programados)
+  VACCINATION = 'VACCINATION',           // Vacunación programada
+  HEALTH_CHECK = 'HEALTH_CHECK',         // Chequeo programado
+  TREATMENT = 'TREATMENT',               // Tratamiento programado
+  MEDICATION = 'MEDICATION',             // Medicación programada
+  SURGERY = 'SURGERY',                   // Cirugía programada
+  
+  // Reproducción (programados)
+  REPRODUCTION = 'REPRODUCTION',         // Servicio programado
+  PREGNANCY_CHECK = 'PREGNANCY_CHECK',   // Chequeo de gestación programado
+  BIRTH = 'BIRTH',                       // Parto esperado
+  WEANING = 'WEANING',                    // Destete programado
+  
+  // Producción (programados)
+  WEIGHING = 'WEIGHING',                  // Pesaje programado
+  
+  // Movimiento (programados)
+  MOVEMENT = 'MOVEMENT',                  // Movimiento programado
+  QUARANTINE = 'QUARANTINE',              // Cuarentena programada
+  
+  // Generales
   OTHER = 'OTHER'
 }
 
 export enum EventStatus {
-  SCHEDULED = 'SCHEDULED',
-  IN_PROGRESS = 'IN_PROGRESS',
-  COMPLETED = 'COMPLETED',
-  CANCELLED = 'CANCELLED',
-  POSTPONED = 'POSTPONED',
-  FAILED = 'FAILED'
+  SCHEDULED = 'SCHEDULED',      // Programado (futuro)
+  IN_PROGRESS = 'IN_PROGRESS',  // En progreso (ahora)
+  COMPLETED = 'COMPLETED',      // Completado (cuando se crea Health)
+  CANCELLED = 'CANCELLED',      // Cancelado
+  POSTPONED = 'POSTPONED'       // Pospuesto
 }
 
 export enum EventPriority {
@@ -48,190 +58,190 @@ export enum RecurrenceType {
   CUSTOM = 'CUSTOM'
 }
 
-// Interface para información específica de vacunación
-export interface VaccinationEventData {
-  vaccineType: string; // Tipo de vacuna
-  vaccineName: string; // Nombre comercial de la vacuna
-  manufacturer?: string; // Fabricante
-  batchNumber?: string; // Número de lote
-  expirationDate?: Date; // Fecha de vencimiento
-  dosage: number; // Dosis administrada
-  dosageUnit: string; // Unidad de la dosis (ml, cc, etc.)
-  applicationMethod: 'SUBCUTANEOUS' | 'INTRAMUSCULAR' | 'ORAL' | 'NASAL' | 'OTHER'; // Método de aplicación
-  applicationSite?: string; // Sitio de aplicación
-  nextDueDate?: Date; // Próxima fecha de aplicación
-  reactions?: string; // Reacciones adversas observadas
-  effectivenessRate?: number; // Tasa de efectividad esperada
+// =============================================
+// INTERFACES PARA PLANIFICACIÓN (NO resultados)
+// =============================================
+
+// Datos esperados para vacunación (NO resultados)
+export interface ExpectedVaccinationData {
+  vaccineType: string;
+  vaccineName: string;
+  manufacturer?: string;
+  batchNumber?: string;        // Número de lote esperado
+  expirationDate?: Date;       // Fecha de vencimiento esperada
+  dosage: number;
+  dosageUnit: string;
+  applicationMethod: 'SUBCUTANEOUS' | 'INTRAMUSCULAR' | 'ORAL' | 'NASAL' | 'OTHER';
+  applicationSite?: string;
+  nextDueDate?: Date;          // Próxima fecha programada
 }
 
-// Interface para información específica de enfermedad
-export interface DiseaseEventData {
-  diseaseName: string; // Nombre de la enfermedad
-  diseaseCode?: string; // Código de la enfermedad
-  symptoms: string[]; // Síntomas observados
-  severity: 'MILD' | 'MODERATE' | 'SEVERE' | 'CRITICAL'; // Severidad
-  contagious: boolean; // Si es contagiosa
-  diagnosis: 'SUSPECTED' | 'CONFIRMED' | 'DIFFERENTIAL'; // Tipo de diagnóstico
-  diagnosisMethod?: string; // Método de diagnóstico (visual, laboratorio, etc.)
-  causativeAgent?: string; // Agente causante
-  affectedSystems?: string[]; // Sistemas afectados
-  chronicCondition: boolean; // Si es condición crónica
-  recoveryTime?: number; // Tiempo de recuperación estimado (días)
-  treatmentRequired: boolean; // Si requiere tratamiento
-}
-
-// Interface para información específica de tratamiento
-export interface TreatmentEventData {
+// Datos esperados para tratamiento
+export interface ExpectedTreatmentData {
   treatmentType: 'MEDICATION' | 'SURGERY' | 'THERAPY' | 'ISOLATION' | 'OTHER';
-  medicationName?: string; // Nombre del medicamento
-  activeIngredient?: string; // Principio activo
-  dosage?: number; // Dosis
-  dosageUnit?: string; // Unidad de dosis
-  frequency?: string; // Frecuencia de administración
-  duration?: number; // Duración del tratamiento (días)
+  medicationName?: string;
+  activeIngredient?: string;
+  dosage?: number;
+  dosageUnit?: string;
+  frequency?: string;
+  duration?: number;
   administrationRoute?: 'ORAL' | 'INJECTABLE' | 'TOPICAL' | 'INTRAVENOUS' | 'OTHER';
-  withdrawalPeriod?: number; // Período de retiro (días)
-  sideEffects?: string; // Efectos secundarios observados
-  effectiveness?: 'POOR' | 'FAIR' | 'GOOD' | 'EXCELLENT'; // Efectividad del tratamiento
+  withdrawalPeriod?: number;
 }
 
-// Interface para información específica de chequeo de salud
-export interface HealthCheckEventData {
+// Datos esperados para chequeo de salud
+export interface ExpectedHealthCheckData {
   checkType: 'ROUTINE' | 'FOLLOW_UP' | 'EMERGENCY' | 'PRE_BREEDING' | 'POST_TREATMENT';
-  vitalSigns?: {
-    temperature?: number; // Temperatura corporal
-    heartRate?: number; // Frecuencia cardíaca
-    respiratoryRate?: number; // Frecuencia respiratoria
-    bloodPressure?: string; // Presión arterial
-  };
-  bodyConditionScore?: number; // Puntuación de condición corporal (1-9)
-  locomotionScore?: number; // Puntuación de locomoción (1-5)
-  hydrationStatus?: 'NORMAL' | 'MILD_DEHYDRATION' | 'MODERATE_DEHYDRATION' | 'SEVERE_DEHYDRATION';
-  appetiteStatus?: 'NORMAL' | 'REDUCED' | 'ABSENT' | 'INCREASED';
-  behaviorStatus?: 'NORMAL' | 'LETHARGIC' | 'AGGRESSIVE' | 'RESTLESS' | 'DEPRESSED';
-  skinCondition?: 'NORMAL' | 'DRY' | 'LESIONS' | 'PARASITES' | 'WOUNDS';
-  eyeCondition?: 'NORMAL' | 'DISCHARGE' | 'INFLAMMATION' | 'CLOUDINESS';
-  musculoskeletalStatus?: 'NORMAL' | 'LAMENESS' | 'STIFFNESS' | 'SWELLING';
-  reproductiveStatus?: 'NORMAL' | 'PREGNANT' | 'IN_HEAT' | 'POST_PARTUM' | 'ABNORMAL';
 }
 
-// Interface para información específica de reproducción
-export interface ReproductionEventData {
+// Datos esperados para reproducción
+export interface ExpectedReproductionData {
   reproductionType: 'NATURAL_BREEDING' | 'ARTIFICIAL_INSEMINATION' | 'EMBRYO_TRANSFER' | 'PREGNANCY_CHECK' | 'BIRTH' | 'WEANING';
-  maleId?: string; // ID del macho (para reproducción)
-  semenSource?: string; // Fuente del semen
-  semenBatch?: string; // Lote del semen
+  maleId?: string;
+  semenSource?: string;
+  semenBatch?: string;
   inseminationMethod?: 'CERVICAL' | 'INTRAUTERINE' | 'DEEP_UTERINE';
-  pregnancyStatus?: 'CONFIRMED' | 'SUSPECTED' | 'NEGATIVE' | 'UNKNOWN';
-  gestationDay?: number; // Día de gestación
-  expectedCalvingDate?: Date; // Fecha esperada de parto
-  calfId?: string; // ID del ternero (para nacimientos)
-  birthWeight?: number; // Peso al nacer
-  calvingDifficulty?: 'EASY' | 'MODERATE' | 'DIFFICULT' | 'CESAREAN';
-  placentaExpulsion?: 'NORMAL' | 'RETAINED' | 'INCOMPLETE';
-  weaningWeight?: number; // Peso al destete
+  expectedCalvingDate?: Date;
 }
 
-// Interface para información específica de movimiento
-export interface MovementEventData {
+// Datos esperados para movimiento
+export interface ExpectedMovementData {
   movementType: 'PASTURE_CHANGE' | 'FACILITY_TRANSFER' | 'TRANSPORT' | 'EXERCISE' | 'GRAZING';
-  fromLocation?: LocationData; // Ubicación de origen
-  toLocation?: LocationData; // Ubicación de destino
+  fromLocation?: LocationData;
+  toLocation?: LocationData;
   transportMethod?: 'WALKING' | 'TRUCK' | 'TRAILER' | 'OTHER';
-  distance?: number; // Distancia recorrida (km)
-  duration?: number; // Duración del movimiento (minutos)
-  reasonForMovement?: string; // Razón del movimiento
-  accompanyingAnimals?: string[]; // IDs de animales que acompañan
-  weatherConditions?: string; // Condiciones climáticas
-  stress_level?: 'LOW' | 'MODERATE' | 'HIGH'; // Nivel de estrés observado
+  reasonForMovement?: string;
 }
 
-// Union type para datos específicos del evento
-export type EventSpecificData = 
-  | VaccinationEventData 
-  | DiseaseEventData 
-  | TreatmentEventData 
-  | HealthCheckEventData 
-  | ReproductionEventData 
-  | MovementEventData;
+export interface ScheduledHealthCheckData {
+    type: 'SCHEDULED_HEALTH_CHECK';
+    healthStatus: HealthStatus;
+    interval: number;
+    automatic: boolean;
+    previousHealthRecordId?: string;
+}
 
-// Interface para información de recurrencia
+// Union type para datos esperados
+export type ExpectedEventData = 
+  | ExpectedVaccinationData 
+  | ExpectedTreatmentData 
+  | ExpectedHealthCheckData 
+  | ExpectedReproductionData 
+  | ExpectedMovementData
+  | ScheduledHealthCheckData;
+
+// Configuración de recurrencia
 export interface RecurrenceConfig {
   type: RecurrenceType;
-  interval?: number; // Intervalo personalizado
-  endDate?: Date; // Fecha de fin de la recurrencia
-  maxOccurrences?: number; // Máximo número de ocurrencias
-  daysOfWeek?: number[]; // Días de la semana (0=domingo, 6=sábado)
-  dayOfMonth?: number; // Día del mes
-  monthsOfYear?: number[]; // Meses del año
+  interval?: number;
+  endDate?: Date;
+  maxOccurrences?: number;
+  daysOfWeek?: number[];
+  dayOfMonth?: number;
+  monthsOfYear?: number[];
 }
 
-// Interface para notificaciones
+// Configuración de notificaciones
 export interface NotificationConfig {
   enabled: boolean;
-  advanceNotice?: number; // Notificar X días antes
-  reminderFrequency?: 'DAILY' | 'WEEKLY' | 'CUSTOM'; // Frecuencia de recordatorios
-  notificationMethods?: ('EMAIL' | 'SMS' | 'PUSH' | 'WHATSAPP')[]; // Métodos de notificación
-  recipients?: string[]; // IDs de usuarios que reciben notificación
+  advanceNotice?: number;      // Días antes de notificar
+  reminderFrequency?: 'ONCE' | 'DAILY' | 'WEEKLY';
+  notificationMethods: ('EMAIL' | 'SMS' | 'PUSH' | 'WHATSAPP')[];
+  recipients: string[];
 }
 
-// Atributos del modelo Event
+// =============================================
+// ATRIBUTOS DEL MODELO EVENT (SOLO PROGRAMACIÓN)
+// =============================================
+
 export interface EventAttributes {
   id: string;
-  bovineId: string; // ID del bovino relacionado
-  eventType: EventType; // Tipo de evento
-  title: string; // Título del evento
-  description?: string; // Descripción detallada
-  status: EventStatus; // Estado del evento
-  priority: EventPriority; // Prioridad del evento
-  scheduledDate: Date; // Fecha programada
-  startDate?: Date; // Fecha de inicio real
-  endDate?: Date; // Fecha de finalización
-  location: LocationData; // Ubicación donde ocurrió el evento
-  performedBy?: string; // ID del usuario que realizó el evento
-  veterinarianId?: string; // ID del veterinario (si aplica)
-  cost?: number; // Costo del evento
-  currency?: string; // Moneda del costo
-  eventData?: EventSpecificData; // Datos específicos del tipo de evento
-  recurrence?: RecurrenceConfig; // Configuración de recurrencia
-  parentEventId?: string; // ID del evento padre (para eventos recurrentes)
-  notifications?: NotificationConfig; // Configuración de notificaciones
-  attachments?: string[]; // URLs de archivos adjuntos
-  photos?: string[]; // URLs de fotos del evento
-  results?: string; // Resultados del evento
-  complications?: string; // Complicaciones observadas
-  followUpRequired: boolean; // Si requiere seguimiento
-  followUpDate?: Date; // Fecha de seguimiento
-  followUpNotes?: string; // Notas de seguimiento
-  publicNotes?: string; // Notas visibles para todos
-  privateNotes?: string; // Notas privadas del veterinario/responsable
-  weatherConditions?: string; // Condiciones climáticas durante el evento
-  temperature?: number; // Temperatura ambiente
-  humidity?: number; // Humedad relativa
-  isActive: boolean; // Si el evento está activo
-  createdBy: string; // ID del usuario que creó el evento
-  updatedBy?: string; // ID del usuario que actualizó el evento
+  bovineId: string;
+  
+  // Relación con Health (cuando se complete)
+  healthRecordId?: string;  // Se llena al completarse
+  
+  // Datos básicos
+  eventType: EventType;
+  title: string;
+  description?: string;
+  
+  // Estado
+  status: EventStatus;
+  priority: EventPriority;
+  
+  // Fechas
+  scheduledDate: Date;      // Cuándo debería ocurrir
+  startDate?: Date;         // Cuándo empezó realmente (solo para tracking)
+  endDate?: Date;           // Cuándo terminó (solo para tracking)
+  
+  // Ubicación esperada
+  expectedLocation?: LocationData;
+  
+  // Responsables
+  assignedTo?: string;      // ID del usuario asignado
+  veterinarianId?: string;  // ID del veterinario (si aplica)
+  
+  // Costo estimado
+  estimatedCost?: number;
+  currency?: string;
+  
+  // Datos esperados (lo que se planea hacer)
+  expectedData?: ExpectedEventData;
+  
+  // Recurrencia
+  recurrence?: RecurrenceConfig;
+  parentEventId?: string;   // Para eventos recurrentes
+  
+  // Notificaciones
+  notifications?: NotificationConfig;
+  
+  // Documentos (protocolos, instrucciones, etc.)
+  attachments?: string[];
+  
+  // Notas de planificación
+  planningNotes?: string;
+  internalNotes?: string;
+  
+  // Requerimientos
+  requiresVeterinarian: boolean;
+  requiresEquipment?: string[];
+  requiresFacility?: string;
+  
+  // Recordatorios
+  reminderSent: boolean;
+  reminderDate?: Date;
+  
+  // Metadata
+  isActive: boolean;
+  metadata?: any;
+  
+  // Auditoría
+  createdBy: string;
+  updatedBy?: string;
   createdAt: Date;
   updatedAt: Date;
-  deletedAt?: Date; // Para soft delete
+  deletedAt?: Date;
 }
 
-// Atributos opcionales al crear un nuevo evento
-export interface EventCreationAttributes 
-  extends Optional<EventAttributes, 
-    'id' | 'description' | 'startDate' | 'endDate' | 'performedBy' | 
-    'veterinarianId' | 'cost' | 'currency' | 'eventData' | 'recurrence' | 
-    'parentEventId' | 'notifications' | 'attachments' | 'photos' | 'results' | 
-    'complications' | 'followUpDate' | 'followUpNotes' | 'publicNotes' | 
-    'privateNotes' | 'weatherConditions' | 'temperature' | 'humidity' | 
-    'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
+// Atributos opcionales al crear
+export interface EventCreationAttributes
+  extends Optional<EventAttributes,
+    'id' | 'healthRecordId' | 'description' | 'startDate' | 'endDate' |
+    'expectedLocation' | 'assignedTo' | 'veterinarianId' | 'estimatedCost' |
+    'currency' | 'expectedData' | 'recurrence' | 'parentEventId' |
+    'notifications' | 'attachments' | 'planningNotes' | 'internalNotes' |
+    'requiresEquipment' | 'requiresFacility' | 'reminderSent' | 'reminderDate' |
+    'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'metadata'
   > {}
 
-// Clase del modelo Event
-class Event extends Model<EventAttributes, EventCreationAttributes> 
+// Clase del modelo Event (ANÉMICA - sin métodos de negocio)
+class Event extends Model<EventAttributes, EventCreationAttributes>
   implements EventAttributes {
+  
   public id!: string;
   public bovineId!: string;
+  public healthRecordId?: string;
   public eventType!: EventType;
   public title!: string;
   public description?: string;
@@ -240,221 +250,33 @@ class Event extends Model<EventAttributes, EventCreationAttributes>
   public scheduledDate!: Date;
   public startDate?: Date;
   public endDate?: Date;
-  public location!: LocationData;
-  public performedBy?: string;
+  public expectedLocation?: LocationData;
+  public assignedTo?: string;
   public veterinarianId?: string;
-  public cost?: number;
+  public estimatedCost?: number;
   public currency?: string;
-  public eventData?: EventSpecificData;
+  public expectedData?: ExpectedEventData;
   public recurrence?: RecurrenceConfig;
   public parentEventId?: string;
   public notifications?: NotificationConfig;
   public attachments?: string[];
-  public photos?: string[];
-  public results?: string;
-  public complications?: string;
-  public followUpRequired!: boolean;
-  public followUpDate?: Date;
-  public followUpNotes?: string;
-  public publicNotes?: string;
-  public privateNotes?: string;
-  public weatherConditions?: string;
-  public temperature?: number;
-  public humidity?: number;
+  public planningNotes?: string;
+  public internalNotes?: string;
+  public requiresVeterinarian!: boolean;
+  public requiresEquipment?: string[];
+  public requiresFacility?: string;
+  public reminderSent!: boolean;
+  public reminderDate?: Date;
   public isActive!: boolean;
   public createdBy!: string;
   public updatedBy?: string;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public deletedAt?: Date;
+   public metadata?: any;
 
-  // Métodos de instancia
-
-  /**
-   * Verifica si el evento está vencido
-   * @returns True si el evento está vencido
-   */
-  public isOverdue(): boolean {
-    if (this.status === EventStatus.COMPLETED || this.status === EventStatus.CANCELLED) {
-      return false;
-    }
-    return new Date() > new Date(this.scheduledDate);
-  }
-
-  /**
-   * Calcula la duración del evento en minutos
-   * @returns Duración en minutos o null si no está completado
-   */
-  public getDurationInMinutes(): number | null {
-    if (!this.startDate || !this.endDate) return null;
-    const diffTime = new Date(this.endDate).getTime() - new Date(this.startDate).getTime();
-    return Math.round(diffTime / (1000 * 60));
-  }
-
-  /**
-   * Obtiene el tipo de evento en español
-   * @returns Tipo de evento traducido
-   */
-  public getEventTypeLabel(): string {
-    const labels = {
-      [EventType.VACCINATION]: 'Vacunación',
-      [EventType.DISEASE]: 'Enfermedad',
-      [EventType.HEALTH_CHECK]: 'Chequeo de Salud',
-      [EventType.TREATMENT]: 'Tratamiento',
-      [EventType.REPRODUCTION]: 'Reproducción',
-      [EventType.MOVEMENT]: 'Movimiento',
-      [EventType.FEEDING]: 'Alimentación',
-      [EventType.WEIGHING]: 'Pesaje',
-      [EventType.BIRTH]: 'Nacimiento',
-      [EventType.DEATH]: 'Muerte',
-      [EventType.INJURY]: 'Lesión',
-      [EventType.QUARANTINE]: 'Cuarentena',
-      [EventType.MEDICATION]: 'Medicación',
-      [EventType.SURGERY]: 'Cirugía',
-      [EventType.OTHER]: 'Otro'
-    };
-    return labels[this.eventType];
-  }
-
-  /**
-   * Obtiene el estado del evento en español
-   * @returns Estado del evento traducido
-   */
-  public getStatusLabel(): string {
-    const labels = {
-      [EventStatus.SCHEDULED]: 'Programado',
-      [EventStatus.IN_PROGRESS]: 'En Progreso',
-      [EventStatus.COMPLETED]: 'Completado',
-      [EventStatus.CANCELLED]: 'Cancelado',
-      [EventStatus.POSTPONED]: 'Pospuesto',
-      [EventStatus.FAILED]: 'Fallido'
-    };
-    return labels[this.status];
-  }
-
-  /**
-   * Obtiene la prioridad del evento en español
-   * @returns Prioridad del evento traducida
-   */
-  public getPriorityLabel(): string {
-    const labels = {
-      [EventPriority.LOW]: 'Baja',
-      [EventPriority.MEDIUM]: 'Media',
-      [EventPriority.HIGH]: 'Alta',
-      [EventPriority.CRITICAL]: 'Crítica',
-      [EventPriority.EMERGENCY]: 'Emergencia'
-    };
-    return labels[this.priority];
-  }
-
-  /**
-   * Verifica si el evento requiere seguimiento
-   * @returns True si requiere seguimiento
-   */
-  public needsFollowUp(): boolean {
-    if (!this.followUpRequired) return false;
-    if (!this.followUpDate) return true;
-    return new Date() >= new Date(this.followUpDate);
-  }
-
-  /**
-   * Calcula los días hasta el evento programado
-   * @returns Número de días (negativo si ya pasó)
-   */
-  public getDaysUntilScheduled(): number {
-    const now = new Date();
-    const scheduled = new Date(this.scheduledDate);
-    const diffTime = scheduled.getTime() - now.getTime();
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  }
-
-  /**
-   * Verifica si el evento es de tipo médico
-   * @returns True si es evento médico
-   */
-  public isMedicalEvent(): boolean {
-    const medicalTypes = [
-      EventType.VACCINATION,
-      EventType.DISEASE,
-      EventType.HEALTH_CHECK,
-      EventType.TREATMENT,
-      EventType.MEDICATION,
-      EventType.SURGERY,
-      EventType.INJURY
-    ];
-    return medicalTypes.includes(this.eventType);
-  }
-
-  /**
-   * Obtiene información específica de vacunación
-   * @returns Datos de vacunación si aplica
-   */
-  public getVaccinationData(): VaccinationEventData | null {
-    if (this.eventType !== EventType.VACCINATION) return null;
-    return this.eventData as VaccinationEventData;
-  }
-
-  /**
-   * Obtiene información específica de enfermedad
-   * @returns Datos de enfermedad si aplica
-   */
-  public getDiseaseData(): DiseaseEventData | null {
-    if (this.eventType !== EventType.DISEASE) return null;
-    return this.eventData as DiseaseEventData;
-  }
-
-  /**
-   * Genera el próximo evento recurrente
-   * @returns Configuración del próximo evento
-   */
-  public generateNextRecurrentEvent(): Partial<EventCreationAttributes> | null {
-    if (!this.recurrence || this.recurrence.type === RecurrenceType.NONE) {
-      return null;
-    }
-
-    // Lógica simplificada para demostración
-    const nextDate = new Date(this.scheduledDate);
-    
-    switch (this.recurrence.type) {
-      case RecurrenceType.DAILY:
-        nextDate.setDate(nextDate.getDate() + (this.recurrence.interval || 1));
-        break;
-      case RecurrenceType.WEEKLY:
-        nextDate.setDate(nextDate.getDate() + (7 * (this.recurrence.interval || 1)));
-        break;
-      case RecurrenceType.MONTHLY:
-        nextDate.setMonth(nextDate.getMonth() + (this.recurrence.interval || 1));
-        break;
-      case RecurrenceType.YEARLY:
-        nextDate.setFullYear(nextDate.getFullYear() + (this.recurrence.interval || 1));
-        break;
-      default:
-        return null;
-    }
-
-    // Verificar si ha alcanzado la fecha límite o máximo de ocurrencias
-    if (this.recurrence.endDate && nextDate > this.recurrence.endDate) {
-      return null;
-    }
-
-    return {
-      bovineId: this.bovineId,
-      eventType: this.eventType,
-      title: this.title,
-      description: this.description,
-      status: EventStatus.SCHEDULED,
-      priority: this.priority,
-      scheduledDate: nextDate,
-      location: this.location,
-      eventData: this.eventData,
-      recurrence: this.recurrence,
-      parentEventId: this.parentEventId || this.id,
-      notifications: this.notifications,
-      followUpRequired: this.followUpRequired,
-      isActive: true,
-      createdBy: this.createdBy
-    };
-  }
+  // ❌ NO MÉTODOS DE NEGOCIO AQUÍ
+  // Todos van en servicios
 }
 
 // Definición del modelo en Sequelize
@@ -465,7 +287,7 @@ Event.init(
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
       allowNull: false,
-      comment: 'ID único del evento'
+      comment: 'ID único del evento programado'
     },
     bovineId: {
       type: DataTypes.UUID,
@@ -478,10 +300,18 @@ Event.init(
       onDelete: 'CASCADE',
       comment: 'ID del bovino relacionado con el evento'
     },
+    healthRecordId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'health_records',
+        key: 'id'
+      },
+      comment: 'ID del registro de salud cuando se completa el evento'
+    },
     eventType: {
       type: DataTypes.ENUM(...Object.values(EventType)),
       allowNull: false,
-      comment: 'Tipo de evento (vacunación, enfermedad, etc.)'
     },
     title: {
       type: DataTypes.STRING(200),
@@ -501,64 +331,63 @@ Event.init(
       type: DataTypes.ENUM(...Object.values(EventStatus)),
       allowNull: false,
       defaultValue: EventStatus.SCHEDULED,
-      comment: 'Estado actual del evento'
     },
     priority: {
       type: DataTypes.ENUM(...Object.values(EventPriority)),
       allowNull: false,
       defaultValue: EventPriority.MEDIUM,
-      comment: 'Prioridad del evento'
     },
     scheduledDate: {
       type: DataTypes.DATE,
       allowNull: false,
+      validate: {
+        isFuture(value: Date) {
+          if (value < new Date()) {
+            throw new Error('La fecha programada debe ser futura');
+          }
+        }
+      },
       comment: 'Fecha y hora programada del evento'
     },
     startDate: {
       type: DataTypes.DATE,
       allowNull: true,
-      comment: 'Fecha y hora de inicio real del evento'
+      comment: 'Fecha y hora de inicio real del evento (solo para seguimiento)'
     },
     endDate: {
       type: DataTypes.DATE,
       allowNull: true,
-      comment: 'Fecha y hora de finalización del evento'
+      comment: 'Fecha y hora de finalización del evento (solo para seguimiento)'
     },
-    location: {
+    expectedLocation: {
       type: DataTypes.JSONB,
-      allowNull: false,
+      allowNull: true,
       validate: {
         isValidLocation(value: LocationData) {
-          if (!value.latitude || !value.longitude) {
-            throw new Error('Latitud y longitud son requeridas para el evento');
-          }
-          if (value.latitude < -90 || value.latitude > 90) {
-            throw new Error('Latitud debe estar entre -90 y 90');
-          }
-          if (value.longitude < -180 || value.longitude > 180) {
-            throw new Error('Longitud debe estar entre -180 y 180');
+          if (value && (!value.latitude || !value.longitude)) {
+            throw new Error('La ubicación debe tener latitud y longitud');
           }
         }
       },
-      comment: 'Ubicación geográfica donde ocurrió el evento'
+      comment: 'Ubicación geográfica esperada para el evento'
     },
-    performedBy: {
+    assignedTo: {
       type: DataTypes.UUID,
       allowNull: true,
-      comment: 'ID del usuario que realizó el evento'
+      comment: 'ID del usuario asignado al evento'
     },
     veterinarianId: {
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del veterinario responsable (si aplica)'
     },
-    cost: {
+    estimatedCost: {
       type: DataTypes.DECIMAL(12, 2),
       allowNull: true,
       validate: {
         min: 0
       },
-      comment: 'Costo del evento'
+      comment: 'Costo estimado del evento'
     },
     currency: {
       type: DataTypes.STRING(3),
@@ -567,12 +396,12 @@ Event.init(
       validate: {
         len: [3, 3]
       },
-      comment: 'Moneda del costo (código ISO)'
+      comment: 'Moneda del costo estimado (código ISO)'
     },
-    eventData: {
+    expectedData: {
       type: DataTypes.JSONB,
       allowNull: true,
-      comment: 'Datos específicos del tipo de evento'
+      comment: 'Datos específicos esperados según el tipo de evento'
     },
     recurrence: {
       type: DataTypes.JSONB,
@@ -597,78 +426,50 @@ Event.init(
       type: DataTypes.ARRAY(DataTypes.STRING),
       allowNull: true,
       defaultValue: [],
-      comment: 'URLs de archivos adjuntos'
+      comment: 'URLs de archivos adjuntos (protocolos, instrucciones)'
     },
-    photos: {
-      type: DataTypes.ARRAY(DataTypes.STRING),
-      allowNull: true,
-      defaultValue: [],
-      comment: 'URLs de fotos del evento'
-    },
-    results: {
+    planningNotes: {
       type: DataTypes.TEXT,
       allowNull: true,
-      comment: 'Resultados del evento'
+      comment: 'Notas de planificación del evento'
     },
-    complications: {
+    internalNotes: {
       type: DataTypes.TEXT,
       allowNull: true,
-      comment: 'Complicaciones observadas durante el evento'
+      comment: 'Notas internas para el equipo'
     },
-    followUpRequired: {
+    requiresVeterinarian: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
-      comment: 'Si el evento requiere seguimiento'
+      comment: 'Si el evento requiere presencia de veterinario'
     },
-    followUpDate: {
-      type: DataTypes.DATE,
+    requiresEquipment: {
+      type: DataTypes.ARRAY(DataTypes.STRING),
       allowNull: true,
-      comment: 'Fecha programada para seguimiento'
+      comment: 'Equipamiento necesario para el evento'
     },
-    followUpNotes: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      comment: 'Notas de seguimiento'
-    },
-    publicNotes: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      comment: 'Notas visibles para todos los usuarios'
-    },
-    privateNotes: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      comment: 'Notas privadas del veterinario/responsable'
-    },
-    weatherConditions: {
+    requiresFacility: {
       type: DataTypes.STRING(100),
       allowNull: true,
-      comment: 'Condiciones climáticas durante el evento'
+      comment: 'Instalación necesaria para el evento'
     },
-    temperature: {
-      type: DataTypes.DECIMAL(5, 2),
-      allowNull: true,
-      validate: {
-        min: -50,
-        max: 60
-      },
-      comment: 'Temperatura ambiente en grados Celsius'
+    reminderSent: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      comment: 'Si ya se envió recordatorio'
     },
-    humidity: {
-      type: DataTypes.DECIMAL(5, 2),
+    reminderDate: {
+      type: DataTypes.DATE,
       allowNull: true,
-      validate: {
-        min: 0,
-        max: 100
-      },
-      comment: 'Humedad relativa en porcentaje'
+      comment: 'Fecha programada para enviar recordatorio'
     },
     isActive: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: true,
-      comment: 'Si el evento está activo en el sistema'
+      comment: 'Si el evento está activo'
     },
     createdBy: {
       type: DataTypes.UUID,
@@ -683,17 +484,24 @@ Event.init(
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,
+      defaultValue: DataTypes.NOW,
       comment: 'Fecha de creación del registro'
     },
     updatedAt: {
       type: DataTypes.DATE,
       allowNull: false,
-      comment: 'Fecha de última actualización del registro'
+      defaultValue: DataTypes.NOW,
+      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,
       allowNull: true,
       comment: 'Fecha de eliminación (soft delete)'
+    },
+    metadata: {
+      type: DataTypes.JSONB,  // ← Campo JSONB para datos adicionales
+      allowNull: true,
+      defaultValue: {}
     }
   },
   {
@@ -701,52 +509,24 @@ Event.init(
     modelName: 'Event',
     tableName: 'events',
     timestamps: true,
-    paranoid: true, // Habilita soft delete
+    paranoid: true,
     indexes: [
-      // Índices para mejorar el rendimiento
-      {
-        fields: ['bovine_id']
-      },
-      {
-        fields: ['event_type']
-      },
-      {
-        fields: ['status']
-      },
-      {
-        fields: ['priority']
-      },
-      {
-        fields: ['scheduled_date']
-      },
-      {
-        fields: ['created_by']
-      },
-      {
-        fields: ['veterinarian_id']
-      },
-      {
-        fields: ['is_active']
-      },
-      {
-        fields: ['parent_event_id']
-      },
-      {
-        name: 'events_scheduled_date_status',
-        fields: ['scheduled_date', 'status']
-      },
-      {
-        name: 'events_bovine_type_date',
-        fields: ['bovine_id', 'event_type', 'scheduled_date']
-      },
-      {
-        name: 'events_location_gin',
-        fields: ['location'],
-        using: 'gin'
-      }
+      { fields: ['bovine_id'] },
+      { fields: ['event_type'] },
+      { fields: ['status'] },
+      { fields: ['priority'] },
+      { fields: ['scheduled_date'] },
+      { fields: ['assigned_to'] },
+      { fields: ['veterinarian_id'] },
+      { fields: ['health_record_id'] },
+      { fields: ['parent_event_id'] },
+      { fields: ['reminder_date'] },
+      { name: 'events_scheduled_status', fields: ['scheduled_date', 'status'] },
+      { name: 'events_bovine_type', fields: ['bovine_id', 'event_type'] },
+      { name: 'events_location_gin', fields: ['expected_location'], using: 'gin' }
     ],
     hooks: {
-      // Hook para establecer fechas de inicio al cambiar estado
+      // Hook para actualizar fechas según estado (solo tracking, no resultados)
       beforeUpdate: async (event: Event) => {
         if (event.changed('status')) {
           if (event.status === EventStatus.IN_PROGRESS && !event.startDate) {
@@ -758,22 +538,27 @@ Event.init(
         }
       },
 
-      // Hook para validar fechas
+      // Hook para validaciones de integridad
       beforeSave: async (event: Event) => {
+        // Si se completa, debe tener healthRecordId
+        if (event.status === EventStatus.COMPLETED && !event.healthRecordId) {
+          throw new Error('Los eventos completados deben referenciar un registro de salud');
+        }
+
+        // Validar fechas
         if (event.startDate && event.endDate) {
           if (event.startDate > event.endDate) {
             throw new Error('La fecha de inicio no puede ser posterior a la fecha de fin');
           }
         }
-        
-        if (event.followUpDate && event.followUpDate < new Date()) {
-          if (event.status === EventStatus.SCHEDULED) {
-            throw new Error('La fecha de seguimiento no puede ser anterior a la fecha actual');
-          }
+
+        // Validar que scheduledDate sea futura (solo para SCHEDULED)
+        if (event.status === EventStatus.SCHEDULED && event.scheduledDate < new Date()) {
+          throw new Error('Los eventos programados deben tener fecha futura');
         }
       }
     },
-    comment: 'Tabla para almacenar eventos relacionados con bovinos (vacunaciones, enfermedades, etc.)'
+    comment: 'Eventos programados para bovinos (agenda) - No almacena resultados, solo planificación'
   }
 );
 

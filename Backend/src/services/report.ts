@@ -1,60 +1,26 @@
-import { Op, QueryTypes, Transaction } from 'sequelize';
-import { logger as appLogger } from '../utils/logger';
+// src/services/reports/ReportsService.ts
+import { Op } from 'sequelize';
+import ExcelJS from 'exceljs';
+import PDFDocument from 'pdfkit';
+import { RanchCoreService } from './ranch/RanchService';
+import { RanchOperationsService } from './ranch/RanchOperationsService';
+import { ProductionService } from './production';
+import { ReproductionService } from './reproduction';
+import { HealthRecordService } from './health/HealthRecordService'; // Asumiendo que existe
+import logger from '../utils/logger';
+import { ValidationError } from '../utils/errorUtils';
+import { LaboratoryService } from './health/LaboratoryService';
+import { TreatmentService } from './health/TreatmentService';
+import { DiagnosisService } from './health/DiagnosisService';
+import Bovine, { HealthStatus } from '../models/Bovine';
+import { ReproductionType } from '../models/Reproduction';
+import { FinanceService } from './FinanceService'
+import { InventoryService } from './InventoryService';
+// ============================================================================
+// TIPOS E INTERFACES (coinciden con el original)
+// ============================================================================
 
-// Logger específico para el servicio de reportes
-const logger = {
-  info: (message: string, metadata?: any) => appLogger.info(message, metadata, 'ReportsService'),
-  error: (message: string, error?: any) => appLogger.error(message, { error }, error as Error, 'ReportsService'),
-  warn: (message: string, metadata?: any) => appLogger.warn(message, metadata, 'ReportsService')
-};
-
-// Mocks para librerías externas
-const ExcelJS = {
-  Workbook: class {
-    public xlsx: {
-      writeBuffer: () => Promise<Buffer>;
-    };
-
-    constructor() {
-      this.xlsx = {
-        writeBuffer: async (): Promise<Buffer> => Buffer.from('mock excel data')
-      };
-    }
-
-    addWorksheet(name: string) {
-      return {
-        addRow: (data: any[]) => {},
-        columns: []
-      };
-    }
-  }
-};
-
-const PDFKit = class {
-  private buffers: Buffer[] = [];
-  
-  constructor() {
-    this.buffers = [];
-  }
-  
-  on(event: string, callback: (buffer: Buffer) => void): this {
-    if (event === 'data') {
-      setTimeout(() => callback(Buffer.from('mock pdf data')), 100);
-    }
-    if (event === 'end') {
-      setTimeout(() => (callback as any)(), 200);
-    }
-    return this;
-  }
-  
-  fontSize(size: number): this { return this; }
-  text(text: string, x?: number, y?: number): this { return this; }
-  addPage(): this { return this; }
-  end(): void {}
-};
-
-// Tipos y interfaces para reportes
-export type ReportType = 
+export type ReportType =
   | 'HEALTH_OVERVIEW'
   | 'HEALTH_TRENDS'
   | 'DISEASE_ANALYSIS'
@@ -70,7 +36,8 @@ export type ReportType =
   | 'VETERINARY_COSTS'
   | 'ROI_ANALYSIS'
   | 'GEOSPATIAL_ANALYSIS'
-  | 'COMPREHENSIVE_DASHBOARD';
+  | 'COMPREHENSIVE_DASHBOARD'
+  | 'INVENTORY_SUMMARY';
 
 export type ExportFormat = 'PDF' | 'EXCEL' | 'CSV' | 'JSON';
 
@@ -84,7 +51,7 @@ export interface ReportFilters {
   ageRange?: { min: number; max: number };
   productionType?: string;
   includeGeospatial?: boolean;
-  period?: 'week' | 'month' | 'quarter' | 'year';
+  period?: 'day' | 'week' | 'month' | 'quarter' | 'year';
   ignoreCache?: boolean;
   realTime?: boolean;
 }
@@ -130,286 +97,41 @@ export interface HealthReport {
   locationDistribution?: any;
 }
 
-export interface VaccinationReport {
-  coverageSummary: {
-    totalBovines: number;
-    fullyVaccinated: number;
-    overdue: number;
-    neverVaccinated: number;
-    overallCoveragePercentage: number;
-  };
-  coverageByVaccine: any[];
-  upcomingVaccinations: Array<{
-    id: string;
-    bovineId: string;
-    earTag?: string;
-    vaccineType: string;
-    dueDate: Date;
-    daysPending: number;
-    location?: any;
-  }>;
-  monthlyHistory: any[];
-  recommendations: string[];
-}
-
-export interface ProductionReport {
-  period: {
-    startDate: Date;
-    endDate: Date;
-  };
-  summary: Array<{
-    type: string;
-    unit: string;
-    totalRecords: number;
-    totalValue: number;
-    averageValue: number;
-    minimumValue: number;
-    maximumValue: number;
-  }>;
-  topProducers: any[];
-  monthlyTrends: any[];
-  periodComparison: any;
-  efficiencyAnalysis: any;
-  recommendations: string[];
-}
-
-export interface FinancialReport {
-  period: {
-    startDate: Date;
-    endDate: Date;
-  };
-  totalExpenses: number;
-  expensesByCategory: Array<{
-    category: string;
-    amount: number;
-    transactionCount: number;
-    averageAmount: number;
-  }>;
-  expensesByBovine: any[];
-  monthlyTrends: any[];
-  treatmentROI: any;
-  budgetAnalysis: any;
-  recommendations: string[];
-}
-
-export interface GeospatialReport {
-  coverageArea: any;
-  bovineDistribution: any[];
-  diseaseClusters: any[];
-  densityAnalysis: any;
-  movementPatterns: any[];
-  riskZones: any[];
-  recommendations: string[];
-}
-
-export interface TrendAnalysis {
-  period: string;
-  dateRange: { startDate: Date; endDate: Date };
-  diagnosisTrends: any[];
-  outbreakAnalysis: any;
-  treatmentEfficacy: any;
-  riskFactors: any;
-  seasonalPatterns: any;
-  recommendations: string[];
-}
-
-export interface ReportMetrics {
-  totalReports: number;
-  byType: Record<ReportType, number>;
-  averageGenerationTime: number;
-  cacheHitRate: number;
-}
-
-export interface DashboardData {
-  summary: {
-    totalBovines: number;
-    healthyPercentage: number;
-    productionToday: number;
-    alertsCount: number;
-  };
-  charts: any[];
-  maps: any[];
-  alerts: any[];
-  recentActivity: any[];
-}
-
-// Clases de error personalizadas
-export class ApiError extends Error {
-  public statusCode: number;
-  
-  constructor(message: string, statusCode: number = 500) {
-    super(message);
-    this.name = 'ApiError';
-    this.statusCode = statusCode;
-  }
-}
-
-export class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ValidationError';
-  }
-}
-
-// Mocks para modelos
-const Bovine = {
-  count: async (options?: any): Promise<number> => 150,
-  findAll: async (options?: any): Promise<any[]> => [
-    { id: '1', earTag: 'COW001', name: 'Bella', breed: 'Holstein', healthStatus: 'HEALTHY' },
-    { id: '2', earTag: 'COW002', name: 'Luna', breed: 'Jersey', healthStatus: 'SICK' }
-  ],
-  findByPk: async (id: string): Promise<any | null> => ({
-    id,
-    earTag: `COW${id.padStart(3, '0')}`,
-    name: `Bovine ${id}`,
-    breed: 'Holstein',
-    healthStatus: 'HEALTHY'
-  })
-};
-
-const Health = {
-  findAll: async (options?: any): Promise<any[]> => [
-    {
-      id: '1',
-      bovineId: '1',
-      disease: 'Mastitis',
-      severity: 'MODERATE',
-      diagnosisDate: new Date(),
-      status: 'TREATMENT',
-      bovine: { earTag: 'COW001', name: 'Bella', breed: 'Holstein' }
-    }
-  ]
-};
-
-const Production = {
-  findAll: async (options?: any): Promise<any[]> => [],
-  findAndCountAll: async (options?: any): Promise<{ rows: any[]; count: number }> => ({
-    rows: [],
-    count: 0
-  })
-};
-
-const Finance = {
-  findAll: async (options?: any): Promise<any[]> => []
-};
-
-const Reproduction = {
-  findAll: async (options?: any): Promise<any[]> => []
-};
-
-const Event = {
-  findAll: async (options?: any): Promise<any[]> => []
-};
-
-const Location = {
-  findAll: async (options?: any): Promise<any[]> => []
-};
-
-const Ranch = {
-  findByPk: async (id: string): Promise<any | null> => ({
-    id,
-    name: `Ranch ${id}`,
-    location: { latitude: 19.4326, longitude: -99.1332 }
-  })
-};
-
-const Vaccination = {
-  findAll: async (options?: any): Promise<any[]> => []
-};
-
-const sequelize = {
-  query: async (sql: string, options?: any): Promise<any[]> => [],
-  fn: (fn: string, col: any) => ({ fn, col }),
-  col: (column: string) => ({ column }),
-  literal: (value: string) => ({ literal: value }),
-  transaction: async (): Promise<Transaction> => ({
-    commit: async () => {},
-    rollback: async () => {}
-  } as Transaction)
-};
-
-// Mocks para servicios
-class ProductionService {
-  async getProductionMetrics(): Promise<any> {
-    return { totalProduction: 1000, averageDaily: 50 };
-  }
-}
-
-class HealthService {
-  async getHealthMetrics(): Promise<any> {
-    return { healthyCount: 120, sickCount: 30 };
-  }
-}
-
-class LocationService {
-  async getLocationData(): Promise<any> {
-    return { coordinates: [19.4326, -99.1332] };
-  }
-}
-
-class CacheService {
-  private cache = new Map<string, string>();
-
-  async get(key: string): Promise<string | null> {
-    return this.cache.get(key) || null;
-  }
-
-  async set(key: string, value: string, expiration?: number): Promise<void> {
-    this.cache.set(key, value);
-  }
-
-  async del(key: string): Promise<void> {
-    this.cache.delete(key);
-  }
-}
+// ============================================================================
+// SERVICIO PRINCIPAL
+// ============================================================================
 
 export class ReportsService {
-  private productionService: ProductionService;
-  private healthService: HealthService;
-  private locationService: LocationService;
-  private cacheService: CacheService;
+  private readonly context = 'ReportsService';
 
-  constructor() {
-    this.productionService = new ProductionService();
-    this.healthService = new HealthService();
-    this.locationService = new LocationService();
-    this.cacheService = new CacheService();
-  }
+  constructor(
+    private ranchCoreService: RanchCoreService,
+    private ranchOpsService: RanchOperationsService,
+    private productionService: ProductionService,
+    private reproductionService: ReproductionService,
+    private healthRecordService: HealthRecordService,
+    private laboratoryService: LaboratoryService,
+    private treatmentService: TreatmentService,
+    private diagnosisService: DiagnosisService,
+    private financeService: FinanceService,
+    private inventoryService: InventoryService
+  ) { }
 
-  // ============================================================================
-  // MÉTODOS PRINCIPALES DE GENERACIÓN DE REPORTES
-  // ============================================================================
+  // ==========================================================================
+  // MÉTODOS PRINCIPALES
+  // ==========================================================================
 
-  /**
-   * Generar reporte según tipo y filtros
-   * @param type - Tipo de reporte
-   * @param filters - Filtros aplicados
-   * @param userId - ID del usuario que solicita
-   * @returns Promise<ReportData>
-   */
-  public async generateReport(
-    type: ReportType,
-    filters: ReportFilters,
-    userId: string
-  ): Promise<ReportData> {
+  async generateReport(type: ReportType, filters: ReportFilters, userId: string): Promise<ReportData> {
+    const startTime = Date.now();
+
     try {
-      logger.info('📊 Generando reporte', { type, filters, userId });
+      logger.info('📊 Generando reporte', this.context, { type, filters, userId });
 
-      // Verificar cache primero para reportes pesados
-      const cacheKey = this.generateCacheKey(type, filters);
-      const cachedReport = await this.cacheService.get(cacheKey);
-      
-      if (cachedReport && !filters.ignoreCache) {
-        logger.info('✅ Reporte obtenido desde cache', { type });
-        return JSON.parse(cachedReport);
-      }
-
-      // Validar filtros
+      // Validar filtros básicos
       await this.validateFilters(filters);
 
       let reportData: ReportData;
 
-      // Generar reporte según tipo
       switch (type) {
         case 'HEALTH_OVERVIEW':
           reportData = await this.generateHealthOverviewReport(filters);
@@ -459,784 +181,218 @@ export class ReportsService {
         case 'COMPREHENSIVE_DASHBOARD':
           reportData = await this.generateComprehensiveDashboard(filters);
           break;
+        case 'INVENTORY_SUMMARY':                                           // ← NUEVO
+          reportData = await this.generateInventorySummaryReport(filters);
+          break;
         default:
           throw new ValidationError(`Tipo de reporte no soportado: ${type}`);
       }
 
-      // Agregar metadatos al reporte
+      const processingTime = Date.now() - startTime;
+
+      // Agregar metadatos
       reportData.metadata = {
         generatedAt: new Date(),
         generatedBy: userId,
-        filters: filters,
-        cacheKey: cacheKey,
-        processingTime: Date.now() - (reportData.startTime || 0)
+        filters,
+        cacheKey: this.generateCacheKey(type, filters),
+        processingTime,
       };
 
-      // Cachear resultado si es apropiado
-      if (this.shouldCacheReport(type, filters)) {
-        await this.cacheService.set(
-          cacheKey, 
-          JSON.stringify(reportData), 
-          this.getCacheExpiration(type)
-        );
-      }
-
-      logger.info('✅ Reporte generado exitosamente', { 
-        type, 
-        processingTime: reportData.metadata.processingTime,
-        dataPoints: Array.isArray(reportData.data) ? reportData.data.length : 0
-      });
+      logger.info('✅ Reporte generado exitosamente', this.context, { type, processingTime });
 
       return reportData;
-
     } catch (error) {
-      logger.error('❌ Error generando reporte', { error, type, filters });
+      logger.error('❌ Error generando reporte', this.context, { type, filters, error });
       throw error;
     }
   }
 
-  // ============================================================================
-  // REPORTES DE SALUD VETERINARIA
-  // ============================================================================
+  // ==========================================================================
+  // REPORTES DE SALUD
+  // ==========================================================================
 
-  /**
-   * Generar reporte general de salud
-   * @param filters - Filtros del reporte
-   * @returns Promise<ReportData>
-   */
   private async generateHealthOverviewReport(filters: ReportFilters): Promise<ReportData> {
     const startTime = Date.now();
+    const { ranchId, startDate, endDate, healthStatus } = filters;
 
-    try {
-      const whereClause = this.buildBovineWhereClause(filters);
-      
-      // Obtener estadísticas principales
-      const totalBovines = await Bovine.count({ where: whereClause });
-      
-      const healthStats = await Bovine.findAll({
-        attributes: [
-          'healthStatus',
-          [sequelize.fn('COUNT', sequelize.col('id')), 'count']
-        ],
-        where: whereClause,
-        group: ['healthStatus'],
-        raw: true
-      });
+    if (!ranchId) throw new ValidationError('ranchId es requerido para el reporte de salud');
 
-      // Enfermedades recientes
-      const recentIllnesses = await Health.findAll({
-        where: {
-          diagnosisDate: {
-            [Op.gte]: filters.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-          },
-          ...(filters.endDate && { diagnosisDate: { [Op.lte]: filters.endDate } })
-        },
-        include: [{
-          model: Bovine,
-          where: whereClause,
-          attributes: ['earTag', 'name', 'breed']
-        }],
-        order: [['diagnosisDate', 'DESC']],
-        limit: 10
-      });
+    // Construir filtros para DiagnosisService
+    const diagnosisFilters: Parameters<typeof this.diagnosisService.getDiagnosisStats>[0] = {
+      ranchId,
+      startDate,
+      endDate,
+      healthStatus: healthStatus ? [healthStatus as HealthStatus] : undefined,
+    };
 
-      // Vacunaciones pendientes
-      const overdueVaccinations = await this.getOverdueVaccinations(filters);
+    // Obtener todos los bovinos del rancho directamente con el modelo
+    const bovinesList = await Bovine.findAll({
+      where: { ranchId, isActive: true },
+      attributes: ['id', 'earTag', 'name', 'healthStatus'],
+    });
 
-      // Tendencias de salud (último mes)
-      const healthTrends = await this.calculateHealthTrends(filters);
+    // Obtener estadísticas de diagnóstico
+    const diagnosisStats = await this.diagnosisService.getDiagnosisStats(diagnosisFilters);
 
-      // Distribución por ubicación si hay filtro geográfico
-      let locationDistribution = null;
-      if (filters.includeGeospatial) {
-        locationDistribution = await this.getHealthLocationDistribution(filters);
-      }
+    // Enfermedades recientes (asumiendo que healthRecordService tiene el método)
+    const recentIllnesses = await this.healthRecordService.getRecentIllnessesByRanch(ranchId, 10);
 
-      const reportData: HealthReport = {
-        summary: {
-          totalBovines,
-          healthyCount: healthStats.find((stat: any) => stat.healthStatus === 'HEALTHY')?.count || 0,
-          sickCount: healthStats.find((stat: any) => stat.healthStatus === 'SICK')?.count || 0,
-          recoveringCount: healthStats.find((stat: any) => stat.healthStatus === 'RECOVERING')?.count || 0,
-          quarantineCount: healthStats.find((stat: any) => stat.healthStatus === 'QUARANTINE')?.count || 0,
-          healthPercentage: ((healthStats.find((stat: any) => stat.healthStatus === 'HEALTHY')?.count || 0) / totalBovines) * 100
-        },
-        recentIllnesses: recentIllnesses.map((illness: any) => ({
-          id: illness.id,
-          bovineId: illness.bovineId,
-          earTag: illness.bovine?.earTag,
-          bovineName: illness.bovine?.name,
-          disease: illness.disease,
-          severity: illness.severity,
-          diagnosisDate: illness.diagnosisDate,
-          status: illness.status,
-          location: illness.location
-        })),
-        overdueVaccinations,
-        trends: healthTrends,
-        locationDistribution
-      };
+    const totalBovines = bovinesList.length;
+    const healthyCount = diagnosisStats.byHealthStatus[HealthStatus.HEALTHY] || 0;
+    const healthPercentage = totalBovines > 0 ? (healthyCount / totalBovines) * 100 : 0;
 
-      return {
-        type: 'HEALTH_OVERVIEW',
-        title: 'Reporte General de Salud',
-        data: reportData,
-        charts: this.generateHealthCharts(reportData),
-        startTime
-      };
+    const reportData: HealthReport = {
+      summary: {
+        totalBovines,
+        healthyCount,
+        sickCount: diagnosisStats.byHealthStatus[HealthStatus.SICK] || 0,
+        recoveringCount: diagnosisStats.byHealthStatus[HealthStatus.RECOVERING] || 0,
+        quarantineCount: diagnosisStats.byHealthStatus[HealthStatus.QUARANTINE] || 0,
+        healthPercentage,
+      },
+      recentIllnesses,
+      overdueVaccinations: [],
+      trends: diagnosisStats.topDiagnoses,
+      locationDistribution: null,
+    };
 
-    } catch (error) {
-      logger.error('❌ Error generando reporte de salud general', { error, filters });
-      throw new ApiError('Error generando reporte de salud', 500);
-    }
+    return {
+      type: 'HEALTH_OVERVIEW',
+      title: 'Reporte General de Salud',
+      data: reportData,
+      charts: this.generateHealthCharts(reportData),
+      startTime,
+    };
   }
 
-  /**
-   * Generar reporte de tendencias de salud
-   * @param filters - Filtros del reporte
-   * @returns Promise<ReportData>
-   */
   private async generateHealthTrendsReport(filters: ReportFilters): Promise<ReportData> {
     const startTime = Date.now();
-
-    try {
-      const period = filters.period || 'month';
-      const startDate = filters.startDate || new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000);
-      const endDate = filters.endDate || new Date();
-
-      // Tendencias de diagnósticos por período
-      const diagnosisTrends = await sequelize.query(`
-        SELECT 
-          DATE_TRUNC('${period}', diagnosis_date) as period,
-          disease,
-          severity,
-          COUNT(*) as case_count,
-          AVG(CASE WHEN status = 'RECOVERED' THEN 1 ELSE 0 END) as recovery_rate
-        FROM health_records h
-        JOIN bovines b ON h.bovine_id = b.id
-        WHERE h.diagnosis_date BETWEEN :startDate AND :endDate
-        ${filters.ranchId ? 'AND b.ranch_id = :ranchId' : ''}
-        ${filters.bovineIds ? 'AND b.id = ANY(:bovineIds)' : ''}
-        GROUP BY period, disease, severity
-        ORDER BY period DESC, case_count DESC
-      `, {
-        replacements: {
-          startDate,
-          endDate,
-          ranchId: filters.ranchId,
-          bovineIds: filters.bovineIds
-        },
-        type: QueryTypes.SELECT
-      });
-
-      // Análisis de brotes (clustering temporal y geográfico)
-      const outbreakAnalysis = await this.detectOutbreaks(filters);
-
-      // Eficacia de tratamientos
-      const treatmentEfficacy = await this.analyzeTreatmentEfficacy(filters);
-
-      // Factores de riesgo identificados
-      const riskFactors = await this.identifyRiskFactors(filters);
-
-      const reportData: TrendAnalysis = {
-        period,
-        dateRange: { startDate, endDate },
-        diagnosisTrends: diagnosisTrends as any[],
-        outbreakAnalysis,
-        treatmentEfficacy,
-        riskFactors,
-        seasonalPatterns: await this.analyzeSeasonalPatterns(filters),
-        recommendations: this.generateHealthRecommendations(diagnosisTrends as any[])
-      };
-
-      return {
-        type: 'HEALTH_TRENDS',
-        title: 'Análisis de Tendencias de Salud',
-        data: reportData,
-        charts: this.generateTrendCharts(reportData),
-        startTime
-      };
-
-    } catch (error) {
-      logger.error('❌ Error generando reporte de tendencias de salud', { error, filters });
-      throw new ApiError('Error generando reporte de tendencias', 500);
-    }
-  }
-
-  // ============================================================================
-  // REPORTES DE VACUNACIÓN
-  // ============================================================================
-
-  /**
-   * Generar reporte de cobertura de vacunación
-   * @param filters - Filtros del reporte
-   * @returns Promise<ReportData>
-   */
-  private async generateVaccinationCoverageReport(filters: ReportFilters): Promise<ReportData> {
-    const startTime = Date.now();
-
-    try {
-      const whereClause = this.buildBovineWhereClause(filters);
-
-      // Cobertura por tipo de vacuna
-      const vaccinationCoverage = await sequelize.query(`
-        SELECT 
-          v.vaccine_type,
-          COUNT(DISTINCT v.bovine_id) as vaccinated_count,
-          COUNT(DISTINCT b.id) as total_bovines,
-          (COUNT(DISTINCT v.bovine_id)::float / COUNT(DISTINCT b.id) * 100) as coverage_percentage,
-          AVG(EXTRACT(DAY FROM (v.next_due_date - CURRENT_DATE))) as avg_days_to_next
-        FROM bovines b
-        LEFT JOIN vaccinations v ON b.id = v.bovine_id 
-          AND v.status = 'COMPLETED'
-          AND v.administered_date >= :startDate
-        WHERE b.is_active = true
-        ${filters.ranchId ? 'AND b.ranch_id = :ranchId' : ''}
-        GROUP BY v.vaccine_type
-        ORDER BY coverage_percentage DESC
-      `, {
-        replacements: {
-          startDate: filters.startDate || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
-          ranchId: filters.ranchId
-        },
-        type: QueryTypes.SELECT
-      });
-
-      // Bovinos con vacunación al día vs atrasada
-      const vaccinationStatus = await sequelize.query(`
-        SELECT 
-          CASE 
-            WHEN MAX(v.next_due_date) >= CURRENT_DATE THEN 'UP_TO_DATE'
-            WHEN MAX(v.next_due_date) < CURRENT_DATE THEN 'OVERDUE'
-            ELSE 'NO_VACCINATION'
-          END as status,
-          COUNT(*) as count
-        FROM bovines b
-        LEFT JOIN vaccinations v ON b.id = v.bovine_id AND v.status = 'COMPLETED'
-        WHERE b.is_active = true
-        ${filters.ranchId ? 'AND b.ranch_id = :ranchId' : ''}
-        GROUP BY 
-          CASE 
-            WHEN MAX(v.next_due_date) >= CURRENT_DATE THEN 'UP_TO_DATE'
-            WHEN MAX(v.next_due_date) < CURRENT_DATE THEN 'OVERDUE'
-            ELSE 'NO_VACCINATION'
-          END
-      `, {
-        replacements: { ranchId: filters.ranchId },
-        type: QueryTypes.SELECT
-      });
-
-      // Próximas vacunaciones (siguiente mes)
-      const upcomingVaccinations = await Vaccination.findAll({
-        where: {
-          nextDueDate: {
-            [Op.between]: [new Date(), new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)]
-          },
-          status: { [Op.ne]: 'COMPLETED' }
-        },
-        include: [{
-          model: Bovine,
-          where: whereClause,
-          attributes: ['earTag', 'name', 'breed']
-        }],
-        order: [['nextDueDate', 'ASC']]
-      });
-
-      // Historial de vacunaciones por mes
-      const monthlyVaccinations = await this.getMonthlyVaccinationHistory(filters);
-
-      const reportData: VaccinationReport = {
-        coverageSummary: {
-          totalBovines: await Bovine.count({ where: whereClause }),
-          fullyVaccinated: (vaccinationStatus as any[]).find((s: any) => s.status === 'UP_TO_DATE')?.count || 0,
-          overdue: (vaccinationStatus as any[]).find((s: any) => s.status === 'OVERDUE')?.count || 0,
-          neverVaccinated: (vaccinationStatus as any[]).find((s: any) => s.status === 'NO_VACCINATION')?.count || 0,
-          overallCoveragePercentage: 0 // Calculado después
-        },
-        coverageByVaccine: vaccinationCoverage as any[],
-        upcomingVaccinations: upcomingVaccinations.map((vacc: any) => ({
-          id: vacc.id,
-          bovineId: vacc.bovineId,
-          earTag: vacc.bovine?.earTag,
-          vaccineType: vacc.vaccineType,
-          dueDate: vacc.nextDueDate,
-          daysPending: Math.ceil((vacc.nextDueDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
-          location: vacc.plannedLocation
-        })),
-        monthlyHistory: monthlyVaccinations,
-        recommendations: []
-      };
-
-      // Calcular porcentaje general de cobertura
-      const totalBovines = reportData.coverageSummary.totalBovines;
-      reportData.coverageSummary.overallCoveragePercentage = 
-        ((reportData.coverageSummary.fullyVaccinated / totalBovines) * 100);
-
-      // Generar recomendaciones
-      reportData.recommendations = this.generateVaccinationRecommendations(reportData);
-
-      return {
-        type: 'VACCINATION_COVERAGE',
-        title: 'Reporte de Cobertura de Vacunación',
-        data: reportData,
-        charts: this.generateVaccinationCharts(reportData),
-        startTime
-      };
-
-    } catch (error) {
-      logger.error('❌ Error generando reporte de cobertura de vacunación', { error, filters });
-      throw new ApiError('Error generando reporte de vacunación', 500);
-    }
-  }
-
-  // ============================================================================
-  // REPORTES DE PRODUCCIÓN
-  // ============================================================================
-
-  /**
-   * Generar reporte resumen de producción
-   * @param filters - Filtros del reporte
-   * @returns Promise<ReportData>
-   */
-  private async generateProductionSummaryReport(filters: ReportFilters): Promise<ReportData> {
-    const startTime = Date.now();
-
-    try {
-      const whereClause = this.buildProductionWhereClause(filters);
-
-      // Resumen por tipo de producción
-      const productionSummary = await Production.findAll({
-        attributes: [
-          'type',
-          'unit',
-          [sequelize.fn('COUNT', sequelize.col('id')), 'recordCount'],
-          [sequelize.fn('SUM', sequelize.col('value')), 'totalValue'],
-          [sequelize.fn('AVG', sequelize.col('value')), 'averageValue'],
-          [sequelize.fn('MIN', sequelize.col('value')), 'minimumValue'],
-          [sequelize.fn('MAX', sequelize.col('value')), 'maximumValue']
-        ],
-        where: whereClause,
-        group: ['type', 'unit'],
-        raw: true
-      });
-
-      // Top productores
-      const topProducers = await sequelize.query(`
-        SELECT 
-          b.id,
-          b.ear_tag,
-          b.name,
-          b.breed,
-          p.type as production_type,
-          SUM(p.value) as total_production,
-          AVG(p.value) as average_production,
-          COUNT(p.id) as record_count
-        FROM bovines b
-        JOIN productions p ON b.id = p.bovine_id
-        WHERE p.recorded_date BETWEEN :startDate AND :endDate
-          AND p.is_deleted = false
-          ${filters.ranchId ? 'AND b.ranch_id = :ranchId' : ''}
-          ${filters.productionType ? 'AND p.type = :productionType' : ''}
-        GROUP BY b.id, b.ear_tag, b.name, b.breed, p.type
-        ORDER BY total_production DESC
-        LIMIT 10
-      `, {
-        replacements: {
-          startDate: filters.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          endDate: filters.endDate || new Date(),
-          ranchId: filters.ranchId,
-          productionType: filters.productionType
-        },
-        type: QueryTypes.SELECT
-      });
-
-      // Tendencias mensuales
-      const monthlyTrends = await this.getMonthlyProductionTrends(filters);
-
-      // Comparación con períodos anteriores
-      const periodComparison = await this.compareProductionPeriods(filters);
-
-      // Análisis de eficiencia
-      const efficiencyAnalysis = await this.analyzeProductionEfficiency(filters);
-
-      const reportData: ProductionReport = {
-        period: {
-          startDate: filters.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          endDate: filters.endDate || new Date()
-        },
-        summary: (productionSummary as any[]).map((item: any) => ({
-          type: item.type,
-          unit: item.unit,
-          totalRecords: item.recordCount,
-          totalValue: item.totalValue,
-          averageValue: parseFloat(item.averageValue),
-          minimumValue: item.minimumValue,
-          maximumValue: item.maximumValue
-        })),
-        topProducers: topProducers as any[],
-        monthlyTrends,
-        periodComparison,
-        efficiencyAnalysis,
-        recommendations: []
-      };
-
-      // Generar recomendaciones
-      reportData.recommendations = this.generateProductionRecommendations(reportData);
-
-      return {
-        type: 'PRODUCTION_SUMMARY',
-        title: 'Reporte Resumen de Producción',
-        data: reportData,
-        charts: this.generateProductionCharts(reportData),
-        startTime
-      };
-
-    } catch (error) {
-      logger.error('❌ Error generando reporte de producción', { error, filters });
-      throw new ApiError('Error generando reporte de producción', 500);
-    }
-  }
-
-  // ============================================================================
-  // REPORTES FINANCIEROS
-  // ============================================================================
-
-  /**
-   * Generar reporte de costos veterinarios
-   * @param filters - Filtros del reporte
-   * @returns Promise<ReportData>
-   */
-  private async generateVeterinaryCostsReport(filters: ReportFilters): Promise<ReportData> {
-    const startTime = Date.now();
-
-    try {
-      // Costos por categoría
-      const costsByCategory = await Finance.findAll({
-        attributes: [
-          'category',
-          'subcategory',
-          [sequelize.fn('SUM', sequelize.col('amount')), 'totalAmount'],
-          [sequelize.fn('COUNT', sequelize.col('id')), 'transactionCount'],
-          [sequelize.fn('AVG', sequelize.col('amount')), 'averageAmount']
-        ],
-        where: {
-          category: 'VETERINARY',
-          date: {
-            [Op.between]: [
-              filters.startDate || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
-              filters.endDate || new Date()
-            ]
-          },
-          ...(filters.ranchId && { ranchId: filters.ranchId })
-        },
-        group: ['category', 'subcategory'],
-        raw: true
-      });
-
-      // Costos por bovino
-      const costsByBovine = await sequelize.query(`
-        SELECT 
-          b.ear_tag,
-          b.name,
-          b.breed,
-          SUM(f.amount) as total_cost,
-          COUNT(f.id) as expense_count,
-          AVG(f.amount) as average_expense
-        FROM finances f
-        JOIN bovines b ON f.bovine_id = b.id
-        WHERE f.category = 'VETERINARY'
-          AND f.date BETWEEN :startDate AND :endDate
-          ${filters.ranchId ? 'AND f.ranch_id = :ranchId' : ''}
-        GROUP BY b.id, b.ear_tag, b.name, b.breed
-        ORDER BY total_cost DESC
-        LIMIT 20
-      `, {
-        replacements: {
-          startDate: filters.startDate || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
-          endDate: filters.endDate || new Date(),
-          ranchId: filters.ranchId
-        },
-        type: QueryTypes.SELECT
-      });
-
-      // Tendencias mensuales de gastos
-      const monthlyExpenses = await this.getMonthlyVeterinaryExpenses(filters);
-
-      // ROI de tratamientos (relación costo-beneficio)
-      const treatmentROI = await this.calculateTreatmentROI(filters);
-
-      // Presupuesto vs gastos reales
-      const budgetAnalysis = await this.analyzeBudgetVsActual(filters);
-
-      const reportData: FinancialReport = {
-        period: {
-          startDate: filters.startDate || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
-          endDate: filters.endDate || new Date()
-        },
-        totalExpenses: (costsByCategory as any[]).reduce((sum: number, item: any) => sum + parseFloat(item.totalAmount), 0),
-        expensesByCategory: (costsByCategory as any[]).map((item: any) => ({
-          category: item.subcategory || item.category,
-          amount: parseFloat(item.totalAmount),
-          transactionCount: item.transactionCount,
-          averageAmount: parseFloat(item.averageAmount)
-        })),
-        expensesByBovine: costsByBovine as any[],
-        monthlyTrends: monthlyExpenses,
-        treatmentROI,
-        budgetAnalysis,
-        recommendations: []
-      };
-
-      // Generar recomendaciones financieras
-      reportData.recommendations = this.generateFinancialRecommendations(reportData);
-
-      return {
-        type: 'VETERINARY_COSTS',
-        title: 'Reporte de Costos Veterinarios',
-        data: reportData,
-        charts: this.generateFinancialCharts(reportData),
-        startTime
-      };
-
-    } catch (error) {
-      logger.error('❌ Error generando reporte de costos veterinarios', { error, filters });
-      throw new ApiError('Error generando reporte financiero', 500);
-    }
-  }
-
-  // ============================================================================
-  // REPORTES GEOESPACIALES
-  // ============================================================================
-
-  /**
-   * Generar análisis geoespacial
-   * @param filters - Filtros del reporte
-   * @returns Promise<ReportData>
-   */
-  private async generateGeospatialAnalysisReport(filters: ReportFilters): Promise<ReportData> {
-    const startTime = Date.now();
-
-    try {
-      // Distribución de bovinos por zona
-      const bovineDistribution = await this.getBovineLocationDistribution(filters);
-
-      // Clusters de enfermedades
-      const diseaseClusters = await this.identifyDiseaseClusters(filters);
-
-      // Análisis de densidad
-      const densityAnalysis = await this.calculateLocationDensity(filters);
-
-      // Rutas de movimiento (si hay datos de tracking)
-      const movementPatterns = await this.analyzeMovementPatterns(filters);
-
-      // Zonas de riesgo identificadas
-      const riskZones = await this.identifyRiskZones(filters);
-
-      const reportData: GeospatialReport = {
-        coverageArea: await this.calculateCoverageArea(filters),
-        bovineDistribution,
-        diseaseClusters,
-        densityAnalysis,
-        movementPatterns,
-        riskZones,
-        recommendations: []
-      };
-
-      // Generar recomendaciones geoespaciales
-      reportData.recommendations = this.generateGeospatialRecommendations(reportData);
-
-      return {
-        type: 'GEOSPATIAL_ANALYSIS',
-        title: 'Análisis Geoespacial',
-        data: reportData,
-        maps: this.generateGeospatialMaps(reportData),
-        startTime
-      };
-
-    } catch (error) {
-      logger.error('❌ Error generando análisis geoespacial', { error, filters });
-      throw new ApiError('Error generando reporte geoespacial', 500);
-    }
-  }
-
-  // ============================================================================
-  // EXPORTACIÓN DE REPORTES
-  // ============================================================================
-
-  /**
-   * Exportar reporte en formato especificado
-   * @param reportData - Datos del reporte
-   * @param format - Formato de exportación
-   * @param options - Opciones de exportación
-   * @returns Promise<Buffer>
-   */
-  public async exportReport(
-    reportData: ReportData,
-    format: ExportFormat,
-    options: {
-      includeCharts?: boolean;
-      includeMaps?: boolean;
-      customization?: any;
-    } = {}
-  ): Promise<Buffer> {
-    try {
-      logger.info('📤 Exportando reporte', { type: reportData.type, format });
-
-      switch (format) {
-        case 'PDF':
-          return await this.exportToPDF(reportData, options);
-        case 'EXCEL':
-          return await this.exportToExcel(reportData, options);
-        case 'CSV':
-          return await this.exportToCSV(reportData);
-        case 'JSON':
-          return Buffer.from(JSON.stringify(reportData, null, 2));
-        default:
-          throw new ValidationError(`Formato de exportación no soportado: ${format}`);
-      }
-
-    } catch (error) {
-      logger.error('❌ Error exportando reporte', { error, format });
-      throw new ApiError('Error exportando reporte', 500);
-    }
-  }
-
-  /**
-   * Exportar a PDF
-   * @param reportData - Datos del reporte
-   * @param options - Opciones
-   * @returns Promise<Buffer>
-   */
-  private async exportToPDF(
-    reportData: ReportData, 
-    options: any
-  ): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      try {
-        const doc = new PDFKit();
-        const buffers: Buffer[] = [];
-
-        doc.on('data', (buffer: Buffer) => buffers.push(buffer));
-        doc.on('end', () => resolve(Buffer.concat(buffers)));
-
-        // Encabezado del documento
-        doc.fontSize(20).text(reportData.title, 50, 50);
-        doc.fontSize(12).text(`Generado: ${new Date().toLocaleString('es-ES')}`, 50, 80);
-        
-        // Contenido principal (simplificado)
-        let yPosition = 120;
-        
-        if (reportData.data && typeof reportData.data === 'object') {
-          for (const [key, value] of Object.entries(reportData.data)) {
-            doc.text(`${key}: ${JSON.stringify(value, null, 2)}`, 50, yPosition);
-            yPosition += 20;
-            
-            if (yPosition > 700) {
-              doc.addPage();
-              yPosition = 50;
-            }
-          }
-        }
-
-        // Incluir gráficos si se especifica
-        if (options.includeCharts && reportData.charts) {
-          doc.addPage();
-          doc.text('Gráficos y Visualizaciones', 50, 50);
-          // Aquí se integrarían las imágenes de los gráficos
-        }
-
-        doc.end();
-
-      } catch (error) {
-        reject(error);
-      }
+    const stats = await this.diagnosisService.getDiagnosisStats({
+      ranchId: filters.ranchId,
+      startDate: filters.startDate,
+      endDate: filters.endDate,
     });
+
+    const trends = {
+      period: filters.period || 'month',
+      dateRange: { startDate: filters.startDate, endDate: filters.endDate },
+      diagnosisTrends: stats.topDiagnoses.map(d => ({ diagnosis: d.diagnosis, count: d.count })),
+      outbreakAnalysis: { outbreaks: [] },
+      treatmentEfficacy: { efficacy: 0 },
+      riskFactors: { factors: [] },
+      seasonalPatterns: { patterns: [] },
+      recommendations: stats.topDiagnoses.length ? ['Monitorear diagnósticos frecuentes'] : [],
+    };
+
+    return {
+      type: 'HEALTH_TRENDS',
+      title: 'Análisis de Tendencias de Salud',
+      data: trends,
+      charts: this.generateTrendCharts(trends),
+      startTime,
+    };
   }
 
-  /**
-   * Exportar a Excel
-   * @param reportData - Datos del reporte
-   * @param options - Opciones
-   * @returns Promise<Buffer>
-   */
-  private async exportToExcel(
-    reportData: ReportData, 
-    options: any
-  ): Promise<Buffer> {
-    const workbook = new ExcelJS.Workbook();
-    
-    // Hoja principal con resumen
-    const summarySheet = workbook.addWorksheet('Resumen');
-    
-    // Encabezados
-    summarySheet.addRow(['Reporte', reportData.title]);
-    summarySheet.addRow(['Tipo', reportData.type]);
-    summarySheet.addRow(['Generado', new Date().toLocaleString('es-ES')]);
-    summarySheet.addRow([]); // Fila vacía
-
-    // Datos principales
-    if (reportData.data && typeof reportData.data === 'object') {
-      this.addDataToExcelSheet(summarySheet, reportData.data);
-    }
-
-    // Hojas adicionales según el tipo de reporte
-    if (reportData.type === 'HEALTH_OVERVIEW' && reportData.data) {
-      const healthData = reportData.data as HealthReport;
-      
-      if (healthData.recentIllnesses) {
-        const illnessSheet = workbook.addWorksheet('Enfermedades Recientes');
-        const illnessHeaders = ['ID', 'Arete', 'Nombre', 'Enfermedad', 'Severidad', 'Fecha', 'Estado'];
-        illnessSheet.addRow(illnessHeaders);
-        
-        healthData.recentIllnesses.forEach(illness => {
-          illnessSheet.addRow([
-            illness.id,
-            illness.earTag,
-            illness.bovineName,
-            illness.disease,
-            illness.severity,
-            illness.diagnosisDate.toLocaleDateString('es-ES'),
-            illness.status
-          ]);
-        });
-      }
-    }
-
-    return await workbook.xlsx.writeBuffer();
-  }
-
-  /**
-   * Exportar a CSV
-   * @param reportData - Datos del reporte
-   * @returns Promise<Buffer>
-   */
-  private async exportToCSV(reportData: ReportData): Promise<Buffer> {
-    let csvContent = '';
-    
-    // Encabezado
-    csvContent += `"Reporte","${reportData.title}"\n`;
-    csvContent += `"Tipo","${reportData.type}"\n`;
-    csvContent += `"Generado","${new Date().toLocaleString('es-ES')}"\n\n`;
-
-    // Datos principales (implementación simplificada)
-    if (reportData.data && typeof reportData.data === 'object') {
-      csvContent += this.convertObjectToCSV(reportData.data);
-    }
-
-    return Buffer.from(csvContent, 'utf8');
-  }
-
-  // ============================================================================
-  // MÉTODOS DE SOPORTE Y UTILIDADES
-  // ============================================================================
-
-  // Implementar todos los métodos faltantes que se referencian en el código
   private async generateDiseaseAnalysisReport(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    const { ranchId, startDate, endDate, healthStatus } = filters;
+    if (!ranchId) throw new ValidationError('ranchId es requerido para análisis de enfermedades');
+
+    const abnormalResults = await this.laboratoryService.getAbnormalResultsByRanch(ranchId, 30);
+
+    const diagnosisFilters: Parameters<typeof this.diagnosisService.getDiagnosisStats>[0] = {
+      ranchId,
+      startDate,
+      endDate,
+      healthStatus: healthStatus ? [healthStatus as HealthStatus] : undefined,
+    };
+    const diagnosisStats = await this.diagnosisService.getDiagnosisStats(diagnosisFilters);
+
     return {
       type: 'DISEASE_ANALYSIS',
       title: 'Análisis de Enfermedades',
+      data: {
+        abnormalResults,
+        topDiagnoses: diagnosisStats.topDiagnoses,
+        byHealthStatus: diagnosisStats.byHealthStatus,
+      },
+      startTime,
+    };
+  }
+
+  // ==========================================================================
+  // NUEVO: REPORTE DE INVENTARIO
+  // ==========================================================================
+
+  private async generateInventorySummaryReport(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    const { ranchId } = filters;
+
+    if (!ranchId) {
+      throw new ValidationError('ranchId es requerido para reporte de inventario');
+    }
+
+    try {
+      // 1. Obtener items del inventario
+      const { items, total, metadata } = await this.inventoryService.getInventory({}, ranchId);
+
+      // 2. Calcular valuación
+      const valuation = await this.inventoryService.calculateInventoryValuation(ranchId, 'WEIGHTED_AVERAGE');
+
+      // 3. Contar alertas
+      const lowStockItems = items.filter(item => item.currentStock <= item.minimumStock);
+      const expiredItems = items.filter(item => item.expirationDate && new Date(item.expirationDate) < new Date());
+
+      // 4. Valor por categoría
+      const byCategory: Record<string, { count: number; value: number }> = {};
+      for (const item of items) {
+        const category = item.category;
+        if (!byCategory[category]) byCategory[category] = { count: 0, value: 0 };
+        byCategory[category].count += 1;
+        byCategory[category].value += item.currentStock * item.unitCost;
+      }
+
+      return {
+        type: 'INVENTORY_SUMMARY',
+        title: 'Resumen de Inventario',
+        data: {
+          summary: {
+            totalItems: total,
+            totalValue: valuation.totalValue,
+            totalQuantity: valuation.totalQuantity,
+            lowStockCount: lowStockItems.length,
+            expiredCount: expiredItems.length,
+          },
+          valuation,
+          byCategory,
+          lowStockItems: lowStockItems.map(item => ({
+            id: item.id,
+            name: item.itemName,
+            currentStock: item.currentStock,
+            minStock: item.minimumStock,
+            unit: item.unitOfMeasure,
+          })),
+          metadata,
+        },
+        startTime,
+      };
+    } catch (error) {
+      logger.error('Error generando reporte de inventario', this.context, { filters, error });
+      throw error;
+    }
+  }
+
+  // ==========================================================================
+  // REPORTES DE VACUNACIÓN (placeholders)
+  // ==========================================================================
+
+  private async generateVaccinationCoverageReport(filters: ReportFilters): Promise<ReportData> {
+    return {
+      type: 'VACCINATION_COVERAGE',
+      title: 'Cobertura de Vacunación',
       data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      startTime: Date.now(),
     };
   }
 
@@ -1245,7 +401,7 @@ export class ReportsService {
       type: 'VACCINATION_SCHEDULE',
       title: 'Cronograma de Vacunación',
       data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      startTime: Date.now(),
     };
   }
 
@@ -1254,7 +410,65 @@ export class ReportsService {
       type: 'VACCINATION_EFFICACY',
       title: 'Eficacia de Vacunación',
       data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      startTime: Date.now(),
+    };
+  }
+
+  // ==========================================================================
+  // REPORTES DE PRODUCCIÓN (usando servicios reales)
+  // ==========================================================================
+
+  private async generateProductionSummaryReport(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    const { ranchId, startDate, endDate, productionType } = filters;
+
+    if (!ranchId || !startDate || !endDate) {
+      throw new ValidationError('ranchId, startDate y endDate son requeridos para reporte de producción');
+    }
+
+    // Obtener registros individuales del rancho
+    const productions = await this.productionService.getProductionsByRanch(ranchId, {
+      startDate,
+      endDate,
+      productionType,
+      limit: 1000000,
+    });
+
+    // Calcular totales por tipo
+    const totals: Record<string, { total: number; count: number }> = {};
+    for (const prod of productions.rows) {
+      const type = prod.productionType;
+      if (!totals[type]) totals[type] = { total: 0, count: 0 };
+      totals[type].total += prod.quantity;
+      totals[type].count++;
+    }
+
+    const summary = Object.entries(totals).map(([type, data]) => ({
+      type,
+      unit: productions.rows.find(p => p.productionType === type)?.unit || 'unidad',
+      totalRecords: data.count,
+      totalValue: data.total,
+      averageValue: data.total / data.count,
+      minimumValue: 0, // se podría calcular
+      maximumValue: 0,
+    }));
+
+    // Top productores (bovinos con más producción)
+    const topProducers = await this.productionService.getTopProducersByRanch(ranchId, startDate, endDate, 10); // método que debería existir
+
+    return {
+      type: 'PRODUCTION_SUMMARY',
+      title: 'Resumen de Producción',
+      data: {
+        period: { startDate, endDate },
+        summary,
+        topProducers: topProducers || [],
+        monthlyTrends: [],
+        periodComparison: {},
+        efficiencyAnalysis: {},
+        recommendations: [],
+      },
+      startTime,
     };
   }
 
@@ -1263,316 +477,301 @@ export class ReportsService {
       type: 'PRODUCTION_TRENDS',
       title: 'Tendencias de Producción',
       data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      startTime: Date.now(),
     };
   }
 
+  // ==========================================================================
+  // REPORTES DE REPRODUCCIÓN (usando servicios reales)
+  // ==========================================================================
+
   private async generateBreedingOverviewReport(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    const { ranchId, startDate, endDate } = filters;
+    if (!ranchId) throw new ValidationError('ranchId es requerido');
+
+    const events = await this.reproductionService.getEventsByRanch(ranchId, {
+      startDate,
+      endDate,
+      limit: 1000000,
+    });
+
+    const byType: Record<string, number> = {};
+    for (const ev of events.rows) {
+      byType[ev.reproductionType] = (byType[ev.reproductionType] || 0) + 1;
+    }
+
+    const conceptionRate = await this.reproductionService.getConceptionRate(
+      ranchId,
+      startDate || new Date(0),
+      endDate || new Date()
+    );
+    const calvingInterval = await this.reproductionService.getAverageCalvingInterval(ranchId);
+
     return {
       type: 'BREEDING_OVERVIEW',
-      title: 'Resumen de Reproducción',
-      data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      title: 'Resumen Reproductivo',
+      data: {
+        totalEvents: events.count,
+        eventsByType: byType,
+        conceptionRate,
+        averageCalvingInterval: calvingInterval,
+      },
+      startTime,
     };
   }
 
   private async generatePregnancyStatusReport(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    const { ranchId, startDate, endDate } = filters;
+    if (!ranchId) throw new ValidationError('ranchId es requerido');
+
+    const pregnancies = await this.reproductionService.getEventsByRanch(ranchId, {
+      reproductionType: ReproductionType.SYNCHRONIZED_BREEDING,
+      startDate,
+      endDate,
+    });
+
+    const confirmed = pregnancies.rows.filter(p => p.status === 'CONFIRMED_PREGNANT');
+    const expectedCalvings = confirmed.map(p => ({
+      damId: p.damId,
+      expectedDate: p.pregnancyInfo?.pregnancyDiagnosis.expectedCalvingDate,
+    }));
+
     return {
       type: 'PREGNANCY_STATUS',
       title: 'Estado de Preñez',
-      data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      data: {
+        totalPregnancies: confirmed.length,
+        expectedCalvings,
+      },
+      startTime,
     };
   }
 
   private async generateBirthRecordsReport(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    const { ranchId, startDate, endDate } = filters;
+    if (!ranchId) throw new ValidationError('ranchId es requerido');
+
+    const births = await this.reproductionService.getEventsByRanch(ranchId, {
+      reproductionType: ReproductionType.SYNCHRONIZED_BREEDING,
+      startDate,
+      endDate,
+    });
+    const birthEvents = births.rows.filter(b => b.status === 'CALVED');
+
     return {
       type: 'BIRTH_RECORDS',
       title: 'Registros de Nacimientos',
-      data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      data: {
+        totalBirths: birthEvents.length,
+        births: birthEvents.map(b => ({
+          damId: b.damId,
+          birthDate: b.serviceInfo?.serviceDate,
+          calfInfo: b.calfInfo,
+          calvingInfo: b.calvingInfo,
+        })),
+      },
+      startTime,
     };
   }
 
+  // ==========================================================================
+  // REPORTES FINANCIEROS Y OTROS (placeholders)
+  // ==========================================================================
+
   private async generateFinancialSummaryReport(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    const { ranchId, startDate, endDate } = filters;
+    if (!ranchId || !startDate || !endDate) {
+      throw new ValidationError('ranchId, startDate y endDate son requeridos para reporte financiero');
+    }
+
+    const summary = await this.financeService.getFinancialSummary(ranchId, startDate, endDate);
     return {
       type: 'FINANCIAL_SUMMARY',
       title: 'Resumen Financiero',
-      data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      data: summary,
+      startTime,
+    };
+  }
+
+  private async generateVeterinaryCostsReport(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    const { ranchId, startDate, endDate } = filters;
+    if (!ranchId || !startDate || !endDate) {
+      throw new ValidationError('ranchId, startDate y endDate son requeridos para reporte de costos veterinarios');
+    }
+
+    const costs = await this.financeService.getVeterinaryCosts(ranchId, startDate, endDate);
+    return {
+      type: 'VETERINARY_COSTS',
+      title: 'Costos Veterinarios',
+      data: costs,
+      startTime,
     };
   }
 
   private async generateROIAnalysisReport(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    const { ranchId, startDate, endDate } = filters;
+    if (!ranchId || !startDate || !endDate) {
+      throw new ValidationError('ranchId, startDate y endDate son requeridos para análisis ROI');
+    }
+
+    const roi = await this.financeService.getROIAnalysis(ranchId, startDate, endDate);
     return {
       type: 'ROI_ANALYSIS',
       title: 'Análisis de ROI',
+      data: roi,
+      startTime,
+    };
+  }
+
+  private async generateGeospatialAnalysisReport(filters: ReportFilters): Promise<ReportData> {
+    return {
+      type: 'GEOSPATIAL_ANALYSIS',
+      title: 'Análisis Geoespacial',
       data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      startTime: Date.now(),
     };
   }
 
   private async generateComprehensiveDashboard(filters: ReportFilters): Promise<ReportData> {
+    const startTime = Date.now();
+    // Combinar algunos reportes
+    const health = await this.generateHealthOverviewReport(filters);
+    const production = await this.generateProductionSummaryReport(filters);
+    const breeding = await this.generateBreedingOverviewReport(filters);
     return {
       type: 'COMPREHENSIVE_DASHBOARD',
       title: 'Dashboard Completo',
-      data: { message: 'Reporte en desarrollo' },
-      startTime: Date.now()
+      data: {
+        health: health.data,
+        production: production.data,
+        breeding: breeding.data,
+      },
+      startTime,
     };
   }
 
-  // Métodos de soporte con implementaciones básicas
-  private async getOverdueVaccinations(filters: ReportFilters): Promise<any[]> {
-    return [];
+  // ==========================================================================
+  // MÉTODOS DE EXPORTACIÓN (mantenidos del original)
+  // ==========================================================================
+
+  async exportReport(
+    reportData: ReportData,
+    format: ExportFormat,
+    options: { includeCharts?: boolean; includeMaps?: boolean } = {}
+  ): Promise<Buffer> {
+    logger.info('📤 Exportando reporte', this.context, { type: reportData.type, format });
+
+    switch (format) {
+      case 'PDF':
+        return this.exportToPDF(reportData, options);
+      case 'EXCEL':
+        return this.exportToExcel(reportData, options);
+      case 'CSV':
+        return this.exportToCSV(reportData);
+      case 'JSON':
+        return Buffer.from(JSON.stringify(reportData, null, 2));
+      default:
+        throw new ValidationError(`Formato no soportado: ${format}`);
+    }
   }
 
-  private async calculateHealthTrends(filters: ReportFilters): Promise<any> {
-    return { trend: 'STABLE', confidence: 0.8 };
+  private async exportToPDF(reportData: ReportData, options: any): Promise<Buffer> {
+    return new Promise((resolve) => {
+      const doc = new PDFDocument();
+      const buffers: Buffer[] = [];
+      doc.on('data', (chunk: Buffer) => buffers.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+      doc.fontSize(20).text(reportData.title, 50, 50);
+      doc.fontSize(12).text(`Generado: ${new Date().toLocaleString()}`, 50, 80);
+      doc.fontSize(12).text(JSON.stringify(reportData.data, null, 2), 50, 120);
+      doc.end();
+    });
   }
 
-  private async getHealthLocationDistribution(filters: ReportFilters): Promise<any> {
-    return [];
+  private async exportToExcel(reportData: ReportData, options: any): Promise<Buffer> {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Reporte');
+    sheet.columns = [
+      { header: 'Campo', key: 'field', width: 30 },
+      { header: 'Valor', key: 'value', width: 50 },
+    ];
+
+    const flatten = (obj: any, prefix = ''): any[] => {
+      const rows: any[] = [];
+      for (const [key, value] of Object.entries(obj)) {
+        const fieldName = prefix ? `${prefix}.${key}` : key;
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          rows.push(...flatten(value, fieldName));
+        } else {
+          rows.push({ field: fieldName, value: JSON.stringify(value) });
+        }
+      }
+      return rows;
+    };
+
+    const rows = flatten(reportData.data);
+    rows.forEach(row => sheet.addRow(row));
+
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
   }
 
-  private async detectOutbreaks(filters: ReportFilters): Promise<any> {
-    return { outbreaks: [] };
+  private async exportToCSV(reportData: ReportData): Promise<Buffer> {
+    const flatten = (obj: any, prefix = ''): Record<string, any> => {
+      const result: Record<string, any> = {};
+      for (const [key, value] of Object.entries(obj)) {
+        const field = prefix ? `${prefix}.${key}` : key;
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          Object.assign(result, flatten(value, field));
+        } else {
+          result[field] = value;
+        }
+      }
+      return result;
+    };
+
+    const flat = flatten(reportData.data);
+    const headers = Object.keys(flat);
+    const csvRows = [headers.join(',')];
+    csvRows.push(headers.map(h => JSON.stringify(flat[h] || '')).join(','));
+
+    return Buffer.from(csvRows.join('\n'), 'utf-8');
   }
 
-  private async analyzeTreatmentEfficacy(filters: ReportFilters): Promise<any> {
-    return { efficacy: 85 };
-  }
-
-  private async identifyRiskFactors(filters: ReportFilters): Promise<any> {
-    return { factors: [] };
-  }
-
-  private async analyzeSeasonalPatterns(filters: ReportFilters): Promise<any> {
-    return { patterns: [] };
-  }
-
-  private async getMonthlyVaccinationHistory(filters: ReportFilters): Promise<any[]> {
-    return [];
-  }
-
-  private async getMonthlyProductionTrends(filters: ReportFilters): Promise<any[]> {
-    return [];
-  }
-
-  private async compareProductionPeriods(filters: ReportFilters): Promise<any> {
-    return { comparison: 'equal' };
-  }
-
-  private async analyzeProductionEfficiency(filters: ReportFilters): Promise<any> {
-    return { efficiency: 80 };
-  }
-
-  private async getMonthlyVeterinaryExpenses(filters: ReportFilters): Promise<any[]> {
-    return [];
-  }
-
-  private async calculateTreatmentROI(filters: ReportFilters): Promise<any> {
-    return { roi: 1.5 };
-  }
-
-  private async analyzeBudgetVsActual(filters: ReportFilters): Promise<any> {
-    return { variance: 5 };
-  }
-
-  private async getBovineLocationDistribution(filters: ReportFilters): Promise<any[]> {
-    return [];
-  }
-
-  private async identifyDiseaseClusters(filters: ReportFilters): Promise<any[]> {
-    return [];
-  }
-
-  private async calculateLocationDensity(filters: ReportFilters): Promise<any> {
-    return { density: 'medium' };
-  }
-
-  private async analyzeMovementPatterns(filters: ReportFilters): Promise<any[]> {
-    return [];
-  }
-
-  private async identifyRiskZones(filters: ReportFilters): Promise<any[]> {
-    return [];
-  }
-
-  private async calculateCoverageArea(filters: ReportFilters): Promise<any> {
-    return { area: 100 };
-  }
-
-  // Métodos de generación de gráficos y mapas
-  private generateHealthCharts(data: HealthReport): any[] {
-    return [];
-  }
-
-  private generateTrendCharts(data: TrendAnalysis): any[] {
-    return [];
-  }
-
-  private generateVaccinationCharts(data: VaccinationReport): any[] {
-    return [];
-  }
-
-  private generateProductionCharts(data: ProductionReport): any[] {
-    return [];
-  }
-
-  private generateFinancialCharts(data: FinancialReport): any[] {
-    return [];
-  }
-
-  private generateGeospatialMaps(data: GeospatialReport): any[] {
-    return [];
-  }
-
-  // Métodos de generación de recomendaciones
-  private generateHealthRecommendations(trends: any[]): string[] {
-    return ['Mantener seguimiento de salud'];
-  }
-
-  private generateVaccinationRecommendations(data: VaccinationReport): string[] {
-    return ['Completar vacunaciones pendientes'];
-  }
-
-  private generateProductionRecommendations(data: ProductionReport): string[] {
-    return ['Optimizar alimentación'];
-  }
-
-  private generateFinancialRecommendations(data: FinancialReport): string[] {
-    return ['Controlar gastos veterinarios'];
-  }
-
-  private generateGeospatialRecommendations(data: GeospatialReport): string[] {
-    return ['Mejorar distribución de pastoreo'];
-  }
-
-  // Métodos de utilidades
-  private generateCacheKey(type: ReportType, filters: ReportFilters): string {
-    const filterHash = Buffer.from(JSON.stringify(filters)).toString('base64');
-    return `report:${type}:${filterHash}`;
-  }
+  // ==========================================================================
+  // MÉTODOS AUXILIARES (validación, caché, etc.)
+  // ==========================================================================
 
   private async validateFilters(filters: ReportFilters): Promise<void> {
     if (filters.startDate && filters.endDate && filters.startDate > filters.endDate) {
       throw new ValidationError('La fecha de inicio no puede ser posterior a la fecha de fin');
     }
-
     if (filters.ranchId) {
-      const ranch = await Ranch.findByPk(filters.ranchId);
-      if (!ranch) {
-        throw new ValidationError('El rancho especificado no existe');
-      }
+      const ranch = await this.ranchCoreService.getRanchById(filters.ranchId);
+      if (!ranch) throw new ValidationError('El rancho especificado no existe');
     }
-
-    if (filters.bovineIds && filters.bovineIds.length > 0) {
-      const bovineCount = await Bovine.count({
-        where: { id: { [Op.in]: filters.bovineIds } }
-      });
-      if (bovineCount !== filters.bovineIds.length) {
-        throw new ValidationError('Algunos bovinos especificados no existen');
-      }
-    }
+    // Otras validaciones según necesidad
   }
 
-  private buildBovineWhereClause(filters: ReportFilters): any {
-    const whereClause: any = { isActive: true };
-
-    if (filters.ranchId) {
-      whereClause.ranchId = filters.ranchId;
-    }
-
-    if (filters.bovineIds && filters.bovineIds.length > 0) {
-      whereClause.id = { [Op.in]: filters.bovineIds };
-    }
-
-    if (filters.breed) {
-      whereClause.breed = filters.breed;
-    }
-
-    if (filters.healthStatus) {
-      whereClause.healthStatus = filters.healthStatus;
-    }
-
-    if (filters.ageRange) {
-      const currentDate = new Date();
-      const minBirthDate = new Date(currentDate.getFullYear() - filters.ageRange.max, currentDate.getMonth(), currentDate.getDate());
-      const maxBirthDate = new Date(currentDate.getFullYear() - filters.ageRange.min, currentDate.getMonth(), currentDate.getDate());
-      
-      whereClause.birthDate = {
-        [Op.between]: [minBirthDate, maxBirthDate]
-      };
-    }
-
-    return whereClause;
+  private generateCacheKey(type: ReportType, filters: ReportFilters): string {
+    const filterHash = Buffer.from(JSON.stringify(filters)).toString('base64');
+    return `report:${type}:${filterHash}`;
   }
 
-  private buildProductionWhereClause(filters: ReportFilters): any {
-    const whereClause: any = { isDeleted: false };
-
-    if (filters.startDate) {
-      whereClause.recordedDate = { [Op.gte]: filters.startDate };
-    }
-
-    if (filters.endDate) {
-      if (whereClause.recordedDate) {
-        whereClause.recordedDate[Op.lte] = filters.endDate;
-      } else {
-        whereClause.recordedDate = { [Op.lte]: filters.endDate };
-      }
-    }
-
-    if (filters.productionType) {
-      whereClause.type = filters.productionType;
-    }
-
-    return whereClause;
+  // Métodos de generación de gráficos (placeholders)
+  private generateHealthCharts(data: HealthReport): any[] {
+    return []; // Implementación pendiente
   }
 
-  private shouldCacheReport(type: ReportType, filters: ReportFilters): boolean {
-    const heavyReports = [
-      'COMPREHENSIVE_DASHBOARD',
-      'GEOSPATIAL_ANALYSIS',
-      'DISEASE_ANALYSIS',
-      'ROI_ANALYSIS'
-    ];
-
-    return heavyReports.includes(type) && !filters.realTime;
-  }
-
-  private getCacheExpiration(type: ReportType): number {
-    const expirations: Record<string, number> = {
-      'HEALTH_OVERVIEW': 3600,
-      'PRODUCTION_SUMMARY': 1800,
-      'FINANCIAL_SUMMARY': 7200,
-      'COMPREHENSIVE_DASHBOARD': 1800,
-      'GEOSPATIAL_ANALYSIS': 3600
-    };
-
-    return expirations[type] || 3600;
-  }
-
-  private addDataToExcelSheet(sheet: any, data: any): void {
-    // Implementación simplificada para agregar datos a Excel
-    if (typeof data === 'object' && data !== null) {
-      for (const [key, value] of Object.entries(data)) {
-        sheet.addRow([key, JSON.stringify(value)]);
-      }
-    }
-  }
-
-  private convertObjectToCSV(data: any): string {
-    // Implementación simplificada para convertir objeto a CSV
-    let csv = '';
-    if (typeof data === 'object' && data !== null) {
-      for (const [key, value] of Object.entries(data)) {
-        csv += `"${key}","${JSON.stringify(value).replace(/"/g, '""')}"\n`;
-      }
-    }
-    return csv;
+  private generateTrendCharts(data: any): any[] {
+    return [];
   }
 }
-
-// Exportar instancia única del servicio
-export const reportsService = new ReportsService();

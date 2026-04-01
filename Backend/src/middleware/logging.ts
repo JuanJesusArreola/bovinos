@@ -338,7 +338,7 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction): 
     requestId: requestId,
     method: req.method,
     path: req.originalUrl,
-    ip: req.ip || req.connection.remoteAddress,
+    ip: req.ip || req.socket.remoteAddress || 'unknown',
     userAgent: req.get('User-Agent'),
     metadata: {
       query: req.query,

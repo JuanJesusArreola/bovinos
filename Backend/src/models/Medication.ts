@@ -265,18 +265,18 @@ export interface MedicationAttributes {
 }
 
 // Atributos opcionales al crear un nuevo medicamento
-export interface MedicationCreationAttributes 
-  extends Optional<MedicationAttributes, 
-    'id' | 'brandName' | 'strength' | 'pharmacologicalInfo' | 'adverseEffects' | 
-    'milkWithdrawalPeriod' | 'storageTemperatureMin' | 'storageTemperatureMax' | 
-    'qualityInfo' | 'contraindications' | 'images' | 'documents' | 
-    'safetyDataSheet' | 'productInsert' | 'notes' | 'lastUpdated' | 
-    'approvedBy' | 'approvedDate' | 'updatedBy' | 'createdAt' | 'updatedAt' | 
+export interface MedicationCreationAttributes
+  extends Optional<MedicationAttributes,
+    'id' | 'brandName' | 'strength' | 'pharmacologicalInfo' | 'adverseEffects' |
+    'milkWithdrawalPeriod' | 'storageTemperatureMin' | 'storageTemperatureMax' |
+    'qualityInfo' | 'contraindications' | 'images' | 'documents' |
+    'safetyDataSheet' | 'productInsert' | 'notes' | 'lastUpdated' |
+    'approvedBy' | 'approvedDate' | 'updatedBy' | 'createdAt' | 'updatedAt' |
     'deletedAt'
-  > {}
+  > { }
 
 // Clase del modelo Medication
-class Medication extends Model<MedicationAttributes, MedicationCreationAttributes> 
+class Medication extends Model<MedicationAttributes, MedicationCreationAttributes>
   implements MedicationAttributes {
   public id!: string;
   public medicationCode!: string;
@@ -323,334 +323,7 @@ class Medication extends Model<MedicationAttributes, MedicationCreationAttribute
   public readonly updatedAt!: Date;
   public deletedAt?: Date;
 
-  // Métodos de instancia
 
-  /**
-   * Obtiene el tipo de medicamento en español
-   * @returns Tipo de medicamento traducido
-   */
-  public getMedicationTypeLabel(): string {
-    const labels = {
-      [MedicationType.ANTIBIOTIC]: 'Antibiótico',
-      [MedicationType.ANTI_INFLAMMATORY]: 'Antiinflamatorio',
-      [MedicationType.ANALGESIC]: 'Analgésico',
-      [MedicationType.ANTIPARASITIC]: 'Antiparasitario',
-      [MedicationType.ANTIFUNGAL]: 'Antifúngico',
-      [MedicationType.ANTIVIRAL]: 'Antiviral',
-      [MedicationType.VACCINE]: 'Vacuna',
-      [MedicationType.VITAMIN]: 'Vitamina',
-      [MedicationType.MINERAL]: 'Mineral',
-      [MedicationType.HORMONE]: 'Hormona',
-      [MedicationType.SEDATIVE]: 'Sedante',
-      [MedicationType.ANESTHETIC]: 'Anestésico',
-      [MedicationType.REPRODUCTIVE]: 'Reproductivo',
-      [MedicationType.NUTRITIONAL]: 'Nutricional',
-      [MedicationType.IMMUNOMODULATOR]: 'Inmunomodulador',
-      [MedicationType.ANTIDIARRHEAL]: 'Antidiarreico',
-      [MedicationType.RESPIRATORY]: 'Respiratorio',
-      [MedicationType.CARDIOVASCULAR]: 'Cardiovascular',
-      [MedicationType.TOPICAL]: 'Tópico',
-      [MedicationType.DISINFECTANT]: 'Desinfectante',
-      [MedicationType.SUPPLEMENT]: 'Suplemento',
-      [MedicationType.PROBIOTIC]: 'Probiótico',
-      [MedicationType.PREBIOTIC]: 'Prebiótico',
-      [MedicationType.OTHER]: 'Otro'
-    };
-    return labels[this.type];
-  }
-
-  /**
-   * Verifica si el medicamento requiere prescripción veterinaria
-   * @returns True si requiere prescripción
-   */
-  public requiresVeterinaryPrescription(): boolean {
-    return this.regulatoryInfo.veterinaryPrescriptionOnly || 
-           this.regulatoryInfo.prescriptionRequired ||
-           this.isControlled;
-  }
-
-  /**
-   * Obtiene el período de retiro aplicable
-   * @param productType Tipo de producto (carne o leche)
-   * @returns Período de retiro en días
-   */
-  public getWithdrawalPeriod(productType: 'MEAT' | 'MILK' = 'MEAT'): number {
-    if (productType === 'MILK' && this.milkWithdrawalPeriod !== undefined) {
-      return this.milkWithdrawalPeriod;
-    }
-    return this.withdrawalPeriod;
-  }
-
-  /**
-   * Verifica si es compatible con una especie específica
-   * @param species Especie a verificar
-   * @returns True si es compatible
-   */
-  public isCompatibleWithSpecies(species: string): boolean {
-    return this.targetSpecies.includes(species.toUpperCase()) ||
-           this.targetSpecies.includes('ALL') ||
-           this.targetSpecies.includes('BOVINE');
-  }
-
-  /**
-   * Obtiene la dosificación para una especie e indicación específica
-   * @param species Especie
-   * @param indication Indicación
-   * @returns Información de dosificación o null
-   */
-  public getDosageForSpecies(species: string, indication?: string): DosageInfo | null {
-    const compatibleDosages = this.dosageInfo.filter(dosage => 
-      dosage.species.includes(species.toUpperCase()) ||
-      dosage.species.includes('ALL') ||
-      dosage.species.includes('BOVINE')
-    );
-
-    if (indication) {
-      const specificDosage = compatibleDosages.find(dosage => 
-        dosage.indication.toLowerCase().includes(indication.toLowerCase())
-      );
-      if (specificDosage) return specificDosage;
-    }
-
-    return compatibleDosages[0] || null;
-  }
-
-  /**
-   * Calcula la dosis para un animal específico
-   * @param weight Peso del animal en kg
-   * @param species Especie del animal
-   * @param indication Indicación del tratamiento
-   * @returns Dosis calculada o null
-   */
-  public calculateDoseForAnimal(
-    weight: number, 
-    species: string, 
-    indication?: string
-  ): { 
-    dose: number; 
-    unit: string; 
-    frequency: string; 
-    route: AdministrationRoute;
-    duration: number;
-  } | null {
-    const dosageInfo = this.getDosageForSpecies(species, indication);
-    if (!dosageInfo) return null;
-
-    // Calcular dosis basada en peso
-    let calculatedDose = dosageInfo.dosage * weight;
-
-    // Verificar dosis máxima diaria si está definida
-    if (dosageInfo.maxDailyDose && calculatedDose > dosageInfo.maxDailyDose) {
-      calculatedDose = dosageInfo.maxDailyDose;
-    }
-
-    return {
-      dose: calculatedDose,
-      unit: dosageInfo.dosageUnit,
-      frequency: dosageInfo.frequency,
-      route: dosageInfo.route,
-      duration: dosageInfo.duration
-    };
-  }
-
-  /**
-   * Verifica si hay interacciones con otros medicamentos
-   * @param otherMedications Lista de otros medicamentos
-   * @returns Array de interacciones encontradas
-   */
-  public checkDrugInteractions(otherMedications: Medication[]): Array<{
-    medication: string;
-    interaction: string;
-    severity: 'MILD' | 'MODERATE' | 'SEVERE';
-    management: string;
-  }> {
-    const interactions: Array<{
-      medication: string;
-      interaction: string;
-      severity: 'MILD' | 'MODERATE' | 'SEVERE';
-      management: string;
-    }> = [];
-
-    if (!this.adverseEffects?.drugInteractions) return interactions;
-
-    otherMedications.forEach(med => {
-      // Verificar por nombre genérico
-      const genericInteraction = this.adverseEffects?.drugInteractions?.find(
-        interaction => interaction.drug.toLowerCase() === med.genericName.toLowerCase()
-      );
-
-      if (genericInteraction) {
-        interactions.push({
-          medication: med.genericName,
-          interaction: genericInteraction.interaction,
-          severity: genericInteraction.severity,
-          management: genericInteraction.management
-        });
-      }
-
-      // Verificar por principios activos
-      med.activeIngredients.forEach(ingredient => {
-        const ingredientInteraction = this.adverseEffects?.drugInteractions?.find(
-          interaction => interaction.drug.toLowerCase() === ingredient.name.toLowerCase()
-        );
-
-        if (ingredientInteraction) {
-          interactions.push({
-            medication: `${med.genericName} (${ingredient.name})`,
-            interaction: ingredientInteraction.interaction,
-            severity: ingredientInteraction.severity,
-            management: ingredientInteraction.management
-          });
-        }
-      });
-    });
-
-    return interactions;
-  }
-
-  /**
-   * Verifica si el medicamento está vencido
-   * @param manufacturingDate Fecha de fabricación
-   * @returns True si está vencido
-   */
-  public isExpired(manufacturingDate: Date): boolean {
-    const expirationDate = new Date(manufacturingDate);
-    expirationDate.setMonth(expirationDate.getMonth() + this.shelfLife);
-    return new Date() > expirationDate;
-  }
-
-  /**
-   * Obtiene los requisitos de almacenamiento en español
-   * @returns Array de requisitos traducidos
-   */
-  public getStorageRequirementsLabels(): string[] {
-    const labels = {
-      [StorageRequirement.ROOM_TEMPERATURE]: 'Temperatura ambiente',
-      [StorageRequirement.REFRIGERATED]: 'Refrigerado (2-8°C)',
-      [StorageRequirement.FROZEN]: 'Congelado (-20°C)',
-      [StorageRequirement.CONTROLLED_TEMPERATURE]: 'Temperatura controlada',
-      [StorageRequirement.PROTECT_FROM_LIGHT]: 'Proteger de la luz',
-      [StorageRequirement.PROTECT_FROM_MOISTURE]: 'Proteger de la humedad',
-      [StorageRequirement.STORE_UPRIGHT]: 'Almacenar en posición vertical',
-      [StorageRequirement.DO_NOT_SHAKE]: 'No agitar',
-      [StorageRequirement.SPECIAL_HANDLING]: 'Manejo especial'
-    };
-
-    return this.storageRequirements.map(req => labels[req]);
-  }
-
-  /**
-   * Obtiene las advertencias de seguridad
-   * @returns Array de advertencias importantes
-   */
-  public getSafetyWarnings(): string[] {
-    const warnings: string[] = [];
-
-    if (this.isControlled) {
-      warnings.push('Sustancia controlada - Manténgase fuera del alcance de personas no autorizadas');
-    }
-
-    if (this.isAntibiotic) {
-      warnings.push('Uso responsable de antibióticos - Completar el tratamiento según prescripción');
-    }
-
-    if (this.requiresRefrigeration) {
-      warnings.push('Mantener refrigerado - No exponer a temperatura ambiente por períodos prolongados');
-    }
-
-    if (this.withdrawalPeriod > 0) {
-      warnings.push(`Período de retiro: ${this.withdrawalPeriod} días para carne`);
-    }
-
-    if (this.milkWithdrawalPeriod && this.milkWithdrawalPeriod > 0) {
-      warnings.push(`Período de retiro: ${this.milkWithdrawalPeriod} días para leche`);
-    }
-
-    if (this.adverseEffects?.warnings) {
-      warnings.push(...this.adverseEffects.warnings);
-    }
-
-    return warnings;
-  }
-
-  /**
-   * Genera un resumen del medicamento
-   * @returns Objeto con resumen completo
-   */
-  public getMedicationSummary(): {
-    name: string;
-    type: string;
-    isVaccine: boolean;
-    isAntibiotic: boolean;
-    requiresPrescription: boolean;
-    withdrawalPeriod: number;
-    milkWithdrawalPeriod?: number;
-    targetSpecies: string[];
-    mainIndications: string[];
-    safetyWarnings: string[];
-    storageRequirements: string[];
-    isExpiredSoon: boolean;
-  } {
-    return {
-      name: this.brandName || this.genericName,
-      type: this.getMedicationTypeLabel(),
-      isVaccine: this.isVaccine,
-      isAntibiotic: this.isAntibiotic,
-      requiresPrescription: this.requiresVeterinaryPrescription(),
-      withdrawalPeriod: this.withdrawalPeriod,
-      milkWithdrawalPeriod: this.milkWithdrawalPeriod,
-      targetSpecies: this.targetSpecies,
-      mainIndications: this.indications.slice(0, 3), // Primeras 3 indicaciones
-      safetyWarnings: this.getSafetyWarnings(),
-      storageRequirements: this.getStorageRequirementsLabels(),
-      isExpiredSoon: false // Se calcularía con fecha específica
-    };
-  }
-
-  /**
-   * Verifica la compatibilidad con condiciones específicas
-   * @param conditions Condiciones a verificar
-   * @returns True si es compatible
-   */
-  public isCompatibleWithConditions(conditions: {
-    pregnancy?: boolean;
-    lactation?: boolean;
-    age?: 'YOUNG' | 'ADULT' | 'SENIOR';
-    renalImpairment?: boolean;
-    hepaticImpairment?: boolean;
-  }): { compatible: boolean; warnings: string[] } {
-    const warnings: string[] = [];
-    let compatible = true;
-
-    // Verificar contraindicaciones
-    if (this.contraindications) {
-      if (conditions.pregnancy && this.contraindications.some(c => 
-        c.toLowerCase().includes('pregnancy') || c.toLowerCase().includes('gestación'))) {
-        compatible = false;
-        warnings.push('Contraindicado en gestación');
-      }
-
-      if (conditions.lactation && this.contraindications.some(c => 
-        c.toLowerCase().includes('lactation') || c.toLowerCase().includes('lactancia'))) {
-        compatible = false;
-        warnings.push('Contraindicado en lactancia');
-      }
-    }
-
-    // Verificar precauciones
-    if (this.adverseEffects?.precautions) {
-      this.adverseEffects.precautions.forEach(precaution => {
-        if (conditions.renalImpairment && precaution.toLowerCase().includes('renal')) {
-          warnings.push('Precaución en insuficiencia renal');
-        }
-        if (conditions.hepaticImpairment && precaution.toLowerCase().includes('hepátic')) {
-          warnings.push('Precaución en insuficiencia hepática');
-        }
-      });
-    }
-
-    return { compatible, warnings };
-  }
 }
 
 // Definición del modelo en Sequelize
@@ -666,7 +339,6 @@ Medication.init(
     medicationCode: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      unique: true,
       validate: {
         notEmpty: true,
         len: [3, 50]
@@ -690,7 +362,6 @@ Medication.init(
     type: {
       type: DataTypes.ENUM(...Object.values(MedicationType)),
       allowNull: false,
-      comment: 'Tipo de medicamento'
     },
     activeIngredients: {
       type: DataTypes.JSONB,
@@ -774,12 +445,18 @@ Medication.init(
       comment: 'Período de retiro para leche (días)'
     },
     storageRequirements: {
-      type: DataTypes.ARRAY(DataTypes.ENUM(...Object.values(StorageRequirement))),
+      type: DataTypes.ARRAY(DataTypes.STRING),
       allowNull: false,
       validate: {
-        notEmpty: true
-      },
-      comment: 'Requisitos de almacenamiento'
+        isValidRequirement(value: string[]) {
+          const valid = Object.values(StorageRequirement);
+          value.forEach(v => {
+            if (!valid.includes(v as StorageRequirement)) {
+              throw new Error(`Storage requirement inválido: ${v}`);
+            }
+          });
+        }
+      }
     },
     storageTemperatureMin: {
       type: DataTypes.DECIMAL(5, 2),
@@ -971,7 +648,7 @@ Medication.init(
     indexes: [
       // Índices para optimizar consultas
       {
-        unique: true,
+
         fields: ['medication_code']
       },
       {
@@ -1036,20 +713,20 @@ Medication.init(
         }
 
         // Establecer flag de prescripción
-        if (medication.regulatoryInfo.prescriptionRequired || 
-            medication.regulatoryInfo.veterinaryPrescriptionOnly) {
+        if (medication.regulatoryInfo.prescriptionRequired ||
+          medication.regulatoryInfo.veterinaryPrescriptionOnly) {
           medication.isPrescriptionOnly = true;
         }
 
         // Establecer flag de refrigeración
         if (medication.storageRequirements.includes(StorageRequirement.REFRIGERATED) ||
-            medication.storageRequirements.includes(StorageRequirement.FROZEN)) {
+          medication.storageRequirements.includes(StorageRequirement.FROZEN)) {
           medication.requiresRefrigeration = true;
         }
 
         // Validar temperaturas de almacenamiento
-        if (medication.storageTemperatureMin !== null && medication.storageTemperatureMin !== undefined && 
-            medication.storageTemperatureMax !== null && medication.storageTemperatureMax !== undefined) {
+        if (medication.storageTemperatureMin !== null && medication.storageTemperatureMin !== undefined &&
+          medication.storageTemperatureMax !== null && medication.storageTemperatureMax !== undefined) {
           if (medication.storageTemperatureMin >= medication.storageTemperatureMax) {
             throw new Error('La temperatura mínima debe ser menor a la temperatura máxima');
           }

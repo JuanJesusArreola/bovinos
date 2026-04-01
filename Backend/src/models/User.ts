@@ -1,7 +1,7 @@
 import { DataTypes, Model, Optional, Op } from 'sequelize';
 import sequelize from '../config/database';
 import bcrypt from 'bcryptjs';
-import  LocationData from './Bovine'; // Se habilitará cuando exista el modelo Bovine
+import LocationData from './Bovine'; // Se habilitará cuando exista el modelo Bovine
 
 /*// Interface temporal para LocationData - Se moverá al modelo Bovine cuando exista
 interface LocationData {
@@ -347,6 +347,23 @@ export interface SecurityInfo {
   }>;
 }
 
+export interface PushToken {
+  token: string;                                // Token FCM/APNs
+  deviceType: 'android' | 'ios' | 'web';        // Tipo de dispositivo
+  deviceName?: string;                          // Nombre del dispositivo (ej: "iPhone de Juan")
+  deviceId?: string;                             // ID único del dispositivo
+  platform?: string;                             // Plataforma específica (ej: "Expo", "React Native")
+  appVersion?: string;                           // Versión de la app
+  lastUsed: Date;                                // Última vez que se usó
+  createdAt: Date;                               // Fecha de registro
+  active: boolean;                               // Si el token está activo
+  preferences?: {                                 // Preferencias específicas para este dispositivo
+    sound: boolean;
+    vibrate: boolean;
+    badge: boolean;
+    priority?: 'high' | 'normal' | 'low';
+  };
+}
 // Atributos del modelo User
 export interface UserAttributes {
   id: string;
@@ -429,21 +446,24 @@ export interface UserAttributes {
   /*createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;*/
+  pushTokens?: PushToken[];
 }
 
+
+
 // Atributos opcionales al crear un nuevo usuario
-export interface UserCreationAttributes 
-  extends Optional<UserAttributes, 
-    'id' | 'userCode' | 'professionalInfo' | 'systemSettings' | 'activity' | 
-    'performanceMetrics' | 'ranchAccess' | 'subscriptionInfo' | 'apiAccess' | 
-    'securityInfo' | 'complianceInfo' | 'integrations' | 'tags' | 'notes' | 
-    'termsAcceptedDate' | 'privacyPolicyAcceptedDate' | 'lastLoginAt' | 
+export interface UserCreationAttributes
+  extends Optional<UserAttributes,
+    'id' | 'userCode' | 'professionalInfo' | 'systemSettings' | 'activity' |
+    'performanceMetrics' | 'ranchAccess' | 'subscriptionInfo' | 'apiAccess' |
+    'securityInfo' | 'complianceInfo' | 'integrations' | 'tags' | 'notes' |
+    'termsAcceptedDate' | 'privacyPolicyAcceptedDate' | 'lastLoginAt' |
     'lastActiveAt' | 'createdBy' | 'updatedBy' /*| 'createdAt' | 'updatedAt' | 
     'deletedAt'*/
-  > {}
+  > { }
 
 // Clase del modelo User
-class User extends Model<UserAttributes, UserCreationAttributes> 
+class User extends Model<UserAttributes, UserCreationAttributes>
   implements UserAttributes {
   public id!: string;
   public userCode!: string;
@@ -475,7 +495,7 @@ class User extends Model<UserAttributes, UserCreationAttributes>
     plan: string;
     startDate: Date;
     endDate?: Date;
-    status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'SUSPENDED' | 'TRIAL' ;
+    status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'SUSPENDED' | 'TRIAL';
     features: string[];
     billingCycle: 'MONTHLY' | 'YEARLY';
     autoRenew: boolean;
@@ -525,7 +545,8 @@ class User extends Model<UserAttributes, UserCreationAttributes>
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public deletedAt?: Date;
-    name: string | undefined;
+  public pushTokens?: PushToken[];
+  name: string | undefined;
 
   // Métodos de instancia
 
@@ -597,7 +618,7 @@ class User extends Model<UserAttributes, UserCreationAttributes>
     // Verificar formato de hash bcrypt
     // Los hashes bcrypt empiezan con: $2a$, $2b$, $2x$, $2y$, o $2$ (versiones antiguas)
     const bcryptHashPattern = /^\$2[abyx]?\$\d{1,2}\$[./A-Za-z0-9]{53}$/;
-    
+
     return bcryptHashPattern.test(value);
   }
 
@@ -613,7 +634,7 @@ class User extends Model<UserAttributes, UserCreationAttributes>
    * await isPasswordDifferent('newpass', '$2a$12$...oldhash') // true o false
    */
   public static async isPasswordDifferent(
-    plainPassword: string, 
+    plainPassword: string,
     hashedPassword: string
   ): Promise<boolean> {
     try {
@@ -638,9 +659,9 @@ class User extends Model<UserAttributes, UserCreationAttributes>
    */
   public hasRanchAccess(ranchId: string): boolean {
     if (!this.ranchAccess) return false;
-    return this.ranchAccess.some(access => 
-      access.ranchId === ranchId && 
-      access.isActive && 
+    return this.ranchAccess.some(access =>
+      access.ranchId === ranchId &&
+      access.isActive &&
       (!access.expirationDate || new Date() < access.expirationDate)
     );
   }
@@ -652,8 +673,8 @@ class User extends Model<UserAttributes, UserCreationAttributes>
    */
   public getRanchAccessLevel(ranchId: string): 'OWNER' | 'MANAGER' | 'EMPLOYEE' | 'CONSULTANT' | 'VIEWER' | null {
     if (!this.ranchAccess) return null;
-    const access = this.ranchAccess.find(access => 
-      access.ranchId === ranchId && 
+    const access = this.ranchAccess.find(access =>
+      access.ranchId === ranchId &&
       access.isActive &&
       (!access.expirationDate || new Date() < access.expirationDate)
     );
@@ -668,7 +689,7 @@ class User extends Model<UserAttributes, UserCreationAttributes>
    */
   public hasPermission(module: keyof UserPermissions['modules'], action: 'READ' | 'WRITE' | 'ADMIN'): boolean {
     const modulePermission = this.permissions.modules[module];
-    
+
     switch (action) {
       case 'READ':
         return modulePermission !== 'NONE';
@@ -701,7 +722,7 @@ class User extends Model<UserAttributes, UserCreationAttributes>
     daysToExpiration?: number;
   }> {
     if (!this.professionalInfo?.certifications) return [];
-    
+
     const now = new Date();
     return this.professionalInfo.certifications
       .filter(cert => cert.status === 'VALID' && (!cert.expirationDate || cert.expirationDate > now))
@@ -709,8 +730,8 @@ class User extends Model<UserAttributes, UserCreationAttributes>
         name: cert.name,
         issuingOrganization: cert.issuingOrganization,
         expirationDate: cert.expirationDate,
-        daysToExpiration: cert.expirationDate ? 
-          Math.ceil((cert.expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : 
+        daysToExpiration: cert.expirationDate ?
+          Math.ceil((cert.expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) :
           undefined
       }));
   }
@@ -731,14 +752,14 @@ class User extends Model<UserAttributes, UserCreationAttributes>
    */
   public getVerificationScore(): number {
     let score = 0;
-    
+
     if (this.emailVerified) score += 20;
     if (this.phoneVerified) score += 20;
     if (this.verificationStatus === VerificationStatus.IDENTITY_VERIFIED) score += 20;
     if (this.verificationStatus === VerificationStatus.PROFESSIONAL_VERIFIED) score += 20;
     if (this.getValidCertifications().length > 0) score += 10;
     if (this.professionalInfo?.licenses && this.professionalInfo.licenses.length > 0) score += 10;
-    
+
     return Math.min(score, 100);
   }
 
@@ -749,7 +770,7 @@ class User extends Model<UserAttributes, UserCreationAttributes>
    */
   public needsCertificationRenewal(days: number = 30): boolean {
     const validCertifications = this.getValidCertifications();
-    return validCertifications.some(cert => 
+    return validCertifications.some(cert =>
       cert.daysToExpiration !== undefined && cert.daysToExpiration <= days
     );
   }
@@ -792,10 +813,10 @@ class User extends Model<UserAttributes, UserCreationAttributes>
 
     // Alertas de certificaciones
     if (this.needsCertificationRenewal(30)) {
-      const expiringSoon = this.getValidCertifications().filter(cert => 
+      const expiringSoon = this.getValidCertifications().filter(cert =>
         cert.daysToExpiration !== undefined && cert.daysToExpiration <= 30
       );
-      
+
       expiringSoon.forEach(cert => {
         alerts.push({
           type: cert.daysToExpiration! <= 7 ? 'CRITICAL' : 'WARNING',
@@ -819,10 +840,10 @@ class User extends Model<UserAttributes, UserCreationAttributes>
     // Alertas de seguridad
     if (this.securityInfo?.passwordLastChanged) {
       const daysSincePasswordChange = Math.floor(
-        (new Date().getTime() - this.securityInfo.passwordLastChanged.getTime()) / 
+        (new Date().getTime() - this.securityInfo.passwordLastChanged.getTime()) /
         (1000 * 60 * 60 * 24)
       );
-      
+
       if (daysSincePasswordChange > 90) {
         alerts.push({
           type: 'WARNING',
@@ -835,10 +856,10 @@ class User extends Model<UserAttributes, UserCreationAttributes>
 
     // Alertas de acceso a ranchos
     if (this.ranchAccess) {
-      const expiredAccess = this.ranchAccess.filter(access => 
+      const expiredAccess = this.ranchAccess.filter(access =>
         access.expirationDate && new Date() > access.expirationDate && access.isActive
       );
-      
+
       if (expiredAccess.length > 0) {
         alerts.push({
           type: 'WARNING',
@@ -870,25 +891,25 @@ class User extends Model<UserAttributes, UserCreationAttributes>
    */
   public recordSuccessfulLogin(ipAddress: string, device: string): void {
     this.lastLoginAt = new Date();
-    
+
     if (!this.activity) {
       this.activity = {};
     }
-    
+
     this.activity.lastLogin = new Date();
     this.activity.loginCount = (this.activity.loginCount || 0) + 1;
-    
+
     if (!this.activity.loginHistory) {
       this.activity.loginHistory = [];
     }
-    
+
     this.activity.loginHistory.unshift({
       timestamp: new Date(),
       ipAddress,
       device,
       success: true
     });
-    
+
     // Mantener solo los últimos 50 registros
     this.activity.loginHistory = this.activity.loginHistory.slice(0, 50);
   }
@@ -936,7 +957,7 @@ class User extends Model<UserAttributes, UserCreationAttributes>
     }>;
   } {
     const alerts = this.getUserAlerts();
-    const isOnline = this.lastActiveAt ? 
+    const isOnline = this.lastActiveAt ?
       (new Date().getTime() - this.lastActiveAt.getTime()) < (15 * 60 * 1000) : // 15 minutos
       false;
 
@@ -953,7 +974,7 @@ class User extends Model<UserAttributes, UserCreationAttributes>
         emailVerified: this.emailVerified,
         phoneVerified: this.phoneVerified,
         professionalVerified: this.verificationStatus === VerificationStatus.PROFESSIONAL_VERIFIED ||
-                               this.verificationStatus === VerificationStatus.FULLY_VERIFIED
+          this.verificationStatus === VerificationStatus.FULLY_VERIFIED
       },
       professional: this.professionalInfo ? {
         title: this.professionalInfo.title,
@@ -986,15 +1007,15 @@ class User extends Model<UserAttributes, UserCreationAttributes>
   public canAccessFeature(feature: string): boolean {
     // Verificar estado del usuario
     if (this.status !== UserStatus.ACTIVE) return false;
-    
+
     // Verificar suscripción
     if (this.subscriptionInfo?.status !== 'ACTIVE') return false;
-    
+
     // Verificar si la funcionalidad está en el plan
     if (this.subscriptionInfo?.features && !this.subscriptionInfo.features.includes(feature)) {
       return false;
     }
-    
+
     return true;
   }
 }
@@ -1012,7 +1033,6 @@ User.init(
     userCode: {
       type: DataTypes.STRING(20),
       allowNull: false,
-      unique: true,
       defaultValue: () => {
         const timestamp = Date.now().toString().slice(-6);
         return `US${timestamp}`;
@@ -1022,7 +1042,6 @@ User.init(
     username: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      unique: true,
       validate: {
         notEmpty: true,
         len: [3, 50],
@@ -1036,7 +1055,6 @@ User.init(
     email: {
       type: DataTypes.STRING(255),
       allowNull: false,
-      unique: true,
       validate: {
         isEmail: true,
         notEmpty: true
@@ -1055,25 +1073,21 @@ User.init(
     role: {
       type: DataTypes.ENUM(...Object.values(UserRole)),
       allowNull: false,
-      comment: 'Rol del usuario en el sistema'
     },
     status: {
       type: DataTypes.ENUM(...Object.values(UserStatus)),
       allowNull: false,
       defaultValue: UserStatus.PENDING_VERIFICATION,
-      comment: 'Estado actual del usuario'
     },
     accessLevel: {
       type: DataTypes.ENUM(...Object.values(AccessLevel)),
       allowNull: false,
       defaultValue: AccessLevel.BASIC,
-      comment: 'Nivel de acceso del usuario'
     },
     verificationStatus: {
       type: DataTypes.ENUM(...Object.values(VerificationStatus)),
       allowNull: false,
       defaultValue: VerificationStatus.UNVERIFIED,
-      comment: 'Estado de verificación del usuario'
     },
     personalInfo: {
       type: DataTypes.JSONB,
@@ -1233,6 +1247,12 @@ User.init(
       allowNull: true,
       comment: 'ID del usuario que lo actualizó'
     },
+    pushTokens: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: [],
+      comment: 'Tokens de notificaciones push del usuario'
+    },
     /*createdAt: {
       type: DataTypes.DATE,
       allowNull: false,
@@ -1320,6 +1340,19 @@ User.init(
         name: 'users_ranch_access',
         fields: ['ranch_access'],
         using: 'gin'
+      },
+      {
+        name: 'users_push_tokens',
+        fields: ['push_tokens'],
+        using: 'gin'
+      },
+
+      // Índice para buscar por token específico (útil para desactivar tokens)
+      {
+        name: 'users_push_tokens_idx',
+        using: 'gin',
+        fields: ['push_tokens'],
+        operator: 'jsonb_path_ops'
       }
     ],
     hooks: {
@@ -1327,6 +1360,7 @@ User.init(
       beforeCreate: async (user: User) => {
         // Generar código de usuario único si no existe
         if (!user.userCode) {
+          const role = user.role || UserRole.VIEWER;
           const timestamp = Date.now().toString().slice(-6);
           const rolePrefix = user.role.substring(0, 2).toUpperCase();
           user.userCode = `${rolePrefix}${timestamp}`;
@@ -1384,8 +1418,8 @@ User.init(
 
       // Hook para hashear contraseña antes de actualizar
       beforeUpdate: async (user: User) => {
-        if (user.changed('password')) {        
-                              
+        if (user.changed('password')) {
+
           // Actualizar el timestamp de último cambio de contraseña
           // Esto es importante para políticas de seguridad (ej: forzar cambio cada X días)
           if (!user.securityInfo) {
@@ -1398,8 +1432,8 @@ User.init(
         }
 
         // Actualizar estado de verificación
-        if (user.emailVerified && user.phoneVerified && 
-            user.verificationStatus === VerificationStatus.UNVERIFIED) {
+        if (user.emailVerified && user.phoneVerified &&
+          user.verificationStatus === VerificationStatus.UNVERIFIED) {
           user.verificationStatus = VerificationStatus.EMAIL_VERIFIED;
         }
 
@@ -1424,10 +1458,10 @@ User.init(
         }
 
         // Validar que veterinarios tengan al menos una certificación
-        if (user.role === UserRole.VETERINARIAN && 
-            user.verificationStatus === VerificationStatus.PROFESSIONAL_VERIFIED) {
-          if (!user.professionalInfo?.certifications || 
-              user.professionalInfo.certifications.length === 0) {
+        if (user.role === UserRole.VETERINARIAN &&
+          user.verificationStatus === VerificationStatus.PROFESSIONAL_VERIFIED) {
+          if (!user.professionalInfo?.certifications ||
+            user.professionalInfo.certifications.length === 0) {
             throw new Error('Los veterinarios verificados requieren al menos una certificación');
           }
         }

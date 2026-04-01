@@ -66,27 +66,27 @@ export enum UnitOfMeasure {
   LB = 'LB',                             // Libras
   OZ = 'OZ',                             // Onzas
   TON = 'TON',                           // Toneladas
-  
+
   // Volumen
   L = 'L',                               // Litros
   ML = 'ML',                             // Mililitros
   GAL = 'GAL',                           // Galones
   QT = 'QT',                             // Cuartos
   PT = 'PT',                             // Pintas
-  
+
   // Longitud
   M = 'M',                               // Metros
   CM = 'CM',                             // Centímetros
   MM = 'MM',                             // Milímetros
   FT = 'FT',                             // Pies
   IN = 'IN',                             // Pulgadas
-  
+
   // Área
   M2 = 'M2',                             // Metros cuadrados
   FT2 = 'FT2',                           // Pies cuadrados
   HA = 'HA',                             // Hectáreas
   ACRE = 'ACRE',                         // Acres
-  
+
   // Unidades discretas
   UNIT = 'UNIT',                         // Unidades
   DOZEN = 'DOZEN',                       // Docenas
@@ -96,7 +96,7 @@ export enum UnitOfMeasure {
   BAG = 'BAG',                           // Bolsas
   ROLL = 'ROLL',                         // Rollos
   SHEET = 'SHEET',                       // Hojas
-  
+
   // Tiempo
   DAY = 'DAY',                           // Días
   WEEK = 'WEEK',                         // Semanas
@@ -265,30 +265,31 @@ export interface InventoryAttributes {
   temperatureMax?: number;              // Temperatura máxima de almacenamiento
   humidityMin?: number;                 // Humedad mínima
   humidityMax?: number;                 // Humedad máxima
-  farmId?: string;                      // ID de la finca
+  ranchId?: string;                      // ID de la finca
   warehouseId?: string;                 // ID del almacén
   createdBy: string;                    // ID del usuario que creó
   updatedBy?: string;                   // ID del usuario que actualizó
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;
+  medicationId?: string;
 }
 
 // Atributos opcionales al crear un nuevo artículo de inventario
-export interface InventoryCreationAttributes 
-  extends Optional<InventoryAttributes, 
-    'id' | 'description' | 'brand' | 'model' | 'barcode' | 'qrCode' | 
-    'reservedStock' | 'availableStock' | 'maximumStock' | 'location' | 
-    'supplierInfo' | 'purchaseDate' | 'expirationDate' | 'manufacturingDate' | 
-    'batchNumber' | 'serialNumbers' | 'nutritionalInfo' | 'medicationInfo' | 
-    'technicalSpecs' | 'qualityControl' | 'images' | 'documents' | 'tags' | 
-    'notes' | 'lastInventoryDate' | 'lastMovementDate' | 'temperatureMin' | 
-    'temperatureMax' | 'humidityMin' | 'humidityMax' | 'farmId' | 
-    'warehouseId' | 'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
-  > {}
+export interface InventoryCreationAttributes
+  extends Optional<InventoryAttributes,
+    'id' | 'description' | 'brand' | 'model' | 'barcode' | 'qrCode' |
+    'reservedStock' | 'availableStock' | 'maximumStock' | 'location' |
+    'supplierInfo' | 'purchaseDate' | 'expirationDate' | 'manufacturingDate' |
+    'batchNumber' | 'serialNumbers' | 'nutritionalInfo' | 'medicationInfo' |
+    'technicalSpecs' | 'qualityControl' | 'images' | 'documents' | 'tags' |
+    'notes' | 'lastInventoryDate' | 'lastMovementDate' | 'temperatureMin' |
+    'temperatureMax' | 'humidityMin' | 'humidityMax' | 'ranchId' |
+    'warehouseId' | 'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'medicationId'
+  > { }
 
 // Clase del modelo Inventory
-class Inventory extends Model<InventoryAttributes, InventoryCreationAttributes> 
+class Inventory extends Model<InventoryAttributes, InventoryCreationAttributes>
   implements InventoryAttributes {
   public id!: string;
   public itemCode!: string;
@@ -341,13 +342,14 @@ class Inventory extends Model<InventoryAttributes, InventoryCreationAttributes>
   public temperatureMax?: number;
   public humidityMin?: number;
   public humidityMax?: number;
-  public farmId?: string;
+  public ranchId?: string;
   public warehouseId?: string;
   public createdBy!: string;
   public updatedBy?: string;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public deletedAt?: Date;
+  public medicationId?: string;
 
   // Métodos de instancia
 
@@ -458,27 +460,27 @@ class Inventory extends Model<InventoryAttributes, InventoryCreationAttributes>
       [UnitOfMeasure.LB]: 'Libras',
       [UnitOfMeasure.OZ]: 'Onzas',
       [UnitOfMeasure.TON]: 'Toneladas',
-      
+
       // Volumen
       [UnitOfMeasure.L]: 'Litros',
       [UnitOfMeasure.ML]: 'Mililitros',
       [UnitOfMeasure.GAL]: 'Galones',
       [UnitOfMeasure.QT]: 'Cuartos',
       [UnitOfMeasure.PT]: 'Pintas',
-      
+
       // Longitud
       [UnitOfMeasure.M]: 'Metros',
       [UnitOfMeasure.CM]: 'Centímetros',
       [UnitOfMeasure.MM]: 'Milímetros',
       [UnitOfMeasure.FT]: 'Pies',
       [UnitOfMeasure.IN]: 'Pulgadas',
-      
+
       // Área
       [UnitOfMeasure.M2]: 'Metros Cuadrados',
       [UnitOfMeasure.FT2]: 'Pies Cuadrados',
       [UnitOfMeasure.HA]: 'Hectáreas',
       [UnitOfMeasure.ACRE]: 'Acres',
-      
+
       // Unidades discretas
       [UnitOfMeasure.UNIT]: 'Unidades',
       [UnitOfMeasure.DOZEN]: 'Docenas',
@@ -488,7 +490,7 @@ class Inventory extends Model<InventoryAttributes, InventoryCreationAttributes>
       [UnitOfMeasure.BAG]: 'Bolsas',
       [UnitOfMeasure.ROLL]: 'Rollos',
       [UnitOfMeasure.SHEET]: 'Hojas',
-      
+
       // Tiempo
       [UnitOfMeasure.DAY]: 'Días',
       [UnitOfMeasure.WEEK]: 'Semanas',
@@ -531,7 +533,7 @@ class Inventory extends Model<InventoryAttributes, InventoryCreationAttributes>
       'EUR': '€',
       'GBP': '£'
     };
-    
+
     const symbol = currencySymbols[this.currency] || this.currency;
     return `${symbol}${this.totalValue.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
   }
@@ -593,8 +595,8 @@ class Inventory extends Model<InventoryAttributes, InventoryCreationAttributes>
    * @returns True si es medicamento
    */
   public isMedication(): boolean {
-    return this.category === InventoryCategory.MEDICATION || 
-           this.category === InventoryCategory.VACCINES;
+    return this.category === InventoryCategory.MEDICATION ||
+      this.category === InventoryCategory.VACCINES;
   }
 
   /**
@@ -634,7 +636,7 @@ class Inventory extends Model<InventoryAttributes, InventoryCreationAttributes>
   } {
     const alerts = this.getActiveAlerts();
     let stockLevel: 'CRITICAL' | 'LOW' | 'NORMAL' | 'HIGH' = 'NORMAL';
-    
+
     if (this.availableStock <= 0) {
       stockLevel = 'CRITICAL';
     } else if (this.isLowStock()) {
@@ -642,7 +644,7 @@ class Inventory extends Model<InventoryAttributes, InventoryCreationAttributes>
     } else if (this.maximumStock && this.availableStock >= this.maximumStock * 0.8) {
       stockLevel = 'HIGH';
     }
-    
+
     return {
       status: this.getStatusLabel(),
       stockLevel,
@@ -667,7 +669,6 @@ Inventory.init(
     itemCode: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      unique: true,
       validate: {
         notEmpty: true,
         len: [3, 50]
@@ -691,7 +692,6 @@ Inventory.init(
     category: {
       type: DataTypes.ENUM(...Object.values(InventoryCategory)),
       allowNull: false,
-      comment: 'Categoría del inventario'
     },
     brand: {
       type: DataTypes.STRING(100),
@@ -706,13 +706,11 @@ Inventory.init(
     barcode: {
       type: DataTypes.STRING(50),
       allowNull: true,
-      unique: true,
       comment: 'Código de barras'
     },
     qrCode: {
       type: DataTypes.STRING(200),
       allowNull: true,
-      unique: true,
       comment: 'Código QR'
     },
     currentStock: {
@@ -777,7 +775,6 @@ Inventory.init(
     unitOfMeasure: {
       type: DataTypes.ENUM(...Object.values(UnitOfMeasure)),
       allowNull: false,
-      comment: 'Unidad de medida'
     },
     unitCost: {
       type: DataTypes.DECIMAL(12, 4),
@@ -810,7 +807,6 @@ Inventory.init(
       type: DataTypes.ENUM(...Object.values(StockStatus)),
       allowNull: false,
       defaultValue: StockStatus.IN_STOCK,
-      comment: 'Estado del stock'
     },
     storageLocation: {
       type: DataTypes.STRING(100),
@@ -824,7 +820,6 @@ Inventory.init(
       type: DataTypes.ENUM(...Object.values(StorageCondition)),
       allowNull: false,
       defaultValue: StorageCondition.AMBIENT,
-      comment: 'Condiciones de almacenamiento'
     },
     location: {
       type: DataTypes.JSONB,
@@ -985,7 +980,7 @@ Inventory.init(
       },
       comment: 'Humedad máxima (%)'
     },
-    farmId: {
+    ranchId: {
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID de la finca'
@@ -1019,7 +1014,16 @@ Inventory.init(
       type: DataTypes.DATE,
       allowNull: true,
       comment: 'Fecha de eliminación (soft delete)'
-    }
+    },
+    medicationId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'medications',
+        key: 'id'
+      },
+      comment: 'ID del medicamento en el catálogo (si aplica)'
+    },
   },
   {
     sequelize,
@@ -1030,7 +1034,7 @@ Inventory.init(
     indexes: [
       // Índices para optimizar consultas
       {
-        unique: true,
+        
         fields: ['item_code']
       },
       {
@@ -1052,7 +1056,7 @@ Inventory.init(
         fields: ['current_stock']
       },
       {
-        fields: ['farm_id']
+        fields: ['ranch_id']
       },
       {
         fields: ['warehouse_id']
@@ -1088,10 +1092,10 @@ Inventory.init(
       beforeSave: async (inventory: Inventory) => {
         // Actualizar stock disponible
         inventory.updateAvailableStock();
-        
+
         // Actualizar valor total
         inventory.updateTotalValue();
-        
+
         // Actualizar estado basado en stock
         if (inventory.currentStock <= 0) {
           inventory.status = StockStatus.OUT_OF_STOCK;

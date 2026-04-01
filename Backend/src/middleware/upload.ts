@@ -29,96 +29,119 @@ const FILE_CONFIGS: Record<FileCategory, {
   requiresAuth: boolean;
   allowedRoles: UserRole[];
   virusScanRequired: boolean;
+  thumbnailSizes?: { name: string; width: number; height: number }[];
 }> = {
   [FileCategory.CATTLE_PHOTOS]: {
     allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic'],
     allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.heic'],
     maxSize: 10 * 1024 * 1024, // 10MB
-    maxFiles: 10, // Máximo 10 fotos por bovino
+    maxFiles: 10,
     requiresAuth: true,
     allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
-    virusScanRequired: false
+    virusScanRequired: false,
+    thumbnailSizes: [                                         // <-- NUEVO
+      { name: 'small', width: 150, height: 150 },
+      { name: 'medium', width: 400, height: 400 },
+      { name: 'large', width: 800, height: 600 }
+    ]
   },
   [FileCategory.VETERINARY_DOCS]: {
     allowedTypes: ['application/pdf', 'image/jpeg', 'image/png', 'text/plain'],
     allowedExtensions: ['.pdf', '.jpg', '.jpeg', '.png', '.txt'],
-    maxSize: 25 * 1024 * 1024, // 25MB
+    maxSize: 25 * 1024 * 1024,
     maxFiles: 5,
     requiresAuth: true,
     allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
-    virusScanRequired: true
+    virusScanRequired: true,
+    thumbnailSizes: [                                         // <-- NUEVO (opcional, para imágenes dentro de documentos)
+      { name: 'small', width: 150, height: 150 }
+    ]
   },
   [FileCategory.VACCINATION_RECORDS]: {
     allowedTypes: ['application/pdf', 'text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
     allowedExtensions: ['.pdf', '.csv', '.xls', '.xlsx'],
-    maxSize: 15 * 1024 * 1024, // 15MB
+    maxSize: 15 * 1024 * 1024,
     maxFiles: 3,
     requiresAuth: true,
     allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
+    // Sin thumbnailSizes (no es necesario para documentos de vacunación)
   },
   [FileCategory.HEALTH_REPORTS]: {
     allowedTypes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
     allowedExtensions: ['.pdf', '.doc', '.docx'],
-    maxSize: 20 * 1024 * 1024, // 20MB
+    maxSize: 20 * 1024 * 1024,
     maxFiles: 5,
     requiresAuth: true,
     allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
+    // Sin thumbnailSizes
   },
   [FileCategory.BREEDING_DOCS]: {
     allowedTypes: ['application/pdf', 'text/csv', 'image/jpeg', 'image/png'],
     allowedExtensions: ['.pdf', '.csv', '.jpg', '.jpeg', '.png'],
-    maxSize: 15 * 1024 * 1024, // 15MB
+    maxSize: 15 * 1024 * 1024,
     maxFiles: 8,
     requiresAuth: true,
     allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
-    virusScanRequired: false
+    virusScanRequired: false,
+    thumbnailSizes: [                                         // <-- NUEVO
+      { name: 'small', width: 150, height: 150 },
+      { name: 'medium', width: 400, height: 400 }
+    ]
   },
   [FileCategory.PRODUCTION_DATA]: {
     allowedTypes: ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/json'],
     allowedExtensions: ['.csv', '.xls', '.xlsx', '.json'],
-    maxSize: 50 * 1024 * 1024, // 50MB para datos grandes
+    maxSize: 50 * 1024 * 1024,
     maxFiles: 1,
     requiresAuth: true,
     allowedRoles: [UserRole.WORKER, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
+    // Sin thumbnailSizes
   },
   [FileCategory.FEED_REPORTS]: {
     allowedTypes: ['application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
     allowedExtensions: ['.pdf', '.csv', '.xlsx'],
-    maxSize: 10 * 1024 * 1024, // 10MB
+    maxSize: 10 * 1024 * 1024,
     maxFiles: 3,
     requiresAuth: true,
     allowedRoles: [UserRole.WORKER, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: false
+    // Sin thumbnailSizes
   },
   [FileCategory.FINANCIAL_DOCS]: {
     allowedTypes: ['application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
     allowedExtensions: ['.pdf', '.xlsx'],
-    maxSize: 30 * 1024 * 1024, // 30MB
+    maxSize: 30 * 1024 * 1024,
     maxFiles: 2,
     requiresAuth: true,
     allowedRoles: [UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
+    // Sin thumbnailSizes
   },
   [FileCategory.GENERAL_DOCS]: {
     allowedTypes: ['application/pdf', 'image/jpeg', 'image/png', 'text/plain'],
     allowedExtensions: ['.pdf', '.jpg', '.jpeg', '.png', '.txt'],
-    maxSize: 20 * 1024 * 1024, // 20MB
+    maxSize: 20 * 1024 * 1024,
     maxFiles: 5,
     requiresAuth: true,
     allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
-    virusScanRequired: false
+    virusScanRequired: false,
+    thumbnailSizes: [                                         // <-- NUEVO
+      { name: 'small', width: 150, height: 150 },
+      { name: 'medium', width: 400, height: 400 }
+    ]
   },
   [FileCategory.SYSTEM_BACKUPS]: {
     allowedTypes: ['application/zip', 'application/x-gzip', 'application/x-tar'],
     allowedExtensions: ['.zip', '.gz', '.tar', '.tar.gz'],
-    maxSize: 500 * 1024 * 1024, // 500MB para backups
+    maxSize: 500 * 1024 * 1024,
     maxFiles: 1,
     requiresAuth: true,
     allowedRoles: [UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
+    // Sin thumbnailSizes
   }
 };
 
@@ -155,7 +178,7 @@ function generateUniqueFileName(originalName: string, category: FileCategory, us
   const randomString = crypto.randomBytes(8).toString('hex');
   const extension = path.extname(originalName).toLowerCase();
   const sanitizedName = path.basename(originalName, extension).replace(/[^a-zA-Z0-9-_]/g, '');
-  
+
   return `${category}_${userId}_${timestamp}_${randomString}_${sanitizedName}${extension}`;
 }
 
@@ -191,17 +214,17 @@ async function scanForVirus(filePath: string): Promise<'clean' | 'infected' | 'e
   try {
     // TODO: Implementar escaneo real de virus
     // const result = await clamAV.scan(filePath);
-    
+
     // Simulación: archivos con nombres sospechosos se marcan como infectados
     const suspiciousPatterns = ['virus', 'malware', 'trojan', 'backdoor'];
     const fileName = path.basename(filePath).toLowerCase();
-    
+
     for (const pattern of suspiciousPatterns) {
       if (fileName.includes(pattern)) {
         return 'infected';
       }
     }
-    
+
     return 'clean';
   } catch (error) {
     logMessage(LogLevel.ERROR, 'virus_scan_error', `Error en escaneo de virus: ${error}`, { filePath });
@@ -242,28 +265,28 @@ const createStorage = (category: FileCategory) => {
 const createFileFilter = (category: FileCategory) => {
   return (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     const config = FILE_CONFIGS[category];
-    
+
     // Verificar autenticación
     if (config.requiresAuth && !req.user) {
       return cb(new Error('Autenticación requerida para subir archivos'));
     }
-    
+
     // Verificar permisos de rol
     if (req.userRole && !config.allowedRoles.includes(req.userRole)) {
       return cb(new Error(`Rol ${req.userRole} no autorizado para subir ${category}`));
     }
-    
+
     // Verificar tipo MIME
     if (!config.allowedTypes.includes(file.mimetype)) {
       return cb(new Error(`Tipo de archivo no permitido: ${file.mimetype}. Tipos permitidos: ${config.allowedTypes.join(', ')}`));
     }
-    
+
     // Verificar extensión
     const extension = path.extname(file.originalname).toLowerCase();
     if (!config.allowedExtensions.includes(extension)) {
       return cb(new Error(`Extensión no permitida: ${extension}. Extensiones permitidas: ${config.allowedExtensions.join(', ')}`));
     }
-    
+
     cb(null, true);
   };
 };
@@ -273,7 +296,7 @@ const createFileFilter = (category: FileCategory) => {
  */
 export const createUploadMiddleware = (category: FileCategory) => {
   const config = FILE_CONFIGS[category];
-  
+
   const upload = multer({
     storage: createStorage(category),
     fileFilter: createFileFilter(category),
@@ -298,7 +321,7 @@ export const processUploadedFiles = (category: FileCategory) => {
     try {
       const files = req.files as Express.Multer.File[] || (req.file ? [req.file] : []);
       const config = FILE_CONFIGS[category];
-      
+
       if (files.length === 0) {
         return next();
       }
@@ -309,16 +332,16 @@ export const processUploadedFiles = (category: FileCategory) => {
         try {
           // Calcular checksums
           const checksums = await calculateChecksums(file.path);
-          
+
           // Escanear virus si es necesario
           let virusScanStatus: 'pending' | 'clean' | 'infected' | 'error' = 'pending';
           if (config.virusScanRequired) {
             virusScanStatus = await scanForVirus(file.path);
-            
+
             // Si está infectado, eliminar archivo inmediatamente
             if (virusScanStatus === 'infected') {
               fs.unlinkSync(file.path);
-              
+
               logMessage(
                 LogLevel.ERROR,
                 'virus_detected',
@@ -331,7 +354,7 @@ export const processUploadedFiles = (category: FileCategory) => {
                   category: category
                 }
               );
-              
+
               return next(new Error(`Archivo infectado detectado: ${file.originalname}`));
             }
           } else {
@@ -386,7 +409,7 @@ export const processUploadedFiles = (category: FileCategory) => {
           if (fs.existsSync(file.path)) {
             fs.unlinkSync(file.path);
           }
-          
+
           logMessage(
             LogLevel.ERROR,
             'file_processing_error',
@@ -398,14 +421,14 @@ export const processUploadedFiles = (category: FileCategory) => {
               error: fileError instanceof Error ? fileError.stack : fileError
             }
           );
-          
+
           return next(new Error(`Error procesando archivo ${file.originalname}: ${fileError instanceof Error ? fileError.message : fileError}`));
         }
       }
 
       // Agregar archivos procesados al request
       (req as any).processedFiles = processedFiles;
-      
+
       next();
 
     } catch (error) {
@@ -419,7 +442,7 @@ export const processUploadedFiles = (category: FileCategory) => {
           error: error instanceof Error ? error.stack : error
         }
       );
-      
+
       next(error);
     }
   };
@@ -432,7 +455,7 @@ export const handleUploadErrors = (error: any, req: Request, res: Response, next
   if (error instanceof MulterError) {
     let message = 'Error en la carga de archivo';
     let code = 'UPLOAD_ERROR';
-    
+
     switch (error.code) {
       case 'LIMIT_FILE_SIZE':
         message = 'Archivo demasiado grande';
@@ -451,7 +474,7 @@ export const handleUploadErrors = (error: any, req: Request, res: Response, next
         code = 'TOO_MANY_PARTS';
         break;
     }
-    
+
     logMessage(
       LogLevel.WARN,
       'upload_error',
@@ -463,7 +486,7 @@ export const handleUploadErrors = (error: any, req: Request, res: Response, next
         path: req.originalUrl
       }
     );
-    
+
     res.status(400).json({
       success: false,
       error: {
@@ -474,10 +497,10 @@ export const handleUploadErrors = (error: any, req: Request, res: Response, next
         path: req.originalUrl
       }
     });
-    
+
     return;
   }
-  
+
   // Error personalizado de filtro de archivos
   if (error.message) {
     logMessage(
@@ -490,7 +513,7 @@ export const handleUploadErrors = (error: any, req: Request, res: Response, next
         path: req.originalUrl
       }
     );
-    
+
     res.status(400).json({
       success: false,
       error: {
@@ -500,10 +523,10 @@ export const handleUploadErrors = (error: any, req: Request, res: Response, next
         path: req.originalUrl
       }
     });
-    
+
     return;
   }
-  
+
   next(error);
 };
 
@@ -513,20 +536,20 @@ export const handleUploadErrors = (error: any, req: Request, res: Response, next
 export const deleteFile = async (filename: string, category: FileCategory): Promise<boolean> => {
   try {
     const filePath = path.join(process.cwd(), 'uploads', category, filename);
-    
+
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
-      
+
       logMessage(
         LogLevel.INFO,
         'file_deleted',
         `Archivo eliminado: ${filename}`,
         { filename, category, filePath }
       );
-      
+
       return true;
     }
-    
+
     return false;
   } catch (error) {
     logMessage(
@@ -535,7 +558,7 @@ export const deleteFile = async (filename: string, category: FileCategory): Prom
       `Error eliminando archivo ${filename}: ${error}`,
       { filename, category, error: error instanceof Error ? error.stack : error }
     );
-    
+
     return false;
   }
 };
@@ -546,13 +569,13 @@ export const deleteFile = async (filename: string, category: FileCategory): Prom
 export const getFileInfo = (filename: string, category: FileCategory): FileMetadata | null => {
   try {
     const filePath = path.join(process.cwd(), 'uploads', category, filename);
-    
+
     if (!fs.existsSync(filePath)) {
       return null;
     }
-    
+
     const stats = fs.statSync(filePath);
-    
+
     // En un sistema real, los metadatos se almacenarían en base de datos
     // Aquí retornamos información básica del sistema de archivos
     return {
@@ -575,7 +598,7 @@ export const getFileInfo = (filename: string, category: FileCategory): FileMetad
       `Error obteniendo información de archivo ${filename}: ${error}`,
       { filename, category }
     );
-    
+
     return null;
   }
 };
@@ -586,34 +609,34 @@ export const getFileInfo = (filename: string, category: FileCategory): FileMetad
 export const cleanupOldFiles = (category: FileCategory, daysOld: number = 30): number => {
   try {
     const uploadDir = path.join(process.cwd(), 'uploads', category);
-    
+
     if (!fs.existsSync(uploadDir)) {
       return 0;
     }
-    
+
     const files = fs.readdirSync(uploadDir);
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOld);
-    
+
     let deletedCount = 0;
-    
+
     for (const file of files) {
       const filePath = path.join(uploadDir, file);
       const stats = fs.statSync(filePath);
-      
+
       if (stats.birthtime < cutoffDate) {
         fs.unlinkSync(filePath);
         deletedCount++;
       }
     }
-    
+
     logMessage(
       LogLevel.INFO,
       'file_cleanup',
       `Limpieza de archivos completada: ${deletedCount} archivos eliminados`,
       { category, daysOld, deletedCount }
     );
-    
+
     return deletedCount;
   } catch (error) {
     logMessage(
@@ -622,7 +645,9 @@ export const cleanupOldFiles = (category: FileCategory, daysOld: number = 30): n
       `Error en limpieza de archivos: ${error}`,
       { category, daysOld }
     );
-    
+
     return 0;
   }
 };
+
+export { calculateChecksums, FILE_CONFIGS };

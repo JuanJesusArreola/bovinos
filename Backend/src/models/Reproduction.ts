@@ -978,7 +978,6 @@ Reproduction.init(
     reproductionCode: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      unique: true,
       validate: {
         notEmpty: true,
         len: [3, 50]
@@ -999,13 +998,11 @@ Reproduction.init(
     reproductionType: {
       type: DataTypes.ENUM(...Object.values(ReproductionType)),
       allowNull: false,
-      comment: 'Tipo de reproducción'
     },
     status: {
       type: DataTypes.ENUM(...Object.values(ServiceStatus)),
       allowNull: false,
       defaultValue: ServiceStatus.PLANNED,
-      comment: 'Estado del servicio reproductivo'
     },
     breedingSeasonId: {
       type: DataTypes.UUID,

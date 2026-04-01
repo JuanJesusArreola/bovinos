@@ -4,7 +4,7 @@ import sequelize from '../config/database';
 // Definición de enums para estados y tipos
 export enum CattleType {
   CATTLE = 'CATTLE',
-  BULL = 'BULL', 
+  BULL = 'BULL',
   COW = 'COW',
   CALF = 'CALF'
 }
@@ -14,7 +14,9 @@ export enum HealthStatus {
   SICK = 'SICK',
   RECOVERING = 'RECOVERING',
   QUARANTINE = 'QUARANTINE',
-  DECEASED = 'DECEASED'
+  DECEASED = 'DECEASED',
+  UNKNOWN = 'UNKNOWN',
+
 }
 
 export enum VaccinationStatus {
@@ -94,7 +96,7 @@ export interface BovineAttributes {
   reproductiveInfo?: ReproductiveInfo; // Información reproductiva
   trackingConfig?: TrackingConfig; // Configuración de rastreo GPS
   ownerId?: string; // ID del propietario/ganadero
-  farmId?: string; // ID de la finca/rancho
+  ranchId?: string; // ID de la finca/rancho
   motherId?: string; // ID de la madre (si aplica)
   fatherId?: string; // ID del padre (si aplica)
   acquisitionDate?: Date; // Fecha de adquisición
@@ -110,20 +112,21 @@ export interface BovineAttributes {
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date; // Para soft delete
+  currentLocationId?: string;
 }
 
 // Atributos opcionales al crear un nuevo bovino
-export interface BovineCreationAttributes 
-  extends Optional<BovineAttributes, 
-    'id' | 'name' | 'weight' | 'physicalMetrics' | 'reproductiveInfo' | 
-    'trackingConfig' | 'ownerId' | 'farmId' | 'motherId' | 'fatherId' | 
-    'acquisitionDate' | 'acquisitionPrice' | 'currentValue' | 'notes' | 
-    'images' | 'qrCode' | 'rfidTag' | 'lastHealthCheck' | 'nextHealthCheck' | 
-    'createdAt' | 'updatedAt' | 'deletedAt'
-  > {}
+export interface BovineCreationAttributes
+  extends Optional<BovineAttributes,
+    'id' | 'name' | 'weight' | 'physicalMetrics' | 'reproductiveInfo' |
+    'trackingConfig' | 'ownerId' | 'ranchId' | 'motherId' | 'fatherId' |
+    'acquisitionDate' | 'acquisitionPrice' | 'currentValue' | 'notes' |
+    'images' | 'qrCode' | 'rfidTag' | 'lastHealthCheck' | 'nextHealthCheck' |
+    'createdAt' | 'updatedAt' | 'deletedAt' | "currentLocationId"
+  > { }
 
 // Clase del modelo Bovine
-class Bovine extends Model<BovineAttributes, BovineCreationAttributes> 
+class Bovine extends Model<BovineAttributes, BovineCreationAttributes>
   implements BovineAttributes {
   public id!: string;
   public earTag!: string;
@@ -140,7 +143,7 @@ class Bovine extends Model<BovineAttributes, BovineCreationAttributes>
   public reproductiveInfo?: ReproductiveInfo;
   public trackingConfig?: TrackingConfig;
   public ownerId?: string;
-  public farmId?: string;
+  public ranchId?: string;
   public motherId?: string;
   public fatherId?: string;
   public acquisitionDate?: Date;
@@ -157,102 +160,7 @@ class Bovine extends Model<BovineAttributes, BovineCreationAttributes>
   public readonly updatedAt!: Date;
   public deletedAt?: Date;
 
-  // Métodos de instancia para cálculos útiles
-  
-  /**
-   * Calcula la edad del bovino en meses
-   * @returns Edad en meses
-   */
-  public getAgeInMonths(): number {
-    const now = new Date();
-    const birthDate = new Date(this.birthDate);
-    const diffTime = Math.abs(now.getTime() - birthDate.getTime());
-    const diffMonths = Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 30.44));
-    return diffMonths;
-  }
 
-  /**
-   * Calcula la edad del bovino en años y meses
-   * @returns Objeto con años y meses
-   */
-  public getAgeInYearsAndMonths(): { years: number; months: number } {
-    const totalMonths = this.getAgeInMonths();
-    const years = Math.floor(totalMonths / 12);
-    const months = totalMonths % 12;
-    return { years, months };
-  }
-
-  /**
-   * Verifica si el bovino es adulto (mayor a 24 meses)
-   * @returns True si es adulto
-   */
-  public isAdult(): boolean {
-    return this.getAgeInMonths() >= 24;
-  }
-
-  /**
-   * Obtiene el estado de salud en español
-   * @returns Estado de salud traducido
-   */
-  public getHealthStatusLabel(): string {
-    const labels = {
-      [HealthStatus.HEALTHY]: 'Saludable',
-      [HealthStatus.SICK]: 'Enfermo',
-      [HealthStatus.RECOVERING]: 'Recuperándose',
-      [HealthStatus.QUARANTINE]: 'Cuarentena',
-      [HealthStatus.DECEASED]: 'Fallecido'
-    };
-    return labels[this.healthStatus];
-  }
-
-  /**
-   * Obtiene el tipo de ganado en español
-   * @returns Tipo de ganado traducido
-   */
-  public getCattleTypeLabel(): string {
-    const labels = {
-      [CattleType.CATTLE]: 'Ganado General',
-      [CattleType.BULL]: 'Toro',
-      [CattleType.COW]: 'Vaca',
-      [CattleType.CALF]: 'Ternero'
-    };
-    return labels[this.cattleType];
-  }
-
-  /**
-   * Verifica si necesita chequeo de salud
-   * @returns True si necesita chequeo
-   */
-  public needsHealthCheck(): boolean {
-    if (!this.nextHealthCheck) return true;
-    return new Date() >= new Date(this.nextHealthCheck);
-  }
-
-  /**
-   * Obtiene la información de tracking GPS
-   * @returns Estado del GPS
-   */
-  public getTrackingStatus(): { 
-    isTracking: boolean; 
-    batteryLevel?: number; 
-    signalStrength?: number;
-    lastUpdate?: Date;
-  } {
-    return {
-      isTracking: this.trackingConfig?.isEnabled || false,
-      batteryLevel: this.trackingConfig?.batteryLevel,
-      signalStrength: this.trackingConfig?.signalStrength,
-      lastUpdate: this.trackingConfig?.lastUpdate
-    };
-  }
-
-  /**
-   * Genera un código QR único para el bovino
-   * @returns Código QR generado
-   */
-  public generateQRCode(): string {
-    return `BOVINE-${this.earTag}-${this.id}`;
-  }
 }
 
 // Definición del modelo en Sequelize
@@ -265,10 +173,18 @@ Bovine.init(
       allowNull: false,
       comment: 'ID único del bovino'
     },
+    currentLocationId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'locations',
+        key: 'id'
+      },
+      comment: 'ID de la ubicación actual (FK a Location)'
+    },
     earTag: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      unique: true,
       validate: {
         notEmpty: true,
         len: [3, 50]
@@ -295,12 +211,10 @@ Bovine.init(
     cattleType: {
       type: DataTypes.ENUM(...Object.values(CattleType)),
       allowNull: false,
-      comment: 'Tipo de ganado (toro, vaca, ternero, etc.)'
     },
     gender: {
       type: DataTypes.ENUM(...Object.values(GenderType)),
       allowNull: false,
-      comment: 'Sexo del animal'
     },
     birthDate: {
       type: DataTypes.DATEONLY,
@@ -324,13 +238,11 @@ Bovine.init(
       type: DataTypes.ENUM(...Object.values(HealthStatus)),
       allowNull: false,
       defaultValue: HealthStatus.HEALTHY,
-      comment: 'Estado de salud actual del animal'
     },
     vaccinationStatus: {
       type: DataTypes.ENUM(...Object.values(VaccinationStatus)),
       allowNull: false,
       defaultValue: VaccinationStatus.NONE,
-      comment: 'Estado de vacunación del animal'
     },
     location: {
       type: DataTypes.JSONB,
@@ -370,7 +282,7 @@ Bovine.init(
       allowNull: true,
       comment: 'ID del propietario del animal'
     },
-    farmId: {
+    ranchId: {
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID de la finca donde se encuentra el animal'
@@ -420,13 +332,11 @@ Bovine.init(
     qrCode: {
       type: DataTypes.STRING(100),
       allowNull: true,
-      unique: true,
       comment: 'Código QR del animal'
     },
     rfidTag: {
       type: DataTypes.STRING(50),
       allowNull: true,
-      unique: true,
       comment: 'Tag RFID del animal'
     },
     isActive: {
@@ -470,7 +380,7 @@ Bovine.init(
     indexes: [
       // Índices para mejorar el rendimiento de las consultas
       {
-        unique: true,
+        
         fields: ['ear_tag']
       },
       {
@@ -486,7 +396,7 @@ Bovine.init(
         fields: ['owner_id']
       },
       {
-        fields: ['farm_id']
+        fields: ['ranch_id']
       },
       {
         fields: ['is_active']
@@ -494,6 +404,8 @@ Bovine.init(
       {
         fields: ['birth_date']
       },
+      { fields: ['current_location_id'] },
+      { fields: ['health_status', 'next_health_check'] },
       {
         name: 'bovines_location_gin',
         fields: ['location'],
@@ -503,16 +415,25 @@ Bovine.init(
             [Op.ne]: null
           }
         }
+      },
+      {
+        name: 'bovines_location_geog_idx',
+        using: 'gist',
+        fields: [
+          sequelize.literal(`
+      ST_SetSRID(
+        ST_MakePoint(
+          (location->>'longitude')::float,
+          (location->>'latitude')::float
+        ),
+        4326
+      )
+    `)
+        ]
       }
     ],
     hooks: {
-      // Hook para generar código QR antes de crear
-      beforeCreate: async (bovine: Bovine) => {
-        if (!bovine.qrCode) {
-          bovine.qrCode = bovine.generateQRCode();
-        }
-      },
-      
+
       // Hook para actualizar el timestamp de ubicación
       beforeUpdate: async (bovine: Bovine) => {
         if (bovine.changed('location')) {

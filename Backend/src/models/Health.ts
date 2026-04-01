@@ -1,6 +1,7 @@
+// PROPÓSITO: Registros COMPLETOS de salud YA OCURRIDOS
 import { DataTypes, Model, Optional, Op } from 'sequelize';
 import sequelize from '../config/database';
-import { LocationData } from './Bovine';
+import { LocationData, HealthStatus } from './Bovine';
 
 // Enums para registros de salud
 export enum HealthRecordType {
@@ -21,30 +22,21 @@ export enum HealthRecordType {
   OTHER = 'OTHER'                              // Otro tipo de registro
 }
 
-export enum HealthStatus {
-  EXCELLENT = 'EXCELLENT',     // Excelente
-  GOOD = 'GOOD',              // Bueno
-  FAIR = 'FAIR',              // Regular
-  POOR = 'POOR',              // Malo
-  CRITICAL = 'CRITICAL',       // Crítico
-  UNKNOWN = 'UNKNOWN'          // Desconocido
-}
-
 export enum DiagnosisStatus {
-  SUSPECTED = 'SUSPECTED',     // Sospechoso
+
   CONFIRMED = 'CONFIRMED',     // Confirmado
   RULED_OUT = 'RULED_OUT',     // Descartado
   DIFFERENTIAL = 'DIFFERENTIAL', // Diferencial
-  PENDING = 'PENDING'          // Pendiente
+
 }
 
 export enum TreatmentStatus {
-  NOT_STARTED = 'NOT_STARTED', // No iniciado
-  IN_PROGRESS = 'IN_PROGRESS', // En progreso
+
   COMPLETED = 'COMPLETED',     // Completado
   SUSPENDED = 'SUSPENDED',     // Suspendido
   FAILED = 'FAILED',           // Fallido
-  CANCELLED = 'CANCELLED'      // Cancelado
+  CANCELLED = 'CANCELLED',     // Cancelado
+  ACTIVE = 'ACTIVE'            // Activo (en curso)
 }
 
 export enum SeverityLevel {
@@ -131,13 +123,14 @@ export interface Diagnosis {
   confidence?: number;           // Nivel de confianza (0-100)
   basedOn?: string[];           // En qué se basa el diagnóstico
   prognosis?: 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR' | 'GRAVE'; // Pronóstico
-  expectedRecoveryTime?: number; // Tiempo esperado de recuperación (días)
+  actualRecoveryTime?: number; // Tiempo esperado de recuperación (días)
 }
 
 // Interface para tratamientos
 export interface Treatment {
   treatmentPlan?: string;        // Plan de tratamiento
   medications?: Array<{          // Medicamentos prescritos
+    medicationId: string; 
     name: string;
     activeIngredient?: string;
     dosage: number;
@@ -147,6 +140,8 @@ export interface Treatment {
     route: 'ORAL' | 'INJECTABLE' | 'TOPICAL' | 'INTRAVENOUS' | 'INTRAMUSCULAR' | 'SUBCUTANEOUS';
     withdrawalPeriod?: number; // días
     cost?: number;
+    inventoryItemId?: string;
+    administeredAt: Date[];
   }>;
   procedures?: Array<{           // Procedimientos realizados
     name: string;
@@ -155,6 +150,7 @@ export interface Treatment {
     anesthesia?: boolean;
     complications?: string;
     outcome?: 'SUCCESS' | 'PARTIAL_SUCCESS' | 'FAILURE';
+    performedAt: Date;
   }>;
   status: TreatmentStatus;       // Estado del tratamiento
   startDate?: Date;              // Fecha de inicio
@@ -164,6 +160,7 @@ export interface Treatment {
   complications?: string[];      // Complicaciones del tratamiento
   followUpRequired?: boolean;    // Si requiere seguimiento
   followUpDate?: Date;           // Fecha de seguimiento
+  followUpNotes?: string;
 }
 
 // Interface para resultados de laboratorio
@@ -184,6 +181,7 @@ export interface LaboratoryResults {
   interpretation?: string;       // Interpretación de resultados
   recommendations?: string[];    // Recomendaciones basadas en resultados
   cost?: number;                 // Costo del examen
+  reportUrl?: string;
 }
 
 // Interface para evaluación nutricional
@@ -198,6 +196,7 @@ export interface NutritionalAssessment {
     dosage: number;
     unit: string;
     frequency: string;
+    administered: boolean;
   }>;
   nutritionalDeficiencies?: string[]; // Deficiencias identificadas
   recommendations?: string[];    // Recomendaciones nutricionales
@@ -218,71 +217,112 @@ export interface ReproductiveAssessment {
 
 // Atributos del modelo Health
 export interface HealthAttributes {
+
   id: string;
-  bovineId: string;                    // ID del bovino
-  recordType: HealthRecordType;        // Tipo de registro de salud
-  recordDate: Date;                    // Fecha del registro
-  veterinarianId?: string;             // ID del veterinario
-  technicianId?: string;               // ID del técnico
-  location?: LocationData;             // Ubicación del examen
-  chiefComplaint?: string;             // Queja principal
-  historyPresent?: string;             // Historia de la enfermedad actual
-  historyPast?: string;                // Historia médica pasada
-  vitalSigns?: VitalSigns;             // Signos vitales
-  physicalExam?: PhysicalExamination;  // Examen físico
-  symptoms?: Symptoms;                 // Síntomas observados
-  diagnosis?: Diagnosis;               // Diagnósticos
-  treatment?: Treatment;               // Tratamientos
-  laboratoryResults?: LaboratoryResults; // Resultados de laboratorio
-  nutritionalAssessment?: NutritionalAssessment; // Evaluación nutricional
-  reproductiveAssessment?: ReproductiveAssessment; // Evaluación reproductiva
-  overallHealthStatus: HealthStatus;   // Estado general de salud
-  recommendations?: string[];          // Recomendaciones
-  nextAppointment?: Date;              // Próxima cita
-  attachments?: string[];              // Archivos adjuntos
-  photos?: string[];                   // Fotos del examen
-  xrays?: string[];                    // Radiografías
-  videos?: string[];                   // Videos del examen
-  notes?: string;                      // Notas adicionales
-  privateNotes?: string;               // Notas privadas del veterinario
-  cost?: number;                       // Costo del examen/tratamiento
-  currency?: string;                   // Moneda del costo
-  followUpRequired: boolean;           // Si requiere seguimiento
-  followUpDate?: Date;                 // Fecha de seguimiento
-  followUpNotes?: string;              // Notas de seguimiento
-  isEmergency: boolean;                // Si fue una emergencia
-  isCompleted: boolean;                // Si el registro está completo
-  isActive: boolean;                   // Si el registro está activo
-  weatherConditions?: string;          // Condiciones climáticas
-  environmentalFactors?: string[];     // Factores ambientales
-  createdBy: string;                   // ID del usuario que creó
-  updatedBy?: string;                  // ID del usuario que actualizó
+  bovineId: string;
+
+  // Relación OPCIONAL con el evento que lo generó
+  eventId?: string;  // Para trazabilidad
+
+  // Datos del registro
+  recordType: HealthRecordType;
+  recordDate: Date;  // Cuándo ocurrió realmente
+
+  // Personal
+  veterinarianId?: string;
+  veterinarianName?: string;
+  veterinarianLicense?: string;
+  technicianId?: string;
+
+  // Ubicación
+  location?: LocationData;
+
+  // Historia clínica
+  chiefComplaint?: string;
+  historyPresent?: string;
+  historyPast?: string;
+
+  // Exámenes REALIZADOS
+  vitalSigns?: VitalSigns;
+  physicalExam?: PhysicalExamination;
+  symptoms?: Symptoms;
+
+  // Diagnóstico CONFIRMADO
+  diagnosis: Diagnosis;
+
+  // Tratamiento APLICADO
+  treatment?: Treatment;
+
+  // Resultados de laboratorio
+  laboratoryResults?: LaboratoryResults[];
+
+  // Evaluaciones
+  nutritionalAssessment?: NutritionalAssessment;
+  reproductiveAssessment?: ReproductiveAssessment;
+
+  // Resultado final
+  overallHealthStatus: HealthStatus;
+  recommendations?: string[];
+
+  // Documentación
+  attachments?: string[];
+  photos?: string[];
+  xrays?: string[];
+  videos?: string[];
+
+  // Notas
+  notes?: string;
+  privateNotes?: string;
+
+  // Costos reales
+  cost?: number;
+  currency?: string;
+
+  // Seguimiento REALIZADO
+  followUpRequired: boolean;
+  followUpDate?: Date;
+  followUpNotes?: string;
+
+  // Metadata
+  isEmergency: boolean;
+  isCompleted: boolean;  // Siempre true para Health
+  isActive: boolean;
+
+  // Factores externos
+  weatherConditions?: string;
+  environmentalFactors?: string[];
+
+  // Auditoría
+  createdBy: string;
+  updatedBy?: string;
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date;
 }
 
 // Atributos opcionales al crear un nuevo registro de salud
-export interface HealthCreationAttributes 
-  extends Optional<HealthAttributes, 
-    'id' | 'veterinarianId' | 'technicianId' | 'location' | 'chiefComplaint' | 
-    'historyPresent' | 'historyPast' | 'vitalSigns' | 'physicalExam' | 
-    'symptoms' | 'diagnosis' | 'treatment' | 'laboratoryResults' | 
-    'nutritionalAssessment' | 'reproductiveAssessment' | 'recommendations' | 
-    'nextAppointment' | 'attachments' | 'photos' | 'xrays' | 'videos' | 
-    'notes' | 'privateNotes' | 'cost' | 'currency' | 'followUpDate' | 
-    'followUpNotes' | 'weatherConditions' | 'environmentalFactors' | 
-    'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
-  > {}
+export interface HealthCreationAttributes
+  extends Optional<HealthAttributes,
+    'id' | 'eventId' | 'veterinarianId' | 'technicianId' | 'location' |
+    'chiefComplaint' | 'historyPresent' | 'historyPast' | 'vitalSigns' |
+    'physicalExam' | 'symptoms' | 'treatment' | 'laboratoryResults' |
+    'nutritionalAssessment' | 'reproductiveAssessment' | 'recommendations' |
+    'attachments' | 'photos' | 'xrays' | 'videos' | 'notes' | 'privateNotes' |
+    'cost' | 'currency' | 'followUpDate' | 'followUpNotes' | 'weatherConditions' |
+    'environmentalFactors' | 'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
+  > { }
 
 // Clase del modelo Health
-class Health extends Model<HealthAttributes, HealthCreationAttributes> 
+class Health extends Model<HealthAttributes, HealthCreationAttributes>
   implements HealthAttributes {
   public id!: string;
   public bovineId!: string;
+  public eventId?: string;
   public recordType!: HealthRecordType;
   public recordDate!: Date;
   public veterinarianId?: string;
+  public veterinarianName?: string;
+  public veterinarianLicense?: string;
   public technicianId?: string;
   public location?: LocationData;
   public chiefComplaint?: string;
@@ -291,14 +331,13 @@ class Health extends Model<HealthAttributes, HealthCreationAttributes>
   public vitalSigns?: VitalSigns;
   public physicalExam?: PhysicalExamination;
   public symptoms?: Symptoms;
-  public diagnosis?: Diagnosis;
+  public diagnosis!: Diagnosis;
   public treatment?: Treatment;
-  public laboratoryResults?: LaboratoryResults;
+  public laboratoryResults?: LaboratoryResults[];
   public nutritionalAssessment?: NutritionalAssessment;
   public reproductiveAssessment?: ReproductiveAssessment;
   public overallHealthStatus!: HealthStatus;
   public recommendations?: string[];
-  public nextAppointment?: Date;
   public attachments?: string[];
   public photos?: string[];
   public xrays?: string[];
@@ -321,265 +360,6 @@ class Health extends Model<HealthAttributes, HealthCreationAttributes>
   public readonly updatedAt!: Date;
   public deletedAt?: Date;
 
-  // Métodos de instancia
-
-  /**
-   * Obtiene el tipo de registro en español
-   * @returns Tipo de registro traducido
-   */
-  public getRecordTypeLabel(): string {
-    const labels = {
-      [HealthRecordType.ROUTINE_CHECKUP]: 'Chequeo Rutinario',
-      [HealthRecordType.EMERGENCY_VISIT]: 'Visita de Emergencia',
-      [HealthRecordType.FOLLOW_UP]: 'Seguimiento',
-      [HealthRecordType.VACCINATION]: 'Vacunación',
-      [HealthRecordType.TREATMENT]: 'Tratamiento',
-      [HealthRecordType.SURGERY]: 'Cirugía',
-      [HealthRecordType.LABORATORY_TEST]: 'Examen de Laboratorio',
-      [HealthRecordType.PHYSICAL_EXAM]: 'Examen Físico',
-      [HealthRecordType.REPRODUCTIVE_EXAM]: 'Examen Reproductivo',
-      [HealthRecordType.NECROPSY]: 'Necropsia',
-      [HealthRecordType.QUARANTINE_ASSESSMENT]: 'Evaluación de Cuarentena',
-      [HealthRecordType.PRE_TRANSPORT_EXAM]: 'Examen Pre-transporte',
-      [HealthRecordType.NUTRITION_ASSESSMENT]: 'Evaluación Nutricional',
-      [HealthRecordType.BEHAVIORAL_ASSESSMENT]: 'Evaluación Conductual',
-      [HealthRecordType.OTHER]: 'Otro'
-    };
-    return labels[this.recordType];
-  }
-
-  /**
-   * Obtiene el estado de salud en español
-   * @returns Estado de salud traducido
-   */
-  public getHealthStatusLabel(): string {
-    const labels = {
-      [HealthStatus.EXCELLENT]: 'Excelente',
-      [HealthStatus.GOOD]: 'Bueno',
-      [HealthStatus.FAIR]: 'Regular',
-      [HealthStatus.POOR]: 'Malo',
-      [HealthStatus.CRITICAL]: 'Crítico',
-      [HealthStatus.UNKNOWN]: 'Desconocido'
-    };
-    return labels[this.overallHealthStatus];
-  }
-
-  /**
-   * Verifica si el registro necesita seguimiento
-   * @returns True si necesita seguimiento
-   */
-  public needsFollowUp(): boolean {
-    if (!this.followUpRequired) return false;
-    if (!this.followUpDate) return true;
-    return new Date() >= new Date(this.followUpDate);
-  }
-
-  /**
-   * Calcula los días desde el registro
-   * @returns Número de días desde el registro
-   */
-  public getDaysSinceRecord(): number {
-    const now = new Date();
-    const recordDate = new Date(this.recordDate);
-    const diffTime = now.getTime() - recordDate.getTime();
-    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
-  }
-
-  /**
-   * Verifica si hay signos vitales anormales
-   * @returns True si hay signos vitales fuera de rango normal
-   */
-  public hasAbnormalVitalSigns(): boolean {
-    if (!this.vitalSigns) return false;
-
-    const vs = this.vitalSigns;
-    
-    // Rangos normales para bovinos adultos
-    const normalRanges = {
-      temperature: { min: 38.0, max: 39.5 }, // °C
-      heartRate: { min: 60, max: 80 },       // latidos/min
-      respiratoryRate: { min: 24, max: 36 }  // resp/min
-    };
-
-    if (vs.temperature && (vs.temperature < normalRanges.temperature.min || vs.temperature > normalRanges.temperature.max)) {
-      return true;
-    }
-    if (vs.heartRate && (vs.heartRate < normalRanges.heartRate.min || vs.heartRate > normalRanges.heartRate.max)) {
-      return true;
-    }
-    if (vs.respiratoryRate && (vs.respiratoryRate < normalRanges.respiratoryRate.min || vs.respiratoryRate > normalRanges.respiratoryRate.max)) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Obtiene la lista de sistemas corporales afectados
-   * @returns Array de sistemas afectados
-   */
-  public getAffectedSystems(): BodySystem[] {
-    return this.symptoms?.affectedSystems || [];
-  }
-
-  /**
-   * Verifica si tiene diagnóstico confirmado
-   * @returns True si tiene diagnóstico confirmado
-   */
-  public hasConfirmedDiagnosis(): boolean {
-    return this.diagnosis?.status === DiagnosisStatus.CONFIRMED;
-  }
-
-  /**
-   * Obtiene el diagnóstico principal
-   * @returns Diagnóstico principal o null
-   */
-  public getPrimaryDiagnosis(): string | null {
-    return this.diagnosis?.primaryDiagnosis || null;
-  }
-
-  /**
-   * Verifica si el tratamiento está en progreso
-   * @returns True si el tratamiento está en progreso
-   */
-  public isTreatmentInProgress(): boolean {
-    return this.treatment?.status === TreatmentStatus.IN_PROGRESS;
-  }
-
-  /**
-   * Obtiene el resumen de medicamentos activos
-   * @returns Array de medicamentos activos
-   */
-  public getActiveMedications(): Array<{name: string; dosage: string; frequency: string}> {
-    if (!this.treatment?.medications) return [];
-    
-    return this.treatment.medications.map(med => ({
-      name: med.name,
-      dosage: `${med.dosage} ${med.dosageUnit}`,
-      frequency: med.frequency
-    }));
-  }
-
-  /**
-   * Calcula el índice de condición corporal promedio
-   * @returns Índice promedio o null
-   */
-  public getAverageBodyConditionScore(): number | null {
-    const scores: number[] = [];
-    
-    if (this.physicalExam?.bodyConditionScore) {
-      scores.push(this.physicalExam.bodyConditionScore);
-    }
-    if (this.nutritionalAssessment?.bodyConditionScore) {
-      scores.push(this.nutritionalAssessment.bodyConditionScore);
-    }
-    
-    if (scores.length === 0) return null;
-    return scores.reduce((sum, score) => sum + score, 0) / scores.length;
-  }
-
-  /**
-   * Verifica si es un registro médico completo
-   * @returns True si tiene información médica completa
-   */
-  public isCompleteMedicalRecord(): boolean {
-    return !!(
-      this.vitalSigns &&
-      this.physicalExam &&
-      this.diagnosis &&
-      this.overallHealthStatus !== HealthStatus.UNKNOWN
-    );
-  }
-
-  /**
-   * Obtiene las recomendaciones de seguimiento
-   * @returns Array de recomendaciones
-   */
-  public getFollowUpRecommendations(): string[] {
-    const recommendations: string[] = [];
-    
-    // Agregar recomendaciones generales
-    if (this.recommendations) {
-      recommendations.push(...this.recommendations);
-    }
-    
-    // Agregar recomendaciones específicas de laboratorio
-    if (this.laboratoryResults?.recommendations) {
-      recommendations.push(...this.laboratoryResults.recommendations);
-    }
-    
-    // Agregar recomendaciones nutricionales
-    if (this.nutritionalAssessment?.recommendations) {
-      recommendations.push(...this.nutritionalAssessment.recommendations);
-    }
-    
-    return [...new Set(recommendations)]; // Eliminar duplicados
-  }
-
-  /**
-   * Calcula el costo total del registro (incluyendo medicamentos)
-   * @returns Costo total
-   */
-  public getTotalCost(): number {
-    let total = this.cost || 0;
-    
-    // Agregar costos de medicamentos
-    if (this.treatment?.medications) {
-      total += this.treatment.medications.reduce((sum, med) => sum + (med.cost || 0), 0);
-    }
-    
-    // Agregar costo de exámenes de laboratorio
-    if (this.laboratoryResults?.cost) {
-      total += this.laboratoryResults.cost;
-    }
-    
-    return total;
-  }
-
-  /**
-   * Genera un resumen del estado de salud
-   * @returns Objeto con resumen del estado
-   */
-  public getHealthSummary(): {
-    status: string;
-    keyFindings: string[];
-    recommendations: string[];
-    followUpNeeded: boolean;
-    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  } {
-    const keyFindings: string[] = [];
-    let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
-    
-    // Determinar hallazgos clave
-    if (this.hasAbnormalVitalSigns()) {
-      keyFindings.push('Signos vitales anormales');
-      riskLevel = 'MEDIUM';
-    }
-    
-    if (this.diagnosis?.primaryDiagnosis) {
-      keyFindings.push(`Diagnóstico: ${this.diagnosis.primaryDiagnosis}`);
-    }
-    
-    if (this.symptoms?.severity === SeverityLevel.SEVERE || this.symptoms?.severity === SeverityLevel.CRITICAL) {
-      riskLevel = 'HIGH';
-    }
-    
-    if (this.overallHealthStatus === HealthStatus.CRITICAL) {
-      riskLevel = 'CRITICAL';
-    }
-    
-    if (this.isEmergency) {
-      riskLevel = 'CRITICAL';
-    }
-    
-    return {
-      status: this.getHealthStatusLabel(),
-      keyFindings,
-      recommendations: this.getFollowUpRecommendations(),
-      followUpNeeded: this.needsFollowUp(),
-      riskLevel
-    };
-  }
 }
 
 // Definición del modelo en Sequelize
@@ -603,10 +383,15 @@ Health.init(
       onDelete: 'CASCADE',
       comment: 'ID del bovino relacionado'
     },
+    eventId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: 'events', key: 'id' },
+      comment: 'ID del evento que generó este registro (opcional)'
+    },
     recordType: {
       type: DataTypes.ENUM(...Object.values(HealthRecordType)),
       allowNull: false,
-      comment: 'Tipo de registro de salud'
     },
     recordDate: {
       type: DataTypes.DATE,
@@ -687,18 +472,12 @@ Health.init(
       type: DataTypes.ENUM(...Object.values(HealthStatus)),
       allowNull: false,
       defaultValue: HealthStatus.UNKNOWN,
-      comment: 'Estado general de salud'
     },
     recommendations: {
       type: DataTypes.ARRAY(DataTypes.TEXT),
       allowNull: true,
       defaultValue: [],
       comment: 'Recomendaciones médicas'
-    },
-    nextAppointment: {
-      type: DataTypes.DATE,
-      allowNull: true,
-      comment: 'Fecha de próxima cita'
     },
     attachments: {
       type: DataTypes.ARRAY(DataTypes.STRING),
@@ -830,6 +609,7 @@ Health.init(
       {
         fields: ['bovine_id']
       },
+      { fields: ['event_id'] },
       {
         fields: ['record_type']
       },
@@ -853,9 +633,6 @@ Health.init(
       },
       {
         fields: ['follow_up_date']
-      },
-      {
-        fields: ['next_appointment']
       },
       {
         name: 'health_bovine_date',
@@ -882,35 +659,33 @@ Health.init(
             [Op.ne]: null
           }
         }
+      },
+      {
+        name: 'health_diagnosis_gin',
+        fields: ['diagnosis'],
+        using: 'gin'
       }
     ],
     hooks: {
-      // Hook para actualizar estado de completación
       beforeSave: async (health: Health) => {
-        // Considerar completo si tiene información básica
-        if (health.vitalSigns && health.physicalExam && health.overallHealthStatus !== HealthStatus.UNKNOWN) {
-          health.isCompleted = true;
+        // ✅ VALIDACIÓN CRÍTICA: diagnosis debe existir
+        if (!health.diagnosis) {
+          throw new Error('Health record requires a confirmed diagnosis');
         }
+
+        // Health siempre está completado
+        health.isCompleted = true;
 
         // Validar fechas de seguimiento
         if (health.followUpDate && health.followUpDate <= new Date(health.recordDate)) {
           throw new Error('La fecha de seguimiento debe ser posterior a la fecha del registro');
         }
-
-        // Validar próxima cita
-        if (health.nextAppointment && health.nextAppointment <= new Date(health.recordDate)) {
-          throw new Error('La próxima cita debe ser posterior a la fecha del registro');
-        }
       },
-
-      // Hook para validaciones adicionales
       beforeCreate: async (health: Health) => {
-        // Si es emergencia, establecer prioridad alta automáticamente
-        if (health.isEmergency) {
-          health.overallHealthStatus = health.overallHealthStatus === HealthStatus.UNKNOWN 
-            ? HealthStatus.POOR 
-            : health.overallHealthStatus;
-        }
+
+        health.isCompleted = true;
+
+
       }
     },
     comment: 'Tabla para almacenar registros completos de salud y exámenes médicos de bovinos'

@@ -169,7 +169,6 @@ export class EmailVerificationToken extends Model<
       token: {
         type: DataTypes.STRING(255),
         allowNull: false,
-        unique: true,
         validate: {
           len: [32, 255], // Mínimo 32 caracteres
         },
@@ -273,7 +272,6 @@ export class EmailVerificationToken extends Model<
         },
         {
           fields: ['token'],
-          unique: true,
         },
         {
           fields: ['user_id', 'used', 'expires_at'],

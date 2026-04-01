@@ -38,23 +38,23 @@ export class DatabaseManager {
 
     // Obtener configuración del ambiente
     this.config = getEnvironmentConfig();
-    
+
     // Configuración del manager
     this.managerConfig = {
       enableMigrations: managerConfig?.enableMigrations ?? this.config.features.enableMigrations,
       enableBackup: managerConfig?.enableBackup ?? this.config.features.enableBackup,
       enableLogging: managerConfig?.enableLogging ?? true,
       autoSync: managerConfig?.autoSync ?? true,
-      forceSync: managerConfig?.forceSync ?? false,
+      forceSync: managerConfig?.forceSync ?? true,
       alterSync: managerConfig?.alterSync ?? false
     };
 
     // Crear instancia de Sequelize
     this.sequelize = new Sequelize(this.config.database);
-    
+
     // Inicializar managers
     this.initializeManagers();
-    
+
     logger.info('🗄️ DatabaseManager inicializado', 'Database', {
       environment: this.config.database.database,
       host: this.config.database.host,
@@ -107,6 +107,8 @@ export class DatabaseManager {
 
       // 1. Probar conexión
       await this.testConnection();
+
+       await this.enablePostGIS();
 
       // 2. Ejecutar migraciones si están habilitadas
       if (this.managerConfig.enableMigrations && this.migrationManager) {
@@ -190,7 +192,7 @@ export class DatabaseManager {
     try {
       logger.start('Ejecución de migraciones', 'Database');
       const result = await this.migrationManager.runMigrations();
-      
+
       if (result.success) {
         logger.end('Ejecución de migraciones', 'Database', {
           executed: result.executed.length,
@@ -234,10 +236,10 @@ export class DatabaseManager {
       logger.fail('Cerrar conexión a base de datos', error as Error, 'Database');
       throw error;
     }
-  } 
-/**
-   * Obtiene información del estado de la conexión
-   */
+  }
+  /**
+     * Obtiene información del estado de la conexión
+     */
   public getConnectionInfo() {
     return {
       environment: this.config.database.database,
@@ -281,6 +283,21 @@ export class DatabaseManager {
     } catch (error) {
       logger.error('Error obteniendo estadísticas de base de datos', 'Database', {}, error as Error);
       throw error;
+    }
+  }
+
+  /**
+ * Habilita la extensión PostGIS en la base de datos si no existe.
+ * Necesaria para índices espaciales y funciones geográficas.
+ */
+  private async enablePostGIS(): Promise<void> {
+    try {
+      logger.info('Habilitando extensión PostGIS (si no existe)', 'Database');
+      await this.sequelize.query('CREATE EXTENSION IF NOT EXISTS postgis;');
+      logger.info('Extensión PostGIS verificada/creada correctamente', 'Database');
+    } catch (error) {
+      logger.fail('Error al habilitar PostGIS', error as Error, 'Database');
+      throw new Error('PostGIS no está disponible en el servidor. Asegúrate de instalarlo.');
     }
   }
 }

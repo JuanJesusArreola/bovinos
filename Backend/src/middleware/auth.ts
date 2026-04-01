@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import * as jwt from 'jsonwebtoken';
-import { authService } from '../services/auth';
+import { tokenService } from '../services/auth';
 import { permissionService } from '../services/permission';
 import  User, { UserRole } from '../models/User';
 import logger from '../utils/logger';
@@ -153,7 +153,7 @@ export const authenticateToken = async (
 
     // Verificar si el token está en la blacklist (revocado)
     // Esto previene que tokens revocados puedan seguir siendo usados
-    const isBlacklisted = await authService.isTokenBlacklisted(token);
+    const isBlacklisted = await tokenService.isTokenRevoked(token);
     if (isBlacklisted) {
       throw new ApiError(401, 'Token revocado', 'TOKEN_REVOKED');
     }
@@ -433,7 +433,7 @@ export const checkApiLimits = (req: Request, res: Response, next: NextFunction):
 
 /**
  * Utilidad para generar tokens JWT
- */
+ 
 export const generateToken = (userId: string, email: string, role: UserRole): string => {
   const payload = {
     userId,
@@ -443,7 +443,7 @@ export const generateToken = (userId: string, email: string, role: UserRole): st
   
   // Usar jwt.sign de forma síncrona sin opciones complejas
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions);
-};
+};*/
 
 /**
  * Utilidad para verificar tokens JWT sin middleware

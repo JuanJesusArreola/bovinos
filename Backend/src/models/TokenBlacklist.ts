@@ -24,7 +24,8 @@ export enum RevocationReason {
   SECURITY_BREACH = 'SECURITY_BREACH',
   TOKEN_ROTATION = 'TOKEN_ROTATION',
   PASSWORD_RESET = 'PASSWORD_RESET',
-  ACCOUNT_DELETED = 'ACCOUNT_DELETED'
+  ACCOUNT_DELETED = 'ACCOUNT_DELETED',
+  ACCOUNT_SUSPENDED = 'ACCOUNT_SUSPENDED',
 }
 
 // =============================================
@@ -181,12 +182,10 @@ export class TokenBlacklist extends Model<
         validate: {
           isIn: [[TokenType.ACCESS, TokenType.REFRESH]],
         },
-        comment: 'Tipo de token: ACCESS (acceso) o REFRESH (renovación)',
       },
       token_jti: {
         type: DataTypes.STRING(255),
         allowNull: false,
-        unique: true,
         comment: 'JWT ID único del token para identificación específica',
       },
       token_hash: {
@@ -218,7 +217,6 @@ export class TokenBlacklist extends Model<
           RevocationReason.SECURITY_BREACH,
           RevocationReason.TOKEN_ROTATION]],
         },
-        comment: 'Razón por la cual se revocó el token: LOGOUT, PASSWORD_CHANGE, etc.',
       },
       ip_address: {
         type: DataTypes.STRING(45),

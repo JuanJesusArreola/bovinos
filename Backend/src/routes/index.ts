@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 // Importaciones corregidas de middleware
 import { authenticateToken } from '../middleware/auth';
 import { requestLogger } from '../middleware/logging';
+import pushRoutes from './push.routes';
 
 // ===================================================================
 // EXTENDER EL TIPO REQUEST PARA PROPIEDADES PERSONALIZADAS
@@ -32,39 +33,41 @@ declare global {
 // ===================================================================
 
 // Rutas de autenticación y usuarios
-import authRoutes from './auth';
 
-// Rutas de gestión de ganado
-import bovinesRoutes from './bovines';
 
-// Rutas de alimentación y nutrición
-import feedingRoutes from './feeding';
-import health from './health';
-import reproduction from './reproduction';
-import production from './production';
-import maps from './maps';
-import events from './events';
-import calendar from './calendar';
-import inventory from './inventory';
-import finances from './finances';
-import reports from './reports';
-import ranch from './ranch';
-import dashboard from './dashboard';
-import upload from './upload';
+import eventRoutes from './event.routes';
+import notificationRoutes from './notification.routes';
+import medicationRoutes from './medication.routes';
+import medicationInventoryRoutes from './medicationInventory.routes';
+import locationRoutes from './location.routes';
+import locationGeofenceRoutes from './locationGeofence.routes';
+import locationCapacityRoutes from './locationCapacity.routes';
+import locationAccessRoutes from './locationAccess.routes';
+import ranchCoreRoutes from './ranch/ranch.routes';
+import ranchLegalRoutes from './ranch/ranchLegal.routes'
+import ranchOperationsRoutes from './ranch/ranchOperations.routes';
+import ranchManagementRoutes from './ranch/ranchManagement.routes';
+import adminRoutes from './admin.routes';
+import reproductionRoutes from './reproduction.routes';
+import reportRoutes from './reports.routes';
+import healthRoutes from './health.routes';
+import financeRoutes from './finance.routes';
+import inventoryRoutes from './inventory.routes';
+import analyticsRoutes from './analytics.routes';
+import authRoutes from './auth/auth.routes';
+import securityRoutes from './auth/security.routes';
+import userRoutes from './auth/user.routes';
 
 // Rutas adicionales (comentadas hasta que se implementen)
-import healthRoutes from './health';
-import reproductionRoutes from './reproduction';
-import productionRoutes from './production';
-import mapsRoutes from './maps';
-import eventsRoutes from './events';
-import calendarRoutes from './calendar';
-import inventoryRoutes from './inventory';
-import financesRoutes from './finances';
-import reportsRoutes from './reports';
-import ranchRoutes from './ranch';
-import dashboardRoutes from './dashboard';
-import uploadRoutes from './upload';
+//import healthRoutes from './health';
+import productionRoutes from './production.routes';
+
+
+import { bovineController } from '../controllers/bovine.controller';
+import { bovineGeoController } from '../controllers/bovine-geo.controller';
+import { bovineHealthController } from '../controllers/bovine-health.controller';
+import { bovineTrackingController } from '../controllers/bovine-tracking.controller';
+import { bovineLocationController } from '../controllers/bovine-location.controller';
 
 // ===================================================================
 // CONFIGURACIÓN DEL ROUTER PRINCIPAL
@@ -317,7 +320,7 @@ router.get('/info', (req: Request, res: Response) => {
       developer: 'División Académica de Ciencias Biológicas',
       documentation: '/api/docs',
       endpoints: {
-        // authentication: '/api/auth/*',
+        authentication: '/api/auth/*',
         bovines: '/api/bovines/*',
         feeding: '/api/feeding/*',
         health: '/api/health/*',
@@ -359,26 +362,6 @@ router.get('/info', (req: Request, res: Response) => {
 // CONFIGURACIÓN DE RUTAS PRINCIPALES
 // ===================================================================
 
-// Rutas de autenticación
-router.use('/auth', authRoutes);
-
-// Rutas principales del sistema ganadero con prefijo /api/v1
-router.use('/bovines', bovinesRoutes);
-router.use('/feeding', feedingRoutes);
-
-// Rutas adicionales (comentadas hasta que se implementen)
-router.use('/health', health);
-router.use('/reproduction', reproduction);
-router.use('/production', production);
-router.use('/maps', maps);
-router.use('/events', events);
-router.use('/calendar', calendar);
-router.use('/inventory', inventory);
-router.use('/finances', finances);
-router.use('/reports', reports);
-router.use('/ranch', ranch);
-router.use('/dashboard', dashboard);
-router.use('/upload', upload);
 
 // ===================================================================
 // RUTAS ESPECIALES Y UTILIDADES
@@ -434,6 +417,31 @@ router.post('/echo', (req: Request, res: Response) => {
   });
 });
 
+router.use('/events', eventRoutes);
+router.use('/notifications', notificationRoutes);
+router.use('/health', healthRoutes);
+router.use('/medications', medicationRoutes);
+router.use('/medication-inventory', medicationInventoryRoutes);
+router.use('/locations', locationRoutes);
+router.use('/geofence', locationGeofenceRoutes);
+router.use('/locations', locationCapacityRoutes);
+router.use('/locations', locationAccessRoutes);
+router.use('/ranch', ranchCoreRoutes);
+router.use('/ranch/legal', ranchLegalRoutes);
+router.use('/ranch/operations', ranchOperationsRoutes);
+router.use('/ranch/management', ranchManagementRoutes);
+router.use('/admin', adminRoutes);
+router.use('/reproduction', reproductionRoutes);
+router.use('/reports', reportRoutes);
+router.use('/finance', financeRoutes);
+router.use('/inventory', inventoryRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/auth', authRoutes);
+router.use('/security', securityRoutes);
+router.use('/users', userRoutes);
+router.use('/production', productionRoutes);
+
+
 // ===================================================================
 // RUTAS DE DOCUMENTACIÓN DE API
 // ===================================================================
@@ -467,6 +475,8 @@ router.get('/docs', (req: Request, res: Response) => {
     }
   });
 });
+
+router.use('/push', pushRoutes);
 
 /**
  * GET /api/endpoints

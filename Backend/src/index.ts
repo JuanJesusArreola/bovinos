@@ -9,9 +9,13 @@ import dotenv from 'dotenv';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
+import path from 'path';
 
 // Importar middleware personalizado
 import { errorHandler } from './middleware/error';
+
+import { scheduleRanchProductionUpdate } from './jobs/updateRanchProduction';
+
 
 // ============================================================================
 // CONFIGURACIÓN INICIAL
@@ -545,12 +549,15 @@ async function main(): Promise<void> {
     console.log('   ✅ CORS completo + Todos los endpoints + Headers');
     console.log('');
 
+    app.use('/files', express.static(path.join(__dirname, '../uploads')));
+
     // Inicializar servicios
     const servicesReady = await initializeServices();
     if (!servicesReady) {
       console.error('❌ Error crítico: No se pudieron inicializar los servicios');
       process.exit(1);
     }
+    scheduleRanchProductionUpdate();
 
     // Iniciar servidor
     await startServer();

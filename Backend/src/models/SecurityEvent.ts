@@ -287,7 +287,6 @@ SecurityEvent.init(
             EventType.SUSPICIOUS_ACTIVITY, EventType.RATE_LIMIT_EXCEEDED, EventType.INVALID_TOKEN, EventType.UNAUTHORIZED_ACCESS, 
             EventType.ADMIN_ACTION]],
         },
-        comment: 'Tipo de evento: LOGIN_SUCCESS, LOGIN_FAILED, PASSWORD_CHANGE, etc.',
       },
       severity: {
         type: DataTypes.ENUM(...Object.values(EventSeverity)),
@@ -295,7 +294,6 @@ SecurityEvent.init(
         validate:{
           isIn: [[EventSeverity.LOW, EventSeverity.MEDIUM, EventSeverity.HIGH, EventSeverity.CRITICAL]],
         },
-        comment: 'Severidad del evento: LOW, MEDIUM, HIGH, CRITICAL',
       },
       description: {
         type: DataTypes.TEXT,

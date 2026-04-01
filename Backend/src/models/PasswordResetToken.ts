@@ -165,7 +165,6 @@ export class PasswordResetToken extends Model<
       token: {
         type: DataTypes.STRING(255),
         allowNull: false,
-        unique: true,
         validate: {
           len: [32, 255],
         },
@@ -256,7 +255,6 @@ export class PasswordResetToken extends Model<
         },
         {
           fields: ['token'],
-          unique: true,
         },
         {
           fields: ['user_id', 'used', 'expires_at'],

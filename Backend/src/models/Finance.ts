@@ -172,7 +172,7 @@ export interface FinanceAttributes {
   location?: LocationData;                 // Ubicación de la transacción
   bovineId?: string;                       // ID del bovino relacionado
   eventId?: string;                        // ID del evento relacionado
-  farmId?: string;                         // ID de la finca
+  ranchId?: string;                         // ID de la finca
   contactInfo?: ContactInfo;               // Información del contacto
   invoiceInfo?: InvoiceInfo;               // Información de facturación
   budgetInfo?: BudgetInfo;                 // Información de presupuesto
@@ -206,7 +206,7 @@ export interface FinanceAttributes {
 export interface FinanceCreationAttributes 
   extends Optional<FinanceAttributes, 
     'id' | 'description' | 'exchangeRate' | 'baseAmount' | 'dueDate' | 
-    'completedDate' | 'location' | 'bovineId' | 'eventId' | 'farmId' | 
+    'completedDate' | 'location' | 'bovineId' | 'eventId' | 'ranchId' | 
     'contactInfo' | 'invoiceInfo' | 'budgetInfo' | 'amortizationInfo' | 
     'financialAnalysis' | 'recurrence' | 'parentTransactionId' | 
     'relatedTransactions' | 'tags' | 'attachments' | 'photos' | 'notes' | 
@@ -235,7 +235,7 @@ class Finance extends Model<FinanceAttributes, FinanceCreationAttributes>
   public location?: LocationData;
   public bovineId?: string;
   public eventId?: string;
-  public farmId?: string;
+  public ranchId?: string;
   public contactInfo?: ContactInfo;
   public invoiceInfo?: InvoiceInfo;
   public budgetInfo?: BudgetInfo;
@@ -499,7 +499,7 @@ class Finance extends Model<FinanceAttributes, FinanceCreationAttributes>
       location: this.location,
       bovineId: this.bovineId,
       eventId: this.eventId,
-      farmId: this.farmId,
+      ranchId: this.ranchId,
       contactInfo: this.contactInfo,
       budgetInfo: this.budgetInfo,
       recurrence: this.recurrence,
@@ -557,7 +557,6 @@ Finance.init(
     transactionType: {
       type: DataTypes.ENUM(...Object.values(TransactionType)),
       allowNull: false,
-      comment: 'Tipo de transacción (ingreso, gasto, transferencia, ajuste)'
     },
     category: {
       type: DataTypes.STRING(100),
@@ -620,13 +619,11 @@ Finance.init(
     paymentMethod: {
       type: DataTypes.ENUM(...Object.values(PaymentMethod)),
       allowNull: false,
-      comment: 'Método de pago utilizado'
     },
     status: {
       type: DataTypes.ENUM(...Object.values(TransactionStatus)),
       allowNull: false,
       defaultValue: TransactionStatus.PENDING,
-      comment: 'Estado actual de la transacción'
     },
     transactionDate: {
       type: DataTypes.DATE,
@@ -666,7 +663,7 @@ Finance.init(
       },
       comment: 'ID del evento relacionado con la transacción'
     },
-    farmId: {
+    ranchId: {
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID de la finca relacionada'
@@ -852,7 +849,7 @@ Finance.init(
         fields: ['event_id']
       },
       {
-        fields: ['farm_id']
+        fields: ['ranch_id']
       },
       {
         fields: ['created_by']

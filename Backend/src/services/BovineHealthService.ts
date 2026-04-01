@@ -1,0 +1,958 @@
+import { Op, Transaction, literal } from 'sequelize';
+import sequelize from '../config/database';
+import logger from '../utils/logger';
+import {
+    BovineError,
+    BovineValidationError,
+    BovineNotFoundError
+} from '../utils/BovineErrors';
+import { getErrorMessage, ensureError } from '../utils/errorUtils';
+import {
+    MIN_AGE_MONTHS,
+    WEIGHT,
+    HEALTH_COLORS,
+    HEALTH_LABELS,
+    ALERT_THRESHOLDS,
+    SCHEDULED_TASKS,
+    CHECK_INTERVALS,
+    VITAL_SIGNS_THRESHOLDS,
+} from '../constants/bovine.constants';
+
+// Modelos
+import Bovine from '../models/Bovine';
+import Health, { HealthAttributes, HealthCreationAttributes } from '../models/Health';
+import Event, { EventPriority } from '../models/Event';
+import { HealthStatus } from '../models/Bovine';
+import { EventType, EventStatus } from '../models/Event';
+
+// Servicios (con lazy loading para evitar dependencias circulares)
+import type { BovineService } from './BovineService';
+import type { BovineGeoService } from './BovineGeoService';
+import type { EventService } from './EventService';
+
+// ============================================================================
+// INTERFACES PÚBLICAS
+// ============================================================================
+
+/**
+ * Datos para registrar un chequeo de salud
+ */
+export interface HealthCheckData {
+    bovineId: string;
+    checkDate: Date;
+    veterinarianId: string;
+    veterinarianName?: string;
+    diagnosis?: string;
+    diagnosisDetails?: any;
+    treatment?: string;
+    treatmentDetails?: any;
+    symptoms?: string[];
+    vitalSigns?: {
+        temperature?: number;
+        heartRate?: number;
+        respiratoryRate?: number;
+        weight?: number;
+    };
+    notes?: string;
+    followUpDate?: Date;
+    cost?: number;
+}
+
+/**
+ * Resultado de un chequeo de salud (para respuesta)
+ */
+export interface HealthCheckResult {
+    id: string;
+    bovineId: string;
+    bovineName?: string;
+    checkDate: Date;
+    veterinarianId: string;
+    veterinarianName?: string;
+    veterinarianLicense?: string;
+    diagnosis?: string;
+    treatment?: string;
+    healthStatus: HealthStatus;
+    followUpDate?: Date;
+    createdAt: Date;
+}
+
+/**
+ * Estadísticas de salud del hato
+ */
+export interface HerdHealthStats {
+    totalBovines: number;
+    byStatus: {
+        [HealthStatus.HEALTHY]: number;
+        [HealthStatus.SICK]: number;
+        [HealthStatus.RECOVERING]: number;
+        [HealthStatus.QUARANTINE]: number;
+        [HealthStatus.DECEASED]: number;
+    };
+    healthyPercentage: number;
+    sickPercentage: number;
+    criticalCount: number;
+    recentChecks: number; // Últimos 7 días
+    upcomingChecks: number; // Próximos 7 días
+    commonDiagnosis: Array<{
+        diagnosis: string;
+        count: number;
+    }>;
+}
+
+/**
+ * Punto para línea de tiempo de salud (gráficos)
+ */
+export interface HealthTimelinePoint {
+    date: Date;
+    healthStatus: HealthStatus;
+    eventType: 'CHECK' | 'DIAGNOSIS' | 'TREATMENT' | 'RECOVERY';
+    description: string;
+}
+
+/**
+ * Filtros para historial de salud
+ */
+export interface HealthHistoryFilters {
+    startDate?: Date;
+    endDate?: Date;
+    healthStatus?: HealthStatus[];
+    veterinarianId?: string;
+    limit?: number;
+    offset?: number;
+}
+// ============================================================================
+// SERVICIO PRINCIPAL
+// ============================================================================
+
+export class BovineHealthService {
+    private readonly context = 'BovineHealthService';
+
+    // Servicios con lazy loading
+    private bovineService!: BovineService;
+    private geoService!: BovineGeoService;
+    private eventService!: EventService;
+
+    constructor() {
+        // Inicialización lazy para evitar dependencias circulares
+        this.initializeServices();
+    }
+
+    private async initializeServices(): Promise<void> {
+        try {
+            const [BovineModule, GeoModule, EventModule] = await Promise.all([
+                import('./BovineService'),
+                import('./BovineGeoService'),
+                import('./EventService')
+            ]);
+
+            this.bovineService = BovineModule.bovineService;
+            this.geoService = GeoModule.bovineGeoService;
+            this.eventService = EventModule.eventService;
+
+            logger.info('Servicios inicializados', this.context);
+        } catch (error) {
+            logger.error('Error inicializando servicios', this.context, {}, ensureError(error));
+        }
+    }
+
+    // ==========================================================================
+    // MÉTODOS DE CHEQUEO DE SALUD
+    // ==========================================================================
+
+    /**
+     * Verifica si un bovino necesita chequeo de salud
+     * 
+     * @param bovineId - ID del bovino
+     * @returns true si necesita chequeo, false si no
+     * 
+     * LÓGICA:
+     *   - Si no tiene último chequeo → necesita
+     *   - Si está enfermo/cuarentena → cada 3 días
+     *   - Si está recuperándose → cada 7 días
+     *   - Si está sano → cada 30 días
+     */
+    async needsHealthCheck(bovineId: string): Promise<boolean> {
+        const startTime = Date.now();
+
+        try {
+            // Obtener bovino
+            const bovine = await Bovine.findByPk(bovineId, {
+                attributes: ['id', 'healthStatus', 'lastHealthCheck']
+            });
+
+            if (!bovine) {
+                throw new BovineNotFoundError(bovineId);
+            }
+
+            // Si nunca ha tenido chequeo
+            if (!bovine.lastHealthCheck) {
+                logger.debug(`Bovino ${bovineId} sin chequeo previo`, this.context);
+                return true;
+            }
+
+            // Calcular días desde último chequeo
+            const daysSinceLastCheck = Math.floor(
+                (Date.now() - bovine.lastHealthCheck.getTime()) / (1000 * 60 * 60 * 24)
+            );
+
+            // Obtener intervalo según estado de salud
+            const interval = CHECK_INTERVALS[bovine.healthStatus] || CHECK_INTERVALS[HealthStatus.HEALTHY];
+
+            const needsCheck = daysSinceLastCheck >= interval;
+
+            const duration = Date.now() - startTime;
+
+            logger.debug(`Verificación de necesidad de chequeo`, this.context, {
+                bovineId,
+                healthStatus: bovine.healthStatus,
+                daysSinceLastCheck,
+                interval,
+                needsCheck,
+                durationMs: duration
+            });
+
+            return needsCheck;
+
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            logger.error(`Error verificando necesidad de chequeo para bovino ${bovineId}`, this.context, {
+                bovineId,
+                durationMs: duration
+            }, ensureError(error));
+
+            if (error instanceof BovineError) throw error;
+            throw new BovineError(
+                `Error al verificar necesidad de chequeo para bovino ${bovineId}`,
+                'HEALTH_CHECK_ERROR',
+                500,
+                ensureError(error)
+            );
+        }
+    }
+
+    /**
+     * Programa el próximo chequeo de salud
+     * 
+     * @param bovineId - ID del bovino
+     * @param userId - ID del usuario que programa
+     * 
+     * ¿CÓMO FUNCIONA?
+     *   1. Calcula la fecha del próximo chequeo según estado
+     *   2. Crea un evento en el sistema de agenda
+     *   3. El evento disparará un recordatorio
+     */
+    async scheduleNextHealthCheck(bovineId: string, userId: string): Promise<void> {
+        const startTime = Date.now();
+
+        try {
+            // Obtener bovino
+            const bovine = await Bovine.findByPk(bovineId, {
+                attributes: ['id', 'earTag', 'healthStatus', 'ranchId']
+            });
+
+            if (!bovine) {
+                throw new BovineNotFoundError(bovineId);
+            }
+
+            // Calcular próxima fecha según estado
+            const interval = CHECK_INTERVALS[bovine.healthStatus] || CHECK_INTERVALS[HealthStatus.HEALTHY];
+            const nextCheckDate = new Date();
+            nextCheckDate.setDate(nextCheckDate.getDate() + interval);
+
+            // Determinar prioridad según estado
+            const priority = bovine.healthStatus === HealthStatus.SICK ||
+                bovine.healthStatus === HealthStatus.QUARANTINE
+                ? EventPriority.HIGH
+                : EventPriority.MEDIUM;
+
+            // Crear evento si eventService está disponible
+            if (this.eventService) {
+                await this.eventService.createEvent({
+                    bovineId,
+                    eventType: EventType.HEALTH_CHECK,
+                    title: `Chequeo de salud - ${bovine.earTag}`,
+                    description: `Chequeo programado automáticamente. Estado actual: ${bovine.healthStatus}`,
+                    scheduledDate: nextCheckDate,
+                    priority,
+                    createdBy: userId,
+                    requiresVeterinarian: true,
+                    expectedData: {
+                        type: 'SCHEDULED_HEALTH_CHECK',
+                        healthStatus: bovine.healthStatus,
+                        interval,
+                        automatic: true
+                    }
+                });
+            }
+
+            const duration = Date.now() - startTime;
+
+            logger.info(`Próximo chequeo programado para bovino ${bovineId}`, this.context, {
+                bovineId,
+                nextCheckDate,
+                interval,
+                healthStatus: bovine.healthStatus,
+                durationMs: duration
+            });
+
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            logger.error(`Error programando chequeo para bovino ${bovineId}`, this.context, {
+                bovineId,
+                durationMs: duration
+            }, ensureError(error));
+
+            if (error instanceof BovineError) throw error;
+            throw new BovineError(
+                `Error al programar chequeo para bovino ${bovineId}`,
+                'SCHEDULE_ERROR',
+                500,
+                ensureError(error)
+            );
+        }
+    }
+
+    /**
+     * Registra un chequeo de salud realizado
+     * 
+     * @param data - Datos del chequeo
+     * @param userId - ID del usuario que registra
+     * @returns El registro de salud creado
+     * 
+     * FLUJO:
+     *   1. Validar que el bovino existe
+     *   2. Crear registro en tabla Health
+     *   3. Actualizar último chequeo en Bovine
+     *   4. Si hay diagnóstico, actualizar estado de salud
+     *   5. Actualizar snapshot para mapas
+     *   6. Programar próximo chequeo
+     */
+    async recordHealthCheck(data: HealthCheckData, userId: string): Promise<Health> {
+        const transaction = await sequelize.transaction();
+        const startTime = Date.now();
+
+        try {
+            // Validar que el bovino existe
+            const bovine = await Bovine.findByPk(data.bovineId, {
+                transaction,
+                attributes: ['id', 'earTag', 'healthStatus', 'ranchId']
+            });
+
+            if (!bovine) {
+                throw new BovineNotFoundError(data.bovineId);
+            }
+
+            // Validar signos vitales si se proporcionaron
+            if (data.vitalSigns) {
+                this.validateVitalSigns(data.vitalSigns);
+            }
+
+            // Determinar nuevo estado de salud basado en el diagnóstico
+            const newHealthStatus = this.determineHealthStatus(data);
+
+            // Crear registro de salud
+            const healthRecord = await Health.create({
+                bovineId: data.bovineId,
+                recordType: 'ROUTINE_CHECKUP',
+                recordDate: data.checkDate,
+                veterinarianId: data.veterinarianId,
+                diagnosis: data.diagnosis ? {
+                    primaryDiagnosis: data.diagnosis,
+                    details: data.diagnosisDetails,
+                    status: 'CONFIRMED'
+                } : undefined,
+                treatment: data.treatment ? {
+                    description: data.treatment,
+                    details: data.treatmentDetails,
+                    status: 'PRESCRIBED'
+                } : undefined,
+                symptoms: data.symptoms,
+                vitalSigns: data.vitalSigns,
+                notes: data.notes,
+                createdBy: userId,
+                isActive: true
+            } as any, { transaction });
+
+            // Actualizar último chequeo y estado de salud en Bovine
+            await bovine.update({
+                lastHealthCheck: data.checkDate,
+                healthStatus: newHealthStatus
+            }, { transaction });
+
+            // Actualizar snapshot si cambió el estado de salud
+            if (newHealthStatus !== bovine.healthStatus) {
+                await this.geoService?.updateSnapshot(data.bovineId, {
+                    healthStatus: newHealthStatus,
+                    healthColor: HEALTH_COLORS[newHealthStatus],
+                    lastHealthCheck: data.checkDate,
+                    diagnosis: data.diagnosis,
+                    lastUpdate: new Date()
+                }, transaction);
+            }
+
+            // Programar próximo chequeo si hay fecha de seguimiento
+            if (data.followUpDate) {
+                await this.eventService?.createEvent({
+                    bovineId: data.bovineId,
+                    eventType: EventType.HEALTH_CHECK,
+                    title: `Chequeo de seguimiento - ${bovine.earTag}`,
+                    description: `Chequeo de seguimiento programado después de: ${data.diagnosis || 'consulta'}`,
+                    scheduledDate: data.followUpDate,
+                    priority: EventPriority.MEDIUM,
+                    createdBy: userId,
+                    requiresVeterinarian: true,
+                    expectedData: {
+                        type: 'SCHEDULED_HEALTH_CHECK',
+                        healthStatus: bovine.healthStatus,
+                        interval: 0,
+                        automatic: true,
+                        previousHealthRecordId: healthRecord.id
+                    }
+                }, transaction);
+            }
+
+            await transaction.commit();
+
+            const duration = Date.now() - startTime;
+
+            logger.info(`Chequeo de salud registrado para bovino ${data.bovineId}`, this.context, {
+                bovineId: data.bovineId,
+                healthRecordId: healthRecord.id,
+                previousStatus: bovine.healthStatus,
+                newStatus: newHealthStatus,
+                hasDiagnosis: !!data.diagnosis,
+                hasTreatment: !!data.treatment,
+                durationMs: duration
+            });
+
+            return healthRecord;
+
+        } catch (error) {
+            await transaction.rollback();
+            const duration = Date.now() - startTime;
+            logger.error(`Error registrando chequeo para bovino ${data.bovineId}`, this.context, {
+                bovineId: data.bovineId,
+                durationMs: duration
+            }, ensureError(error));
+
+            if (error instanceof BovineError) throw error;
+            throw new BovineError(
+                `Error al registrar chequeo para bovino ${data.bovineId}`,
+                'RECORD_ERROR',
+                500,
+                ensureError(error)
+            );
+        }
+    }
+
+    /**
+     * Actualiza el estado de salud de un bovino
+     * 
+     * @param bovineId - ID del bovino
+     * @param newStatus - Nuevo estado de salud
+     * @param userId - ID del usuario
+     * @param reason - Razón del cambio (opcional)
+     */
+    async updateHealthStatus(
+        bovineId: string,
+        newStatus: HealthStatus,
+        userId: string,
+        reason?: string
+    ): Promise<void> {
+        const transaction = await sequelize.transaction();
+        const startTime = Date.now();
+
+        try {
+            const bovine = await Bovine.findByPk(bovineId, {
+                transaction,
+                attributes: ['id', 'healthStatus', 'ranchId']
+            });
+
+            if (!bovine) {
+                throw new BovineNotFoundError(bovineId);
+            }
+
+            const previousStatus = bovine.healthStatus;
+
+            // No hacer nada si es el mismo estado
+            if (previousStatus === newStatus) {
+                logger.debug(`Estado de salud ya es ${newStatus} para bovino ${bovineId}`, this.context);
+                return;
+            }
+
+            // Actualizar bovino
+            await bovine.update({ healthStatus: newStatus }, { transaction });
+
+            // Actualizar snapshot
+            await this.geoService?.updateSnapshot(bovineId, {
+                healthStatus: newStatus,
+                healthColor: HEALTH_COLORS[newStatus],
+                lastUpdate: new Date()
+            }, transaction);
+
+            // Crear evento de cambio de salud si eventService está disponible
+            if (this.eventService) {
+                await this.eventService.createEventFromAction('HEALTH_STATUS_CHANGED', {
+                    bovineId,
+                    userId,
+                    metadata: {
+                        from: previousStatus,
+                        to: newStatus,
+                        reason
+                    }
+                }, transaction);
+            }
+
+            // Reprogramar próximo chequeo según nuevo estado
+            await this.scheduleNextHealthCheck(bovineId, userId);
+
+            await transaction.commit();
+
+            const duration = Date.now() - startTime;
+
+            logger.info(`Estado de salud actualizado para bovino ${bovineId}`, this.context, {
+                bovineId,
+                from: previousStatus,
+                to: newStatus,
+                reason,
+                durationMs: duration
+            });
+
+        } catch (error) {
+            await transaction.rollback();
+            const duration = Date.now() - startTime;
+            logger.error(`Error actualizando estado de salud para bovino ${bovineId}`, this.context, {
+                bovineId,
+                newStatus,
+                durationMs: duration
+            }, ensureError(error));
+
+            if (error instanceof BovineError) throw error;
+            throw new BovineError(
+                `Error al actualizar estado de salud para bovino ${bovineId}`,
+                'STATUS_UPDATE_ERROR',
+                500,
+                ensureError(error)
+            );
+        }
+    }
+
+    /**
+     * Maneja un cambio de estado de salud (método público para ser llamado por otros servicios)
+     */
+    async handleHealthStatusChange(
+        bovine: Bovine,
+        previousStatus: HealthStatus,
+        newStatus: HealthStatus,
+        userId: string,
+        transaction?: Transaction
+    ): Promise<void> {
+        try {
+            // Ya se maneja en updateHealthStatus, pero este método existe para
+            // mantener la compatibilidad con otros servicios
+            await this.updateHealthStatus(bovine.id, newStatus, userId,
+                `Cambio automático desde ${previousStatus}`);
+        } catch (error) {
+            logger.error(`Error manejando cambio de estado de salud`, this.context, {
+                bovineId: bovine.id,
+                previousStatus,
+                newStatus
+            }, ensureError(error));
+            throw error;
+        }
+    }
+
+    // ==========================================================================
+    // MÉTODOS DE CONSULTA
+    // ==========================================================================
+
+    /**
+     * Obtiene el historial de salud de un bovino
+     * 
+     * @param bovineId - ID del bovino
+     * @param filters - Filtros opcionales
+     * @returns Lista de registros de salud
+     */
+    async getHealthHistory(
+        bovineId: string,
+        filters: HealthHistoryFilters = {}
+    ): Promise<Health[]> {
+        const startTime = Date.now();
+
+        try {
+            const whereClause: any = { bovineId };
+
+            if (filters.startDate || filters.endDate) {
+                whereClause.recordDate = {};
+                if (filters.startDate) whereClause.recordDate[Op.gte] = filters.startDate;
+                if (filters.endDate) whereClause.recordDate[Op.lte] = filters.endDate;
+            }
+
+            if (filters.veterinarianId) {
+                whereClause.veterinarianId = filters.veterinarianId;
+            }
+
+            const records = await Health.findAll({
+                where: whereClause,
+                order: [['recordDate', 'DESC']],
+                limit: filters.limit || 50,
+                offset: filters.offset || 0
+            });
+
+            const duration = Date.now() - startTime;
+
+            logger.debug(`Historial de salud obtenido para bovino ${bovineId}`, this.context, {
+                bovineId,
+                recordCount: records.length,
+                durationMs: duration
+            });
+
+            return records;
+
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            logger.error(`Error obteniendo historial de salud para bovino ${bovineId}`, this.context, {
+                bovineId,
+                durationMs: duration
+            }, ensureError(error));
+
+            throw new BovineError(
+                `Error al obtener historial de salud para bovino ${bovineId}`,
+                'HISTORY_ERROR',
+                500,
+                ensureError(error)
+            );
+        }
+    }
+
+    /**
+     * Obtiene estadísticas de salud del hato
+     * 
+     * @param ranchId - ID del rancho
+     * @returns Estadísticas agregadas
+     */
+    async getHerdHealthStats(ranchId: string): Promise<HerdHealthStats> {
+        const startTime = Date.now();
+
+        try {
+            // Consulta 1: Conteo por estado de salud
+            const statusCounts = await Bovine.findAll({
+                where: { ranchId, isActive: true },
+                attributes: [
+                    'healthStatus',
+                    [sequelize.fn('COUNT', sequelize.col('healthStatus')), 'count']
+                ],
+                group: ['healthStatus']
+            });
+
+            // Inicializar contadores
+            const byStatus = {
+                [HealthStatus.HEALTHY]: 0,
+                [HealthStatus.SICK]: 0,
+                [HealthStatus.RECOVERING]: 0,
+                [HealthStatus.QUARANTINE]: 0,
+                [HealthStatus.DECEASED]: 0,
+                [HealthStatus.UNKNOWN]: 0
+            };
+
+            let totalBovines = 0;
+
+            // Procesar resultados
+            statusCounts.forEach((item: any) => {
+                const status = item.healthStatus as HealthStatus;
+                const count = parseInt(item.getDataValue('count'));
+                if (status in byStatus) {
+                    byStatus[status] = count;
+                    totalBovines += count;
+                }
+            });
+
+            // Consulta 2: Chequeos recientes (últimos 7 días)
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+            const recentChecks = await Health.count({
+                where: {
+                    recordDate: { [Op.gte]: sevenDaysAgo }
+                },
+                include: [{
+                    model: Bovine,
+                    where: { ranchId }
+                }]
+            });
+
+            // Consulta 3: Próximos chequeos (próximos 7 días)
+            const sevenDaysFromNow = new Date();
+            sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+
+            const upcomingChecks = await Event.count({
+                where: {
+                    eventType: EventType.HEALTH_CHECK,
+                    scheduledDate: {
+                        [Op.between]: [new Date(), sevenDaysFromNow]
+                    },
+                    status: EventStatus.SCHEDULED
+                },
+                include: [{
+                    model: Bovine,
+                    where: { ranchId }
+                }]
+            });
+
+            // Consulta 4: Diagnósticos más comunes (últimos 30 días)
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            const commonDiagnosisRaw = await Health.findAll({
+                where: {
+                    recordDate: { [Op.gte]: thirtyDaysAgo }
+                },
+                attributes: [
+                    [sequelize.literal("diagnosis->>'primaryDiagnosis'"), 'diagnosis'],
+                    [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+                ],
+                include: [{
+                    model: Bovine,
+                    where: { ranchId }
+                }],
+                group: [sequelize.literal("diagnosis->>'primaryDiagnosis'") as any, "diagnosis"],
+                order: [[sequelize.literal('count'), 'DESC']],
+                limit: 5
+            });
+
+            const commonDiagnosis = commonDiagnosisRaw
+                .filter((item: any) => item.getDataValue('diagnosis'))
+                .map((item: any) => ({
+                    diagnosis: item.getDataValue('diagnosis'),
+                    count: parseInt(item.getDataValue('count'))
+                }));
+
+            const duration = Date.now() - startTime;
+
+            logger.info(`Estadísticas de salud obtenidas para rancho ${ranchId}`, this.context, {
+                ranchId,
+                totalBovines,
+                durationMs: duration
+            });
+
+            return {
+                totalBovines,
+                byStatus,
+                healthyPercentage: totalBovines ? (byStatus[HealthStatus.HEALTHY] / totalBovines) * 100 : 0,
+                sickPercentage: totalBovines ? ((byStatus[HealthStatus.SICK] + byStatus[HealthStatus.QUARANTINE]) / totalBovines) * 100 : 0,
+                criticalCount: byStatus[HealthStatus.QUARANTINE],
+                recentChecks,
+                upcomingChecks,
+                commonDiagnosis
+            };
+
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            logger.error(`Error obteniendo estadísticas de salud para rancho ${ranchId}`, this.context, {
+                ranchId,
+                durationMs: duration
+            }, ensureError(error));
+
+            throw new BovineError(
+                `Error al obtener estadísticas de salud para rancho ${ranchId}`,
+                'STATS_ERROR',
+                500,
+                ensureError(error)
+            );
+        }
+    }
+
+    /**
+     * Obtiene línea de tiempo de salud para gráficos
+     * 
+     * @param bovineId - ID del bovino
+     * @param days - Número de días hacia atrás
+     * @returns Puntos para gráfico de línea de tiempo
+     */
+    async getHealthTimeline(bovineId: string, days: number = 30): Promise<HealthTimelinePoint[]> {
+        const startTime = Date.now();
+
+        try {
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+
+            // Obtener registros de salud
+            const healthRecords = await Health.findAll({
+                where: {
+                    bovineId,
+                    recordDate: { [Op.gte]: startDate }
+                },
+                order: [['recordDate', 'ASC']]
+            });
+
+            // Obtener cambios de estado de eventos (si hay)
+            const statusChanges = await Event.findAll({
+                where: {
+                    bovineId,
+                    eventType: EventType.HEALTH_CHECK,
+                    createdAt: { [Op.gte]: startDate },
+                    [Op.and]: literal("metadata->>'event' = 'HEALTH_STATUS_CHANGED'")
+                },
+                order: [['createdAt', 'ASC']]
+            });
+
+            // Combinar y ordenar
+            const timeline: HealthTimelinePoint[] = [
+                ...healthRecords.map(record => ({
+                    date: record.recordDate,
+                    healthStatus: record.overallHealthStatus || HealthStatus.UNKNOWN,
+                    eventType: 'CHECK' as const,
+                    description: record.diagnosis?.primaryDiagnosis || 'Chequeo rutinario'
+                })),
+                ...statusChanges.map(event => ({
+                    date: event.createdAt,
+                    healthStatus: (event.metadata?.to as HealthStatus) || HealthStatus.UNKNOWN,
+                    eventType: 'DIAGNOSIS' as const,
+                    description: `Cambio de estado: ${event.metadata?.from} → ${event.metadata?.to}`
+                }))
+            ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+            const duration = Date.now() - startTime;
+
+            logger.debug(`Línea de tiempo obtenida para bovino ${bovineId}`, this.context, {
+                bovineId,
+                points: timeline.length,
+                durationMs: duration
+            });
+
+            return timeline;
+
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            logger.error(`Error obteniendo línea de tiempo para bovino ${bovineId}`, this.context, {
+                bovineId,
+                durationMs: duration
+            }, ensureError(error));
+
+            throw new BovineError(
+                `Error al obtener línea de tiempo para bovino ${bovineId}`,
+                'TIMELINE_ERROR',
+                500,
+                ensureError(error)
+            );
+        }
+    }
+
+    // ==========================================================================
+    // MÉTODOS DE VALIDACIÓN
+    // ==========================================================================
+
+    /**
+     * Valida signos vitales
+     */
+    private validateVitalSigns(vitalSigns: any): void {
+        if (vitalSigns.temperature !== undefined) {
+            const { MIN, MAX } = VITAL_SIGNS_THRESHOLDS.TEMPERATURE;
+            if (vitalSigns.temperature < MIN || vitalSigns.temperature > MAX) {
+                throw new BovineValidationError(
+                    `Temperatura fuera de rango normal (${MIN}°C - ${MAX}°C): ${vitalSigns.temperature}°C`
+                );
+            }
+        }
+
+        if (vitalSigns.heartRate !== undefined) {
+            const { MIN, MAX } = VITAL_SIGNS_THRESHOLDS.HEART_RATE;
+            if (vitalSigns.heartRate < MIN || vitalSigns.heartRate > MAX) {
+                throw new BovineValidationError(
+                    `Frecuencia cardíaca fuera de rango normal (${MIN}-${MAX} lpm): ${vitalSigns.heartRate} lpm`
+                );
+            }
+        }
+
+        if (vitalSigns.respiratoryRate !== undefined) {
+            const { MIN, MAX } = VITAL_SIGNS_THRESHOLDS.RESPIRATORY_RATE;
+            if (vitalSigns.respiratoryRate < MIN || vitalSigns.respiratoryRate > MAX) {
+                throw new BovineValidationError(
+                    `Frecuencia respiratoria fuera de rango normal (${MIN}-${MAX} rpm): ${vitalSigns.respiratoryRate} rpm`
+                );
+            }
+        }
+    }
+
+    /**
+     * Determina el estado de salud basado en el diagnóstico
+     */
+    private determineHealthStatus(data: HealthCheckData): HealthStatus {
+        // Si hay diagnóstico de enfermedad grave
+        if (data.diagnosis) {
+            const diagnosisLower = data.diagnosis.toLowerCase();
+
+            // Palabras clave para estados críticos
+            const criticalKeywords = ['critical', 'grave', 'emergencia', 'urgencia'];
+            if (criticalKeywords.some(k => diagnosisLower.includes(k))) {
+                return HealthStatus.SICK;
+            }
+
+            // Palabras clave para cuarentena
+            const quarantineKeywords = ['contagioso', 'infeccioso', 'cuarentena', 'aislamiento'];
+            if (quarantineKeywords.some(k => diagnosisLower.includes(k))) {
+                return HealthStatus.QUARANTINE;
+            }
+
+            // Palabras clave para enfermedad
+            const sickKeywords = ['enfermo', 'infección', 'enfermedad', 'diagnóstico'];
+            if (sickKeywords.some(k => diagnosisLower.includes(k))) {
+                return HealthStatus.SICK;
+            }
+        }
+
+        // Si hay tratamiento pero no diagnóstico claro
+        if (data.treatment && !data.diagnosis) {
+            return HealthStatus.RECOVERING;
+        }
+
+        // Por defecto, si todo está bien
+        return HealthStatus.HEALTHY;
+    }
+
+    // ==========================================================================
+    // MÉTODOS DE UTILIDAD
+    // ==========================================================================
+
+    /**
+     * Formatea un registro de salud para respuesta
+     */
+    formatHealthRecord(record: Health): HealthCheckResult {
+        return {
+            id: record.id,
+            bovineId: record.bovineId,
+            checkDate: record.recordDate,
+            veterinarianId: record.veterinarianId || '',
+            veterinarianName: record.veterinarianName || 'Veterinario no especificado',
+            veterinarianLicense: record.veterinarianLicense,
+            diagnosis: record.diagnosis?.primaryDiagnosis,
+            treatment: record.treatment?.treatmentPlan,
+            healthStatus: record.overallHealthStatus || HealthStatus.UNKNOWN,
+            followUpDate: record.followUpDate,
+            createdAt: record.createdAt
+        };
+    }
+
+    /**
+     * Calcula días desde el último chequeo
+     */
+    getDaysSinceLastCheck(bovine: Bovine): number {
+        if (!bovine.lastHealthCheck) return -1;
+        return Math.floor(
+            (Date.now() - bovine.lastHealthCheck.getTime()) / (1000 * 60 * 60 * 24)
+        );
+    }
+
+    /**
+     * Obtiene etiqueta de estado de salud en español
+     */
+    getHealthStatusLabel(status: HealthStatus): string {
+        return HEALTH_LABELS[status] || status;
+    }
+}
+
+// ============================================================================
+// EXPORTAR INSTANCIA ÚNICA
+// ============================================================================
+
+export const bovineHealthService = new BovineHealthService();

@@ -779,7 +779,6 @@ Production.init(
     productionCode: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      unique: true,
       validate: {
         notEmpty: true,
         len: [3, 50]
@@ -789,7 +788,6 @@ Production.init(
     productionType: {
       type: DataTypes.ENUM(...Object.values(ProductionType)),
       allowNull: false,
-      comment: 'Tipo de producción'
     },
     bovineId: {
       type: DataTypes.UUID,
@@ -827,12 +825,10 @@ Production.init(
       type: DataTypes.ENUM(...Object.values(ProductionStatus)),
       allowNull: false,
       defaultValue: ProductionStatus.PLANNED,
-      comment: 'Estado de la producción'
     },
     qualityGrade: {
       type: DataTypes.ENUM(...Object.values(QualityGrade)),
       allowNull: true,
-      comment: 'Grado de calidad del producto'
     },
     location: {
       type: DataTypes.JSONB,
@@ -877,7 +873,6 @@ Production.init(
     productionShift: {
       type: DataTypes.ENUM('MORNING', 'AFTERNOON', 'NIGHT'),
       allowNull: true,
-      comment: 'Turno de producción'
     },
     weather: {
       type: DataTypes.JSONB,
@@ -915,7 +910,6 @@ Production.init(
     traceabilityCode: {
       type: DataTypes.STRING(100),
       allowNull: true,
-      unique: true,
       comment: 'Código de trazabilidad único'
     },
     storageInfo: {
@@ -1049,7 +1043,7 @@ Production.init(
     indexes: [
       // Índices para optimizar consultas
       {
-        unique: true,
+       
         fields: ['production_code']
       },
       {
