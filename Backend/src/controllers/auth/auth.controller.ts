@@ -400,6 +400,30 @@ export class AuthController {
             }
         }
     }
+
+    /**
+ * GET /api/auth/reset-password?token=xxx
+ *
+ * Este endpoint existe SOLO para el caso en que alguien configure
+ * el link del email apuntando a la API en lugar del frontend.
+ * Redirige inmediatamente al frontend con el token intacto.
+ *
+ * ¿Por qué no simplemente corregir el link del email y listo?
+ * Doble protección: si en algún momento el link del email cambia
+ * o se configura mal, el usuario no ve un 404 sino que llega
+ * al lugar correcto igualmente.
+ */
+    async redirectResetPassword(req: Request, res: Response): Promise<void> {
+        const { token } = req.query;
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+        if (!token || typeof token !== 'string') {
+            return res.redirect(`${frontendUrl}/auth/reset-password?error=token-missing`) as any;
+        }
+
+        // Redirigir al frontend con el token — el frontend mostrará el formulario
+        return res.redirect(`${frontendUrl}/auth/reset-password?token=${token}`) as any;
+    }
 }
 
 export const authController = new AuthController();

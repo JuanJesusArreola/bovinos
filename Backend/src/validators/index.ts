@@ -19,3 +19,21 @@ export * from './bovine-tracking.validators';
 
 // Ubicaciones lógicas
 export * from './bovine-location.validators';
+
+// Finanzas
+export * from './finance.validators';
+
+// Reproducción
+export * from './reproduction.validators';
+
+// Producción (leche, carne, etc.)
+export * from './production.validators';
+
+// Inventario y movimientos de stock
+export * from './inventory.validators';
+
+// Ranchos
+export * from './ranch.validators';
+
+// Administración (creación de usuarios por admin)
+export * from './admin.validators';

@@ -1,5 +1,4 @@
 {{! templates/email/profile-updated.hbs }}
-  {{#*inline "content"}}
     <div class="profile-updated-container">
       <h1 style="color: #3b82f6;">📝 Perfil Actualizado</h1>
       <p>Hola <strong>{{firstName}}</strong>,</p>
@@ -20,4 +19,3 @@
       
       {{> button text="Ver mi perfil" url=(absoluteUrl "/profile") }}
     </div>
-  {{/inline}}

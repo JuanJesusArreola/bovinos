@@ -1,5 +1,4 @@
 {{! templates/email/weekly-report.hbs }}
-  {{#*inline "content"}}
     <div class="weekly-report-container">
       <h1 style="color: #059669;">📊 Reporte Semanal</h1>
       <p>Estimado/a <strong>{{ownerName}}</strong>,</p>
@@ -27,4 +26,3 @@
       
       {{> button text="Ver reporte completo" url=(absoluteUrl "/reports/weekly") }}
     </div>
-  {{/inline}}

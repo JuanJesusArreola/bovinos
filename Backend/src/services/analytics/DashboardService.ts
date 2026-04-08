@@ -19,7 +19,11 @@ import {
 import Bovine from '../../models/Bovine';
 import Production from '../../models/Production';
 import { ProductionType } from '../../models/Production';
-import User, { UserStatus } from '../../models/User';
+import User, { UserRole, UserStatus } from '../../models/User';
+import { SecurityEvent, EventSeverity } from '../../models/SecurityEvent';
+import Ranch from '../../models/Ranch';
+import { reproductionService } from '../../container';
+import { ServiceStatus, ReproductionType } from '../../models/Reproduction';
 
 // ============================================================================
 // INTERFACES PÚBLICAS
@@ -131,6 +135,139 @@ export interface DashboardFilters {
     startDate?: Date;
     endDate?: Date;
     compareWithPrevious?: boolean;
+}
+
+// ============================================================================
+// INTERFACES PARA DASHBOARD POR ROL
+// ============================================================================
+
+/**
+ * Resumen de salud reducido para roles con visibilidad limitada
+ * (MANAGER, WORKER, VIEWER).
+ * Solo conteos por estado — sin eventos detallados ni chequeos.
+ */
+export interface HealthSummaryLight {
+    totalBovines: number;
+    healthy: number;
+    sick: number;
+    recovering: number;
+    quarantine: number;
+    criticalCount: number;
+}
+
+/**
+ * Resumen de producción reducido para roles con visibilidad limitada
+ * (VET, WORKER, VIEWER).
+ * Solo totales del período — sin tendencias, sin comparación, sin reproducción.
+ */
+export interface ProductionSummaryLight {
+    currentPeriod: { startDate: Date; endDate: Date };
+    milkTotal: number;
+    meatTotal: number;
+}
+
+/**
+ * Resumen financiero parcial para roles con visibilidad READ
+ * (RANCH_MANAGER, MANAGER).
+ * Solo totales — sin desglose por categoría, sin ROI, sin margen.
+ */
+export interface FinancialSummaryLight {
+    currentPeriod: { startDate: Date; endDate: Date };
+    income: number;
+    expenses: number;
+    net: number;
+}
+
+/**
+ * Información de usuario para la sección de gestión
+ */
+export interface UserSummaryItem {
+    id: string;
+    email: string;
+    fullName: string;
+    role: string;
+    status: string;
+    isActive: boolean;
+    emailVerified: boolean;
+    lastLoginAt?: Date;
+    createdAt: Date;
+}
+
+/**
+ * Sección de usuarios agrupados por rancho (SUPER_ADMIN)
+ */
+export interface UsersGroupedByRanch {
+    ranchId: string;
+    ranchName: string;
+    totalUsers: number;
+    active: number;
+    pending: number;
+    inactive: number;
+    byRole: Record<string, number>;
+    users: UserSummaryItem[];
+}
+
+/**
+ * Sección de usuarios del rancho del OWNER
+ */
+export interface UsersForOwner {
+    ranchId: string;
+    ranchName: string;
+    totalUsers: number;
+    active: number;
+    pending: number;
+    inactive: number;
+    byRole: Record<string, number>;
+    users: UserSummaryItem[];
+    lastRegistered?: UserSummaryItem;
+}
+
+/**
+ * Métricas de sistema exclusivas del SUPER_ADMIN
+ */
+export interface SystemMetrics {
+    totalUsers: number;
+    totalRanches: number;
+    usersActive: number;
+    usersPendingVerification: number;
+    usersInactive: number;
+    recentSecurityEvents: Array<{
+        id: string;
+        eventType: string;
+        severity: string;
+        description: string;
+        createdAt: Date;
+    }>;
+    securitySummary: {
+        criticalLast7Days: number;
+        failedLoginsLast24h: number;
+        lockedAccounts: number;
+    };
+}
+
+/**
+ * Dashboard filtrado por rol.
+ *
+ * Cada campo es opcional porque la presencia depende del rol:
+ * - health / healthLight: mutuamente excluyentes
+ * - production / productionLight: mutuamente excluyentes
+ * - financial / financialLight: mutuamente excluyentes, o null
+ * - users: solo SUPER_ADMIN y OWNER
+ * - system: solo SUPER_ADMIN
+ */
+export interface RoleDashboard {
+    role: UserRole;
+    health?: HealthDashboard;
+    healthLight?: HealthSummaryLight;
+    production?: ProductionDashboard;
+    productionLight?: ProductionSummaryLight;
+    financial?: FinancialDashboard;
+    financialLight?: FinancialSummaryLight;
+    summary: DashboardSummary;
+    usersGrouped?: UsersGroupedByRanch[];
+    usersForOwner?: UsersForOwner;
+    system?: SystemMetrics;
+    generatedAt: Date;
 }
 
 // ============================================================================
@@ -526,6 +663,15 @@ export class DashboardService {
     /**
      * Obtiene métricas de reproducción
      */
+    /**
+     * Obtiene métricas de reproducción reales desde ReproductionService.
+     *
+     * Consultas que ejecuta:
+     * 1. conceptionRate: inseminaciones vs preñeces confirmadas en el período
+     * 2. birthsLastMonth: eventos con status CALVED en los últimos 30 días
+     * 3. expectedBirths: preñeces confirmadas sin parto (todavía gestando)
+     * 4. calvingRate: partos / total vacas activas del rancho
+     */
     private async getReproductionMetrics(
         ranchId: string,
         startDate: Date,
@@ -536,7 +682,6 @@ export class DashboardService {
         birthsLastMonth: number;
         expectedBirths: number;
     }> {
-        // Valores por defecto
         const defaults = {
             calvingRate: 0,
             conceptionRate: 0,
@@ -545,11 +690,74 @@ export class DashboardService {
         };
 
         try {
-            // TODO: Implementar cuando tengamos el servicio de reproducción
-            // Por ahora retornamos valores por defecto
-            return defaults;
+            // ── 1. Tasa de concepción ───────────────────────────────
+            // Usa el método existente de ReproductionService que calcula
+            // inseminaciones vs preñeces confirmadas en el rango de fechas.
+            const conceptionRate = await reproductionService.getConceptionRate(
+                ranchId, startDate, endDate
+            );
+
+            // ── 2. Nacimientos del último mes ───────────────────────
+            // Buscar eventos con status CALVED en los últimos 30 días.
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            const recentEvents = await reproductionService.getEventsByRanch(ranchId, {
+                startDate: thirtyDaysAgo,
+                endDate: new Date(),
+                limit: 10000
+            });
+            const birthsLastMonth = recentEvents.rows.filter(
+                e => e.status === ServiceStatus.CALVED
+            ).length;
+
+            // ── 3. Partos esperados ─────────────────────────────────
+            // Preñeces confirmadas que aún no han parido.
+            const allActiveEvents = await reproductionService.getEventsByRanch(ranchId, {
+                limit: 10000
+            });
+            const expectedBirths = allActiveEvents.rows.filter(
+                e => e.status === ServiceStatus.CONFIRMED_PREGNANT
+            ).length;
+
+            // ── 4. Tasa de partos ───────────────────────────────────
+            // Partos en el período / total de vacas activas del rancho.
+            const birthsInPeriod = recentEvents.rows.filter(
+                e => e.status === ServiceStatus.CALVED
+            ).length;
+
+            const cowCount = await Bovine.count({
+                where: {
+                    ranchId,
+                    isActive: true,
+                    cattleType: 'COW'
+                }
+            });
+
+            const calvingRate = cowCount > 0
+                ? (birthsInPeriod / cowCount) * 100
+                : 0;
+
+            logger.debug('Métricas de reproducción calculadas', this.context, {
+                ranchId,
+                conceptionRate,
+                birthsLastMonth,
+                expectedBirths,
+                calvingRate,
+                cowCount
+            });
+
+            return {
+                calvingRate: Math.round(calvingRate * 100) / 100,
+                conceptionRate: Math.round(conceptionRate * 100) / 100,
+                birthsLastMonth,
+                expectedBirths
+            };
 
         } catch (error) {
+            logger.error('Error calculando métricas de reproducción', this.context, {
+                ranchId, startDate, endDate
+            }, ensureError(error));
             return defaults;
         }
     }
@@ -708,6 +916,535 @@ export class DashboardService {
             'OTHER_EXPENSES': 'Otros Gastos'
         };
         return labels[category] || category;
+    }
+
+    // ==========================================================================
+    // DASHBOARD POR ROL
+    // ==========================================================================
+
+    /**
+     * Obtiene el dashboard filtrado según el rol del usuario.
+     *
+     * Estrategia: ejecuta en paralelo SOLO las queries que el rol necesita.
+     * Roles con `finance: NONE` nunca disparan getFinancialDashboard(),
+     * ahorrando queries a la BD.
+     *
+     * @param filters - Filtros estándar (ranchId, period, etc.)
+     * @param user    - Usuario autenticado (se lee role, id, ranchAccess)
+     */
+    async getRoleDashboard(
+        filters: DashboardFilters,
+        user: { id: string; role: UserRole; ranchAccess?: Array<{ ranchId: string; ranchName: string; isActive: boolean }> }
+    ): Promise<RoleDashboard> {
+        const startTime = Date.now();
+        const { role } = user;
+
+        try {
+            logger.info('Obteniendo dashboard por rol', this.context, {
+                ranchId: filters.ranchId,
+                role,
+                userId: user.id
+            });
+
+            const result: RoleDashboard = {
+                role,
+                summary: {
+                    totalBovines: 0,
+                    activeAlerts: 0,
+                    pendingTasks: 0,
+                    unreadNotifications: 0,
+                    criticalHealthIssues: 0,
+                    lowStockItems: 0
+                },
+                generatedAt: new Date()
+            };
+
+            // ── Determinar qué secciones necesita este rol ──────────────
+            const needsFullHealth = [
+                UserRole.SUPER_ADMIN, UserRole.OWNER,
+                UserRole.RANCH_MANAGER, UserRole.VETERINARIAN
+            ].includes(role);
+
+            const needsFullProduction = [
+                UserRole.SUPER_ADMIN, UserRole.OWNER,
+                UserRole.RANCH_MANAGER, UserRole.MANAGER
+            ].includes(role);
+
+            const needsFullFinancial = [
+                UserRole.SUPER_ADMIN, UserRole.OWNER
+            ].includes(role);
+
+            const needsLightFinancial = [
+                UserRole.RANCH_MANAGER, UserRole.MANAGER
+            ].includes(role);
+
+            const needsUsers = [
+                UserRole.SUPER_ADMIN, UserRole.OWNER
+            ].includes(role);
+
+            const needsSystem = role === UserRole.SUPER_ADMIN;
+
+            // ── Ejecutar queries en paralelo según necesidad ────────────
+            const promises: Promise<any>[] = [];
+            const promiseKeys: string[] = [];
+
+            // Health: siempre se consulta (todos los roles ven al menos un resumen)
+            promises.push(this.getHealthDashboard(filters));
+            promiseKeys.push('health');
+
+            // Production: completo o light
+            if (needsFullProduction) {
+                promises.push(this.getProductionDashboard(filters));
+                promiseKeys.push('production');
+            } else {
+                promises.push(this.getProductionLight(filters));
+                promiseKeys.push('productionLight');
+            }
+
+            // Financial: completo, light, o nada
+            if (needsFullFinancial) {
+                promises.push(this.getFinancialDashboard(filters));
+                promiseKeys.push('financial');
+            } else if (needsLightFinancial) {
+                promises.push(this.getFinancialLight(filters));
+                promiseKeys.push('financialLight');
+            }
+
+            // Users: SUPER_ADMIN o OWNER
+            if (needsUsers) {
+                if (role === UserRole.SUPER_ADMIN) {
+                    promises.push(this.getUsersGroupedByRanch());
+                    promiseKeys.push('usersGrouped');
+                } else {
+                    // OWNER: usuarios de su(s) rancho(s)
+                    const ownerRanchIds = user.ranchAccess
+                        ?.filter(a => a.isActive)
+                        .map(a => a.ranchId) || [filters.ranchId];
+                    promises.push(this.getUsersForOwner(ownerRanchIds));
+                    promiseKeys.push('usersForOwner');
+                }
+            }
+
+            // System: solo SUPER_ADMIN
+            if (needsSystem) {
+                promises.push(this.getSystemMetrics());
+                promiseKeys.push('system');
+            }
+
+            // ── Esperar todas las queries ────────────────────────────────
+            const results = await Promise.all(promises);
+
+            // ── Mapear resultados a la estructura del dashboard ──────────
+            for (let i = 0; i < promiseKeys.length; i++) {
+                const key = promiseKeys[i];
+                const data = results[i];
+
+                switch (key) {
+                    case 'health':
+                        if (needsFullHealth) {
+                            result.health = data as HealthDashboard;
+                        } else {
+                            // Roles con health limitado: extraer solo conteos
+                            const full = data as HealthDashboard;
+                            result.healthLight = {
+                                totalBovines: full.totalBovines,
+                                healthy: full.byStatus.HEALTHY,
+                                sick: full.byStatus.SICK,
+                                recovering: full.byStatus.RECOVERING,
+                                quarantine: full.byStatus.QUARANTINE,
+                                criticalCount: full.criticalCount
+                            };
+                        }
+                        break;
+
+                    case 'production':
+                        result.production = data as ProductionDashboard;
+                        break;
+
+                    case 'productionLight':
+                        result.productionLight = data as ProductionSummaryLight;
+                        break;
+
+                    case 'financial':
+                        result.financial = data as FinancialDashboard;
+                        break;
+
+                    case 'financialLight':
+                        result.financialLight = data as FinancialSummaryLight;
+                        break;
+
+                    case 'usersGrouped':
+                        result.usersGrouped = data as UsersGroupedByRanch[];
+                        break;
+
+                    case 'usersForOwner':
+                        result.usersForOwner = data as UsersForOwner;
+                        break;
+
+                    case 'system':
+                        result.system = data as SystemMetrics;
+                        break;
+                }
+            }
+
+            // ── Calcular summary adaptado al rol ────────────────────────
+            const healthData = result.health || null;
+            const healthLightData = result.healthLight || null;
+
+            result.summary = {
+                totalBovines: healthData?.totalBovines ?? healthLightData?.totalBovines ?? 0,
+                activeAlerts: healthData
+                    ? (healthData.byStatus.SICK + healthData.byStatus.QUARANTINE)
+                    : (healthLightData ? healthLightData.sick + healthLightData.quarantine : 0),
+                pendingTasks: healthData
+                    ? (healthData.upcomingHealthChecks + healthData.overdueHealthChecks)
+                    : 0,
+                unreadNotifications: 0,
+                criticalHealthIssues: healthData?.criticalCount ?? healthLightData?.criticalCount ?? 0,
+                lowStockItems: 0
+            };
+
+            const duration = Date.now() - startTime;
+
+            logger.info('Dashboard por rol generado', this.context, {
+                role,
+                userId: user.id,
+                sections: promiseKeys,
+                durationMs: duration
+            });
+
+            return result;
+
+        } catch (error) {
+            logger.error('Error obteniendo dashboard por rol', this.context, {
+                filters, role, userId: user.id
+            }, ensureError(error));
+            throw error;
+        }
+    }
+
+    // ==========================================================================
+    // MÉTODOS AUXILIARES PARA DASHBOARD POR ROL
+    // ==========================================================================
+
+    /**
+     * Producción resumida: solo totales de leche y carne del período.
+     * Para VET, WORKER, VIEWER.
+     */
+    private async getProductionLight(filters: DashboardFilters): Promise<ProductionSummaryLight> {
+        try {
+            const { ranchId, period = 'month' } = filters;
+            const { startDate, endDate } = this.getPeriodDates(period, filters.startDate, filters.endDate);
+
+            const currentProduction = await Production.findAll({
+                where: {
+                    [Op.and]: [
+                        literal(`bovine_id IN (SELECT id FROM bovines WHERE ranch_id = '${ranchId}')`),
+                        { productionDate: { [Op.between]: [startDate, endDate] } }
+                    ]
+                }
+            });
+
+            const milkTotal = currentProduction
+                .filter(p => p.productionType === ProductionType.MILK)
+                .reduce((sum, p) => sum + p.quantity, 0);
+
+            const meatTotal = currentProduction
+                .filter(p => p.productionType === ProductionType.MEAT)
+                .reduce((sum, p) => sum + p.quantity, 0);
+
+            return {
+                currentPeriod: { startDate, endDate },
+                milkTotal,
+                meatTotal
+            };
+
+        } catch (error) {
+            logger.error('Error en getProductionLight', this.context, { filters }, ensureError(error));
+            return {
+                currentPeriod: { startDate: new Date(), endDate: new Date() },
+                milkTotal: 0,
+                meatTotal: 0
+            };
+        }
+    }
+
+    /**
+     * Finanzas resumidas: solo totales.
+     * Para RANCH_MANAGER, MANAGER.
+     */
+    private async getFinancialLight(filters: DashboardFilters): Promise<FinancialSummaryLight> {
+        try {
+            const { ranchId, period = 'month' } = filters;
+            const { startDate, endDate } = this.getPeriodDates(period, filters.startDate, filters.endDate);
+
+            const summary = await financeService.getFinancialSummary(ranchId, startDate, endDate);
+
+            return {
+                currentPeriod: { startDate, endDate },
+                income: summary.totals.income,
+                expenses: summary.totals.expense,
+                net: summary.totals.net
+            };
+
+        } catch (error) {
+            logger.error('Error en getFinancialLight', this.context, { filters }, ensureError(error));
+            return {
+                currentPeriod: { startDate: new Date(), endDate: new Date() },
+                income: 0,
+                expenses: 0,
+                net: 0
+            };
+        }
+    }
+
+    /**
+     * Usuarios agrupados por rancho (SUPER_ADMIN).
+     * Consulta todos los ranchos y agrupa los usuarios por cada uno.
+     */
+    private async getUsersGroupedByRanch(): Promise<UsersGroupedByRanch[]> {
+        try {
+            const ranches = await Ranch.findAll({
+                attributes: ['id', 'name'],
+                where: { isActive: true }
+            });
+
+            const allUsers = await User.findAll({
+                attributes: [
+                    'id', 'email', 'username', 'role', 'status',
+                    'isActive', 'emailVerified', 'lastLoginAt',
+                    'createdAt', 'personalInfo', 'ranchAccess'
+                ]
+            });
+
+            const result: UsersGroupedByRanch[] = ranches.map(ranch => {
+                // Filtrar usuarios que tienen acceso activo a este rancho
+                const ranchUsers = allUsers.filter(u =>
+                    u.ranchAccess?.some(a => a.ranchId === ranch.id && a.isActive)
+                );
+
+                const byRole: Record<string, number> = {};
+                let active = 0;
+                let pending = 0;
+                let inactive = 0;
+
+                const users: UserSummaryItem[] = ranchUsers.map(u => {
+                    // Contar por rol
+                    byRole[u.role] = (byRole[u.role] || 0) + 1;
+
+                    // Contar por estado
+                    if (u.status === UserStatus.ACTIVE && u.isActive) active++;
+                    else if (u.status === UserStatus.PENDING_VERIFICATION) pending++;
+                    else inactive++;
+
+                    return {
+                        id: u.id,
+                        email: u.email,
+                        fullName: u.getFullName(),
+                        role: u.role,
+                        status: u.status,
+                        isActive: u.isActive,
+                        emailVerified: u.emailVerified,
+                        lastLoginAt: u.lastLoginAt,
+                        createdAt: u.createdAt
+                    };
+                });
+
+                return {
+                    ranchId: ranch.id,
+                    ranchName: ranch.name,
+                    totalUsers: ranchUsers.length,
+                    active,
+                    pending,
+                    inactive,
+                    byRole,
+                    users
+                };
+            });
+
+            return result;
+
+        } catch (error) {
+            logger.error('Error en getUsersGroupedByRanch', this.context, {}, ensureError(error));
+            return [];
+        }
+    }
+
+    /**
+     * Usuarios del/los rancho(s) del OWNER.
+     * Recibe los ranchIds activos del owner y agrupa los usuarios.
+     */
+    private async getUsersForOwner(ranchIds: string[]): Promise<UsersForOwner> {
+        try {
+            // Si el OWNER tiene múltiples ranchos, usamos el primero como principal
+            // (en futuro se puede extender a multi-rancho)
+            const primaryRanchId = ranchIds[0];
+
+            const ranch = await Ranch.findByPk(primaryRanchId, {
+                attributes: ['id', 'name']
+            });
+
+            const allUsers = await User.findAll({
+                attributes: [
+                    'id', 'email', 'username', 'role', 'status',
+                    'isActive', 'emailVerified', 'lastLoginAt',
+                    'createdAt', 'personalInfo', 'ranchAccess'
+                ]
+            });
+
+            // Filtrar usuarios con acceso activo a alguno de los ranchos del owner
+            const ranchUsers = allUsers.filter(u =>
+                u.ranchAccess?.some(a => ranchIds.includes(a.ranchId) && a.isActive)
+            );
+
+            const byRole: Record<string, number> = {};
+            let active = 0;
+            let pending = 0;
+            let inactive = 0;
+
+            const users: UserSummaryItem[] = ranchUsers.map(u => {
+                byRole[u.role] = (byRole[u.role] || 0) + 1;
+
+                if (u.status === UserStatus.ACTIVE && u.isActive) active++;
+                else if (u.status === UserStatus.PENDING_VERIFICATION) pending++;
+                else inactive++;
+
+                return {
+                    id: u.id,
+                    email: u.email,
+                    fullName: u.getFullName(),
+                    role: u.role,
+                    status: u.status,
+                    isActive: u.isActive,
+                    emailVerified: u.emailVerified,
+                    lastLoginAt: u.lastLoginAt,
+                    createdAt: u.createdAt
+                };
+            });
+
+            // Último registrado
+            const sortedByDate = [...users].sort(
+                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+
+            return {
+                ranchId: primaryRanchId,
+                ranchName: ranch?.name || 'Rancho',
+                totalUsers: ranchUsers.length,
+                active,
+                pending,
+                inactive,
+                byRole,
+                users,
+                lastRegistered: sortedByDate[0] || undefined
+            };
+
+        } catch (error) {
+            logger.error('Error en getUsersForOwner', this.context, { ranchIds }, ensureError(error));
+            return {
+                ranchId: ranchIds[0] || '',
+                ranchName: 'Error',
+                totalUsers: 0,
+                active: 0,
+                pending: 0,
+                inactive: 0,
+                byRole: {},
+                users: []
+            };
+        }
+    }
+
+    /**
+     * Métricas de sistema (SUPER_ADMIN).
+     * Datos de la plataforma: usuarios totales, ranchos, eventos de seguridad.
+     */
+    private async getSystemMetrics(): Promise<SystemMetrics> {
+        try {
+            // Ejecutar consultas en paralelo
+            const [
+                totalUsers,
+                totalRanches,
+                activeUsers,
+                pendingUsers,
+                inactiveUsers,
+                recentEvents,
+                criticalEvents,
+                failedLogins,
+                lockedAccounts
+            ] = await Promise.all([
+                // Total usuarios
+                User.count(),
+                // Total ranchos activos
+                Ranch.count({ where: { isActive: true } }),
+                // Usuarios activos
+                User.count({ where: { isActive: true, status: UserStatus.ACTIVE } }),
+                // Usuarios pendientes de verificación
+                User.count({ where: { status: UserStatus.PENDING_VERIFICATION } }),
+                // Usuarios inactivos
+                User.count({ where: { isActive: false } }),
+                // Eventos de seguridad recientes (últimos 7 días, máximo 10)
+                SecurityEvent.findAll({
+                    where: {
+                        created_at: { [Op.gte]: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+                    },
+                    order: [['created_at', 'DESC']],
+                    limit: 10,
+                    attributes: ['id', 'event_type', 'severity', 'description', 'created_at']
+                }),
+                // Eventos críticos últimos 7 días
+                SecurityEvent.count({
+                    where: {
+                        severity: EventSeverity.CRITICAL,
+                        created_at: { [Op.gte]: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+                    }
+                }),
+                // Logins fallidos últimas 24h
+                SecurityEvent.count({
+                    where: {
+                        event_type: 'LOGIN_FAILED',
+                        created_at: { [Op.gte]: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+                    }
+                }),
+                // Cuentas bloqueadas actualmente
+                User.count({ where: { status: UserStatus.BLOCKED } })
+            ]);
+
+            return {
+                totalUsers,
+                totalRanches,
+                usersActive: activeUsers,
+                usersPendingVerification: pendingUsers,
+                usersInactive: inactiveUsers,
+                recentSecurityEvents: recentEvents.map(e => ({
+                    id: e.id,
+                    eventType: e.event_type,
+                    severity: e.severity,
+                    description: e.description,
+                    createdAt: e.created_at
+                })),
+                securitySummary: {
+                    criticalLast7Days: criticalEvents,
+                    failedLoginsLast24h: failedLogins,
+                    lockedAccounts: lockedAccounts
+                }
+            };
+
+        } catch (error) {
+            logger.error('Error en getSystemMetrics', this.context, {}, ensureError(error));
+            return {
+                totalUsers: 0,
+                totalRanches: 0,
+                usersActive: 0,
+                usersPendingVerification: 0,
+                usersInactive: 0,
+                recentSecurityEvents: [],
+                securitySummary: {
+                    criticalLast7Days: 0,
+                    failedLoginsLast24h: 0,
+                    lockedAccounts: 0
+                }
+            };
+        }
     }
 }
 

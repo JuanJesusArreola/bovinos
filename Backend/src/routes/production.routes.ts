@@ -4,6 +4,7 @@ import { productionController } from '../controllers/production.controller';
 import { authenticateToken } from '../middleware/auth';
 import { requireMinimumRole } from '../middleware/role';
 import { UserRole } from '../models/User';
+import { validateProduction } from '../validators/production.validators';
 
 const router = Router();
 
@@ -14,6 +15,7 @@ router.use(authenticateToken);
 router.post(
   '/',
   requireMinimumRole(UserRole.WORKER),
+  validateProduction('createProduction'),
   productionController.createProduction
 );
 
@@ -49,6 +51,7 @@ router.get(
 router.put(
   '/:id',
   requireMinimumRole(UserRole.WORKER),
+  validateProduction('updateProduction'),
   productionController.updateProduction
 );
 

@@ -4,6 +4,7 @@ import { inventoryController } from '../controllers/inventory.controller';
 import { authenticateToken } from '../middleware/auth';
 import { authorizeRoles } from '../middleware/auth';
 import { UserRole } from '../models/User';
+import { validateInventory } from '../validators/inventory.validators';
 
 const router = Router();
 
@@ -65,6 +66,7 @@ router.get(
 router.post(
     '/:itemId/update-stock',
     authorizeRoles(UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    validateInventory('updateStock'),
     inventoryController.updateStock
 );
 
@@ -75,6 +77,7 @@ router.post(
 router.post(
     '/:itemId/reserve',
     authorizeRoles(UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    validateInventory('reserveStock'),
     inventoryController.reserveStock
 );
 
@@ -85,6 +88,7 @@ router.post(
 router.post(
     '/:itemId/release',
     authorizeRoles(UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.SUPER_ADMIN),
+    validateInventory('releaseStock'),
     inventoryController.releaseStock
 );
 

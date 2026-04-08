@@ -285,7 +285,7 @@ SecurityEvent.init(
             EventType.PASSWORD_RESET_REQUEST, EventType.PASSWORD_RESET_SUCCESS, EventType.EMAIL_VERIFICATION_REQUEST, 
             EventType.EMAIL_VERIFICATION_SUCCESS, EventType.ACCOUNT_LOCKED, EventType.ACCOUNT_UNLOCKED, EventType.TOKEN_REVOKED, 
             EventType.SUSPICIOUS_ACTIVITY, EventType.RATE_LIMIT_EXCEEDED, EventType.INVALID_TOKEN, EventType.UNAUTHORIZED_ACCESS, 
-            EventType.ADMIN_ACTION]],
+            EventType.ADMIN_ACTION, EventType.PASSWORD_RESET_FAILED, EventType.PASSWORD_CHANGED, EventType.PASSWORD_RESET_RATE_LIMIT_EXCEEDED]],
         },
       },
       severity: {
@@ -403,16 +403,7 @@ SecurityEvent.init(
         },
         {
           fields: ['created_at'],
-        },
-        {
-          fields: ['user_id', 'event_type', 'created_at'],
-        },
-        {
-          fields: ['ip_address', 'event_type', 'created_at'],
-        },
-        {
-          fields: ['severity', 'resolved', 'created_at'],
-        },
+        },  
         {
           fields: ['user_id', 'event_type', 'created_at'],
           name: 'idx_security_events_user_type_time',

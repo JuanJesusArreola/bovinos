@@ -1,5 +1,4 @@
 {{! templates/email/vaccination-reminder.hbs }}
-  {{#*inline "content"}}
     <div class="vaccination-container">
       <h1 style="color: #3b82f6;">🏥 Recordatorio de Vacunación</h1>
       <p>Estimado/a <strong>{{ownerName}}</strong>,</p>
@@ -16,4 +15,3 @@
       
       {{> button text="Ver calendario" url=(absoluteUrl "/calendar") }}
     </div>
-  {{/inline}}

@@ -2,7 +2,6 @@
 import { Router } from 'express';
 import { authController } from '../../controllers/auth/auth.controller';
 import { authenticateToken } from '../../middleware/auth';
-import { validate, validateId } from '../../middleware/validation';
 import { createRateLimit, EndpointType } from '../../middleware/rate-limit';
 import { sanitizeInput } from '../../middleware/validation';
 import { validateAuth } from '../../middleware/Auth.validation';
@@ -27,7 +26,7 @@ router.use(sanitizeInput);
 router.post(
     '/register',
     createRateLimit(EndpointType.AUTH),
-    validateAuth('register'), // TODO: Crear esquema específico para registro
+    validateAuth('register'),
     authController.register.bind(authController)
 );
 
@@ -38,7 +37,7 @@ router.post(
 router.post(
     '/login',
     createRateLimit(EndpointType.AUTH),
-    validateAuth('login'), // TODO: Crear esquema específico para login
+    validateAuth('login'),
     authController.login.bind(authController)
 );
 
@@ -59,8 +58,15 @@ router.post(
 router.post(
     '/forgot-password',
     createRateLimit(EndpointType.AUTH),
-    validateAuth('forgotPassword'), // TODO: Crear esquema específico
+    validateAuth('forgotPassword'),
     authController.forgotPassword.bind(authController)
+);
+
+//GET que redirije al frontend
+router.get(
+    '/reset-password',
+    createRateLimit(EndpointType.AUTH),
+    authController.redirectResetPassword
 );
 
 /**
@@ -70,7 +76,7 @@ router.post(
 router.post(
     '/reset-password',
     createRateLimit(EndpointType.AUTH),
-    validate('search'), // TODO: Crear esquema específico
+    validateAuth('resetPassword'),
     authController.resetPassword.bind(authController)
 );
 
@@ -81,7 +87,7 @@ router.post(
 router.get(
     '/verify-email',
     createRateLimit(EndpointType.AUTH),
-    validateAuth('verifyEmail'), // TODO: Crear esquema específico
+    validateAuth('verifyEmail'),
     authController.verifyEmail.bind(authController)
 );
 
@@ -92,7 +98,7 @@ router.get(
 router.post(
     '/resend-verification',
     createRateLimit(EndpointType.AUTH),
-    validateAuth('resendVerification'), // TODO: Crear esquema específico
+    validateAuth('resendVerification'),
     authController.resendVerification.bind(authController)
 );
 
@@ -119,7 +125,7 @@ router.post(
     '/change-password',
     authenticateToken,
     createRateLimit(EndpointType.AUTH),
-    validateAuth('changePassword'), // TODO: Crear esquema específico
+    validateAuth('changePassword'),
     authController.changePassword.bind(authController)
 );
 

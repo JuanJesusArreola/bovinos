@@ -1,5 +1,4 @@
 {{! templates/email/health-alert.hbs }}
-  {{#*inline "content"}}
     <div class="health-alert-container">
       <h1 style="color: #dc2626;">🚨 ALERTA DE SALUD</h1>
       <p>Estimado/a <strong>{{ownerName}}</strong>,</p>
@@ -22,4 +21,3 @@
       
       {{> button text="Ver detalles" url=(absoluteUrl (concat "/bovines/" bovineEarTag)) }}
     </div>
-  {{/inline}}

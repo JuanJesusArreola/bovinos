@@ -3,6 +3,7 @@ import { Model, DataTypes, Optional } from 'sequelize';
 import sequelize from '../config/database';
 import { HealthStatus } from './Bovine';
 import { LocationData } from './Bovine';
+import { Geometry } from 'geojson';
 
 // Interfaz para atributos
 export interface BovineHealthSnapshotAttributes {
@@ -14,6 +15,8 @@ export interface BovineHealthSnapshotAttributes {
   lastUpdate: Date;
   healthColor: string;
   clusterSize: number;
+
+  geom?: Geometry;
 
   // Metadatos para filtros
   breed?: string;
@@ -46,6 +49,8 @@ class BovineHealthSnapshot extends Model<BovineHealthSnapshotAttributes, BovineH
   public lastUpdate!: Date;
   public healthColor!: string;
   public clusterSize!: number;
+
+  public geom?: Geometry;
 
   public breed?: string;
   public ageMonths?: number;
@@ -146,6 +151,11 @@ BovineHealthSnapshot.init(
       allowNull: true,
       comment: 'Fecha del último chequeo de salud'
     },
+    geom: {
+      type: DataTypes.GEOMETRY('POINT', 4326),
+      allowNull: true,
+      comment: 'Punto geográfico PostGIS — sincronizado con location (lat/lng)'
+    },
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,
@@ -173,7 +183,7 @@ BovineHealthSnapshot.init(
     indexes: [
       // Índices para mapas de calor
       // 🟢 Nuevo: Índice B‑Tree para health_status (filtro rápido)
-      {
+      /*{
         name: 'idx_health_snapshots_health_status',
         fields: ['health_status']
       },
@@ -204,23 +214,56 @@ BovineHealthSnapshot.init(
         )
       `)
         ]
-      },
-      // Índice para búsquedas por bovino
+      },*/
+
       {
-        name: 'idx_health_snapshots_bovine',
+        unique: true,
+        name: 'unique_snapshot_per_bovine',
         fields: ['bovine_id']
       },
-      // Índice para filtros combinados
+      // ── Filtros frecuentes ─────────────────────────────────────────────
+      {
+        name: 'idx_health_snapshots_health_status',
+        fields: ['health_status']
+      },
+      {
+        name: 'idx_health_snapshots_ranch_health',
+        fields: ['ranch_id', 'health_status']
+      },
       {
         name: 'idx_health_snapshots_filters',
         fields: ['health_status', 'breed', 'age_months']
       },
-      // Índice para actualizaciones recientes
       {
         name: 'idx_health_snapshots_last_update',
         fields: ['last_update']
+      },
+      //  JSONB (para acceso por clave dentro del JSON) 
+      {
+        name: 'idx_health_snapshots_location_gin',
+        fields: ['location'],
+        using: 'gin'
+      },
+      {
+        name: 'idx_health_snapshots_geom_gist',
+        fields: ['geom'],
+        using: 'gist'
       }
     ],
+    hooks: {
+      // ── Sincronizar geom cada vez que location cambia ──────────────────
+      // De esta forma las queries PostGIS (ST_DWithin, ST_Distance, etc.)
+      // siempre trabajan sobre datos actualizados sin leer el JSONB.
+      beforeSave: async (snapshot: BovineHealthSnapshot) => {
+        if (snapshot.changed('location') || snapshot.isNewRecord) {
+          const { latitude, longitude } = snapshot.location;
+          snapshot.geom = {
+            type: 'Point',
+            coordinates: [longitude, latitude]
+          };
+        }
+      }
+    },
     comment: 'Snapshots de salud para consultas rápidas en mapas de calor'
   }
 );

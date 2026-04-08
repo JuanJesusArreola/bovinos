@@ -2,6 +2,7 @@
 import { DataTypes, Model, Optional, Op } from 'sequelize';
 import sequelize from '../config/database';
 import { LocationData, HealthStatus } from './Bovine';
+import { BovineValidationError } from '../utils/BovineErrors';
 
 // Enums para registros de salud
 export enum HealthRecordType {
@@ -130,7 +131,7 @@ export interface Diagnosis {
 export interface Treatment {
   treatmentPlan?: string;        // Plan de tratamiento
   medications?: Array<{          // Medicamentos prescritos
-    medicationId: string; 
+    medicationId: string;
     name: string;
     activeIngredient?: string;
     dosage: number;
@@ -303,9 +304,9 @@ export interface HealthAttributes {
 // Atributos opcionales al crear un nuevo registro de salud
 export interface HealthCreationAttributes
   extends Optional<HealthAttributes,
-    'id' | 'eventId' | 'veterinarianId' | 'technicianId' | 'location' |
-    'chiefComplaint' | 'historyPresent' | 'historyPast' | 'vitalSigns' |
-    'physicalExam' | 'symptoms' | 'treatment' | 'laboratoryResults' |
+    'id' | 'eventId' | 'veterinarianId' | 'veterinarianName' | 'veterinarianLicense' |
+    'technicianId' | 'location' | 'chiefComplaint' | 'historyPresent' | 'historyPast' |
+    'vitalSigns' | 'physicalExam' | 'symptoms' | 'treatment' | 'laboratoryResults' |
     'nutritionalAssessment' | 'reproductiveAssessment' | 'recommendations' |
     'attachments' | 'photos' | 'xrays' | 'videos' | 'notes' | 'privateNotes' |
     'cost' | 'currency' | 'followUpDate' | 'followUpNotes' | 'weatherConditions' |
@@ -445,7 +446,7 @@ Health.init(
     },
     diagnosis: {
       type: DataTypes.JSONB,
-      allowNull: true,
+      allowNull: false,
       comment: 'Diagnósticos realizados'
     },
     treatment: {
@@ -668,24 +669,35 @@ Health.init(
     ],
     hooks: {
       beforeSave: async (health: Health) => {
-        // ✅ VALIDACIÓN CRÍTICA: diagnosis debe existir
         if (!health.diagnosis) {
-          throw new Error('Health record requires a confirmed diagnosis');
+          throw new BovineValidationError(
+            'El registro de salud requiere un diagnóstico. Proporciona al menos { status, primaryDiagnosis }.'
+          );
+        }
+
+        // Validar estructura mínima del objeto diagnosis
+        if (!health.diagnosis.status) {
+          throw new BovineValidationError(
+            'El diagnóstico debe incluir el campo "status" (CONFIRMED | DIFFERENTIAL | RULED_OUT).'
+          );
         }
 
         // Health siempre está completado
         health.isCompleted = true;
 
-        // Validar fechas de seguimiento
+        // Validar coherencia de fechas de seguimiento
         if (health.followUpDate && health.followUpDate <= new Date(health.recordDate)) {
-          throw new Error('La fecha de seguimiento debe ser posterior a la fecha del registro');
+          throw new BovineValidationError(
+            'La fecha de seguimiento debe ser posterior a la fecha del registro.'
+          );
         }
-      },
-      beforeCreate: async (health: Health) => {
 
-        health.isCompleted = true;
-
-
+        // Si requiere seguimiento, la fecha debe estar presente
+        if (health.followUpRequired && !health.followUpDate) {
+          throw new BovineValidationError(
+            'Se marcó followUpRequired como true pero no se proporcionó followUpDate.'
+          );
+        }
       }
     },
     comment: 'Tabla para almacenar registros completos de salud y exámenes médicos de bovinos'

@@ -16,6 +16,8 @@ import { errorHandler } from './middleware/error';
 
 import { scheduleRanchProductionUpdate } from './jobs/updateRanchProduction';
 
+import { initRateLimiter, closeRateLimiter } from './middleware/rate-limit';
+
 
 // ============================================================================
 // CONFIGURACIÓN INICIAL
@@ -49,12 +51,12 @@ const corsOptions = {
       callback(null, true);
       return;
     }
-    
+
     // Orígenes permitidos expandidos
     const allowedOrigins = [
       'http://localhost:3000',
-      'http://localhost:5173', 
-      'http://localhost:4173', 
+      'http://localhost:5173',
+      'http://localhost:4173',
       'http://127.0.0.1:3000',
       'http://127.0.0.1:5173',
       'http://127.0.0.1:4173',
@@ -73,8 +75,8 @@ const corsOptions = {
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
   // ✅ CORRECCIÓN PRINCIPAL: Agregar TODOS los headers necesarios
   allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
+    'Content-Type',
+    'Authorization',
     'X-Requested-With',
     'Accept',
     'Origin',
@@ -101,7 +103,7 @@ app.use(cors(corsOptions));
 // 🔧 ARREGLO 3: Middleware CORS manual adicional para asegurar funcionamiento
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  
+
   // Forzar headers CORS en desarrollo
   if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
     res.header('Access-Control-Allow-Origin', origin || '*');
@@ -110,13 +112,13 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, X-Access-Token, x-app-version, x-client-platform, x-client-version, x-api-key, x-request-id');
     res.header('Access-Control-Allow-Credentials', 'true');
   }
-  
+
   // Responder inmediatamente a OPTIONS requests
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
-  
+
   next();
 });
 
@@ -135,9 +137,9 @@ if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
         imgSrc: ["'self'", "data:", "https:", "http:", "blob:"],
         // 🚨 CLAVE: Esto arregla los errores de connect-src
         connectSrc: [
-          "'self'", 
-          "http://localhost:*", 
-          "https://localhost:*", 
+          "'self'",
+          "http://localhost:*",
+          "https://localhost:*",
           "http://127.0.0.1:*",
           "https://127.0.0.1:*",
           "ws://localhost:*",
@@ -157,7 +159,7 @@ if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
     crossOriginResourcePolicy: { policy: "cross-origin" },
     crossOriginOpenerPolicy: { policy: "unsafe-none" }
   }));
-  
+
   console.log('🛡️  Helmet configurado para desarrollo (CSP muy permisivo)');
 } else {
   // Configuración más segura para producción
@@ -192,7 +194,7 @@ app.get('/favicon.ico', (req: Request, res: Response) => {
 app.use((req, res, next) => {
   // Remover headers que pueden causar conflictos
   res.removeHeader('X-Powered-By');
-  
+
   // Asegurar CORS headers están presentes en desarrollo
   if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
     const origin = req.headers.origin;
@@ -201,7 +203,7 @@ app.use((req, res, next) => {
     }
     res.header('Access-Control-Allow-Credentials', 'true');
   }
-  
+
   next();
 });
 
@@ -229,7 +231,7 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // Parsing de JSON y URL-encoded
-app.use(express.json({ 
+app.use(express.json({
   limit: '10mb',
   verify: (req, res, buf) => {
     try {
@@ -245,9 +247,9 @@ app.use(express.json({
   }
 }));
 
-app.use(express.urlencoded({ 
-  extended: true, 
-  limit: '10mb' 
+app.use(express.urlencoded({
+  extended: true,
+  limit: '10mb'
 }));
 
 // ============================================================================
@@ -395,11 +397,11 @@ async function initializeServices(): Promise<boolean> {
     console.log('🔧 Inicializando base de datos...');
     await initializeDatabase();
     console.log('✅ Base de datos inicializada correctamente');
-    
+
     if (!process.env.DB_HOST) {
       console.warn('⚠️ DB_HOST no configurado');
     }
-    
+
     if (!process.env.JWT_ACCESS_SECRET) {
       console.warn('⚠️ JWT_ACCESS_SECRET no configurado');
     }
@@ -429,6 +431,7 @@ async function initializeServices(): Promise<boolean> {
  */
 async function startServer(): Promise<void> {
   try {
+    await initRateLimiter();
     server.listen(PORT, HOST, () => {
       console.log('');
       console.log('🎉 ¡Servidor iniciado exitosamente!');
@@ -501,7 +504,7 @@ async function startServer(): Promise<void> {
  */
 async function handleShutdown(signal: string): Promise<void> {
   console.log(`\n🔄 Señal ${signal} recibida. Iniciando cierre ordenado...`);
-  
+
   try {
     // Cerrar servidor HTTP
     server.close(() => {
@@ -531,6 +534,9 @@ process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
   console.error('   En la promesa:', promise);
   handleShutdown('UNHANDLED_REJECTION');
 });
+
+process.on('SIGTERM', async () => { await closeRateLimiter(); process.exit(0); });
+process.on('SIGINT', async () => { await closeRateLimiter(); process.exit(0); })
 
 // ============================================================================
 // INICIALIZACIÓN PRINCIPAL

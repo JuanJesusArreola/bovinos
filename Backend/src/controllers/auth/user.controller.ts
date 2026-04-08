@@ -105,10 +105,16 @@ export class UserController {
 
     /**
      * GET /api/users
-     * Lista usuarios (solo admin)
+     * Lista usuarios (solo admin).
+     *
+     * Scoping por rancho:
+     * - SUPER_ADMIN: ve todos los usuarios (puede filtrar por ranchId opcionalmente)
+     * - OWNER: forzado a ver solo usuarios de su(s) rancho(s)
+     * - MANAGER: forzado a ver solo usuarios de su rancho (con datos limitados)
      */
     async listUsers(req: Request, res: Response): Promise<void> {
         try {
+            const requestingUser = req.user;
             const {
                 search,
                 role,
@@ -123,12 +129,42 @@ export class UserController {
                 sortOrder = 'DESC'
             } = req.query;
 
+            // ── Determinar ranchId según rol del solicitante ─────────
+            let effectiveRanchId = ranchId as string;
+
+            if (req.userRole === UserRole.OWNER && requestingUser) {
+                // OWNER: forzar filtro por sus ranchos
+                const ownerRanchIds = requestingUser.ranchAccess
+                    ?.filter(a => a.isActive)
+                    .map(a => a.ranchId) || [];
+
+                // Si pidió un ranchId específico, verificar que sea suyo
+                if (effectiveRanchId) {
+                    if (!ownerRanchIds.includes(effectiveRanchId)) {
+                        res.status(403).json({
+                            success: false,
+                            error: 'Solo puedes ver usuarios de tus ranchos',
+                            code: 'RANCH_ACCESS_DENIED'
+                        });
+                        return;
+                    }
+                } else {
+                    // Si no pidió ranchId, usar el primero de sus ranchos
+                    effectiveRanchId = ownerRanchIds[0];
+                }
+            } else if (req.userRole === UserRole.MANAGER && requestingUser) {
+                // MANAGER: forzar filtro por su rancho
+                const managerRanchId = requestingUser.ranchAccess
+                    ?.find(a => a.isActive)?.ranchId;
+                effectiveRanchId = managerRanchId || '';
+            }
+
             const filters = {
                 searchTerm: search as string,
                 role: role ? (role as string).split(',') as UserRole[] : undefined,
                 status: status ? (status as string).split(',') as any[] : undefined,
                 isActive: isActive === 'true' ? true : isActive === 'false' ? false : undefined,
-                ranchId: ranchId as string,
+                ranchId: effectiveRanchId,
                 startDate: startDate ? new Date(startDate as string) : undefined,
                 endDate: endDate ? new Date(endDate as string) : undefined,
                 sortBy: sortBy as string,
@@ -288,13 +324,50 @@ export class UserController {
 
     /**
      * DELETE /api/users/:id
-     * Desactiva un usuario (solo admin)
+     * Desactiva un usuario (solo admin).
+     *
+     * Protecciones:
+     * 1. No puedes desactivarte a ti mismo
+     * 2. OWNER solo puede desactivar usuarios de su rancho
      */
     async deactivateUser(req: Request, res: Response): Promise<void> {
         try {
             const { id } = req.params;
-            const userId = req.user?.id;
+            const requestingUser = req.user;
+            const userId = requestingUser?.id;
             const { reason } = req.body;
+
+            // ── Protección anti-auto-desactivación ──────────────────
+            if (id === userId) {
+                res.status(403).json({
+                    success: false,
+                    error: 'No puedes desactivar tu propia cuenta',
+                    code: 'SELF_DEACTIVATION_DENIED'
+                });
+                return;
+            }
+
+            // ── OWNER: solo puede desactivar usuarios de su rancho ──
+            if (req.userRole === UserRole.OWNER && requestingUser) {
+                const ownerRanchIds = requestingUser.ranchAccess
+                    ?.filter(a => a.isActive)
+                    .map(a => a.ranchId) || [];
+
+                const targetUser = await userService.getUserById(id);
+                if (targetUser) {
+                    const targetInOwnerRanch = targetUser.ranchAccess?.some(
+                        a => a.isActive && ownerRanchIds.includes(a.ranchId)
+                    );
+                    if (!targetInOwnerRanch) {
+                        res.status(403).json({
+                            success: false,
+                            error: 'Solo puedes gestionar usuarios de tu rancho',
+                            code: 'RANCH_ACCESS_DENIED'
+                        });
+                        return;
+                    }
+                }
+            }
 
             await userService.deactivateUser(id, userId || 'system', reason);
 
@@ -323,12 +396,37 @@ export class UserController {
 
     /**
      * POST /api/users/:id/activate
-     * Activa un usuario (solo admin)
+     * Activa un usuario (solo admin).
+     *
+     * Protección: OWNER solo puede activar usuarios de su rancho.
      */
     async activateUser(req: Request, res: Response): Promise<void> {
         try {
             const { id } = req.params;
-            const userId = req.user?.id;
+            const requestingUser = req.user;
+            const userId = requestingUser?.id;
+
+            // ── OWNER: solo puede activar usuarios de su rancho ─────
+            if (req.userRole === UserRole.OWNER && requestingUser) {
+                const ownerRanchIds = requestingUser.ranchAccess
+                    ?.filter(a => a.isActive)
+                    .map(a => a.ranchId) || [];
+
+                const targetUser = await userService.getUserById(id);
+                if (targetUser) {
+                    const targetInOwnerRanch = targetUser.ranchAccess?.some(
+                        a => a.isActive && ownerRanchIds.includes(a.ranchId)
+                    );
+                    if (!targetInOwnerRanch) {
+                        res.status(403).json({
+                            success: false,
+                            error: 'Solo puedes gestionar usuarios de tu rancho',
+                            code: 'RANCH_ACCESS_DENIED'
+                        });
+                        return;
+                    }
+                }
+            }
 
             await userService.activateUser(id, userId || 'system');
 

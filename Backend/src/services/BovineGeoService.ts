@@ -1,4 +1,4 @@
-import { Op, Transaction } from 'sequelize';
+import { Op, Transaction, QueryTypes } from 'sequelize';
 import sequelize from '../config/database';
 import logger from '../utils/logger';
 import { 
@@ -44,6 +44,28 @@ export interface HeatmapPoint {
     age?: number;                // Edad en meses (para filtros)
     diagnosis?: string;          // Diagnóstico actual (si existe)
   };
+}
+
+/**
+ * Datos estructurados para que el FRONTEND construya el popup de Leaflet.
+ *
+ * El backend entrega datos; el frontend decide cómo renderizarlos.
+ * Esto permite cambiar el idioma, el framework de UI o el proveedor
+ * de mapas sin tocar ningún servicio backend.
+ *
+ * Uso típico en React/Leaflet:
+ *   const popup = L.popup().setContent(renderBovinePopup(popupData));
+ */
+export interface PopupData {
+  bovineId:      string;
+  shortId:       string;        // últimos 6 chars del ID — para el título
+  healthStatus:  HealthStatus;
+  statusLabel:   string;        // etiqueta en español lista para mostrar
+  statusColor:   string;        // color hex del estado
+  breed?:        string;
+  ageMonths?:    number;
+  diagnosis?:    string;
+  hasDiagnosis:  boolean;       // shortcut para condicionales en el template
 }
 
 /**
@@ -94,11 +116,14 @@ export interface Bounds {
 export interface HeatmapFilters {
   healthStatus?: HealthStatus[];  // Filtrar por uno o más estados
   breeds?: string[];              // Filtrar por razas específicas
-  ageRange?: {                     // Rango de edad en meses
+  ageRange?: {                    // Rango de edad en meses
     min: number;
     max: number;
   };
-  diseases?: string[];            // Filtrar por diagnósticos
+  // Lista de diagnósticos a incluir — comparación exacta contra el campo
+  // `diagnosis` del snapshot (string normalizado, ej. "Mastitis", "Fiebre aftosa").
+  // El frontend debe enviar los mismos valores que usa al guardar en Health.diagnosis.
+  diseases?: string[];
 }
 
 /**
@@ -237,15 +262,19 @@ export class BovineGeoService {
         return;
       }
 
-      // Preparar datos de actualización
-      const updateData: any = {
-        ...data,
-        lastUpdate: new Date()
+      // Construir payload de actualización de forma explícita para evitar
+      // que un healthColor pasado en data pise el que calculamos aquí
+      const updateData: Partial<BovineHealthSnapshot['_attributes']> & Record<string, unknown> = {
+        lastUpdate:  new Date(),
+        ...(data.location        !== undefined && { location:       data.location }),
+        ...(data.diagnosis       !== undefined && { diagnosis:      data.diagnosis }),
+        ...(data.lastHealthCheck !== undefined && { lastHealthCheck: data.lastHealthCheck }),
       };
 
-      // Si cambió el healthStatus, actualizar también el color
+      // healthStatus y healthColor siempre van juntos para mantener consistencia
       if (data.healthStatus) {
-        updateData.healthColor = this.getHealthColor(data.healthStatus);
+        updateData.healthStatus = data.healthStatus;
+        updateData.healthColor  = this.getHealthColor(data.healthStatus);
       }
 
       // Actualizar snapshot
@@ -417,60 +446,86 @@ export class BovineGeoService {
 
   /**
    * Refresca snapshots de un rancho específico (operación optimizada)
-   * 
-   * ¿POR QUÉ UNA VERSIÓN ESPECÍFICA PARA RANCHO?
-   *   Cuando un usuario ve su rancho, los datos deben estar actualizados.
-   *   Esta versión usa SQL nativo para ser MÁS RÁPIDA que el loop en JS.
-   * 
+   *
+   * Usa un INSERT … ON CONFLICT … DO UPDATE nativo para actualizar toda la
+   * tabla en una sola roundtrip a la BD en lugar de un loop en JS.
+   *
    * @param ranchId - ID del rancho
-   * @returns Número de snapshots actualizados
+   * @returns Número de snapshots insertados o actualizados
    */
   async refreshRanchSnapshots(ranchId: string): Promise<number> {
     const startTime = Date.now();
-    
+
     try {
-      // Consulta SQL optimizada con UPSERT
-      // 🔥 ESTO ES MUY RÁPIDO porque se ejecuta todo en la BD
-      const [result] = await sequelize.query(`
+      // ── Por qué QueryTypes.SELECT y no BULKUPDATE ────────────────────────
+      //
+      // BULKUPDATE devuelve un entero (filas afectadas) como primer elemento
+      // del destructuring. Eso descarta la cláusula RETURNING, haciendo
+      // imposible saber cuántas filas se tocaron realmente.
+      //
+      // QueryTypes.SELECT trata el resultado como filas devueltas, lo que
+      // funciona correctamente con RETURNING — obtenemos el array de bovine_id
+      // y su longitud es el conteo real.
+      const rows = await sequelize.query<{ bovine_id: string }>(`
         INSERT INTO bovine_health_snapshots (
-          bovine_id, ranch_id, health_status, location, 
-          last_update, health_color, cluster_size, breed, age_months
+          bovine_id,
+          ranch_id,
+          health_status,
+          location,
+          geom,
+          last_update,
+          health_color,
+          cluster_size,
+          breed,
+          age_months
         )
-        SELECT 
-          b.id, 
-          b.ranch_id, 
-          b.health_status, 
+        SELECT
+          b.id,
+          b.ranch_id,
+          b.health_status,
           b.location,
-          NOW(), 
+          -- ── columna geom sincronizada en cada refresh ──────────────────
+          -- Sin esto el índice GIST queda desactualizado respecto al JSONB
+          ST_SetSRID(
+            ST_MakePoint(
+              (b.location->>'longitude')::float,
+              (b.location->>'latitude')::float
+            ),
+            4326
+          ),
+          NOW(),
           CASE b.health_status
-            WHEN 'HEALTHY' THEN '#10b981'
-            WHEN 'SICK' THEN '#ef4444'
+            WHEN 'HEALTHY'    THEN '#10b981'
+            WHEN 'SICK'       THEN '#ef4444'
             WHEN 'RECOVERING' THEN '#f59e0b'
             WHEN 'QUARANTINE' THEN '#8b5cf6'
             ELSE '#6b7280'
           END,
           1,
           b.breed,
-          EXTRACT(YEAR FROM age(NOW(), b.birth_date)) * 12 + 
+          EXTRACT(YEAR  FROM age(NOW(), b.birth_date)) * 12 +
           EXTRACT(MONTH FROM age(NOW(), b.birth_date))
         FROM bovines b
-        WHERE b.ranch_id = :ranchId
+        WHERE b.ranch_id  = :ranchId
           AND b.is_active = true
-        ON CONFLICT (bovine_id) 
+          AND b.deleted_at IS NULL
+        ON CONFLICT (bovine_id)
         DO UPDATE SET
           health_status = EXCLUDED.health_status,
-          location = EXCLUDED.location,
-          last_update = EXCLUDED.last_update,
-          health_color = EXCLUDED.health_color,
-          age_months = EXCLUDED.age_months,
-          breed = EXCLUDED.breed
+          location      = EXCLUDED.location,
+          geom          = EXCLUDED.geom,         -- ← sincronizar geom también
+          last_update   = EXCLUDED.last_update,
+          health_color  = EXCLUDED.health_color,
+          age_months    = EXCLUDED.age_months,
+          breed         = EXCLUDED.breed
         RETURNING bovine_id
       `, {
         replacements: { ranchId },
-        type: 'BULKUPDATE'
+        type: QueryTypes.SELECT          // ← devuelve las filas del RETURNING
       });
 
-      const updatedCount = Array.isArray(result) ? result.length : 0;
+      // rows es el array de { bovine_id } devuelto por RETURNING
+      const updatedCount = rows.length;
       const duration = Date.now() - startTime;
 
       logger.info(`Snapshots del rancho ${ranchId} actualizados`, this.context, {
@@ -487,7 +542,7 @@ export class BovineGeoService {
         ranchId,
         durationMs: duration
       }, ensureError(error));
-      
+
       throw new BovineError(
         `Error al actualizar snapshots del rancho ${ranchId}`,
         'RANCH_SNAPSHOT_REFRESH_ERROR',
@@ -536,12 +591,22 @@ export class BovineGeoService {
         };
       }
 
-      // Consultar snapshots
+      // ── Filtro por enfermedad ────────────────────────────────────────────
+      // `diagnosis` en el snapshot es un string con el nombre normalizado
+      // del diagnóstico principal (copiado de Health.diagnosis.primaryDiagnosis
+      // cuando se actualiza el snapshot).
+      // Usamos Op.in para permitir seleccionar múltiples enfermedades a la vez,
+      // ej: ["Mastitis", "Fiebre aftosa"] → bovinos con cualquiera de las dos.
+      if (filters?.diseases?.length) {
+        whereClause.diagnosis = { [Op.in]: filters.diseases };
+      }
+
+      // Consultar snapshots — incluimos geom para no parsear el JSONB
       const snapshots = await BovineHealthSnapshot.findAll({
         where: whereClause,
         attributes: [
           'bovineId',
-          'location',
+          'location',     // mantenemos location para el mapping lat/lng
           'healthStatus',
           'healthColor',
           'breed',
@@ -570,7 +635,12 @@ export class BovineGeoService {
       logger.info(`Datos de heatmap obtenidos para rancho ${ranchId}`, this.context, {
         ranchId,
         pointCount: points.length,
-        filters,
+        appliedFilters: {
+          healthStatus: filters?.healthStatus ?? [],
+          breeds:       filters?.breeds       ?? [],
+          diseases:     filters?.diseases     ?? [],
+          hasAgeRange:  !!filters?.ageRange
+        },
         durationMs: duration
       });
 
@@ -616,7 +686,7 @@ export class BovineGeoService {
     ranchId: string,
     bounds: Bounds,
     zoom: number,
-    filters?: any
+    filters?: HeatmapFilters
   ): Promise<Cluster[]> {
     const startTime = Date.now();
     
@@ -641,44 +711,41 @@ export class BovineGeoService {
        */
       const clusters = await sequelize.query(`
         WITH filtered_snapshots AS (
-          SELECT 
+          SELECT
             bovine_id,
-            ST_SetSRID(ST_MakePoint(
-              (location->>'longitude')::float,
-              (location->>'latitude')::float
-            ), 4326) as geom,
+            geom,          -- columna PostGIS nativa: usa el índice GIST directamente
             health_status
           FROM bovine_health_snapshots
           WHERE ranch_id = :ranchId
-            AND (location->>'latitude')::float BETWEEN :south AND :north
-            AND (location->>'longitude')::float BETWEEN :west AND :east
+            AND geom && ST_MakeEnvelope(:west, :south, :east, :north, 4326)
             ${filters?.healthStatus ? 'AND health_status = ANY(:healthStatus)' : ''}
+            ${filters?.diseases    ? 'AND diagnosis    = ANY(:diseases)'      : ''}
         ),
         clustered AS (
-          SELECT 
-            ST_SnapToGrid(geom, :gridSize) as cell,
-            COUNT(*) as point_count,
-            array_agg(DISTINCT health_status) as health_statuses,
-            AVG(CASE 
-              WHEN health_status = 'HEALTHY' THEN 1
+          SELECT
+            ST_SnapToGrid(geom, :gridSize) AS cell,
+            COUNT(*)                        AS point_count,
+            array_agg(DISTINCT health_status) AS health_statuses,
+            AVG(CASE
+              WHEN health_status = 'HEALTHY'    THEN 1
               WHEN health_status = 'RECOVERING' THEN 2
-              WHEN health_status = 'SICK' THEN 3
+              WHEN health_status = 'SICK'       THEN 3
               WHEN health_status = 'QUARANTINE' THEN 4
               ELSE 0
-            END) as avg_severity
+            END) AS avg_severity
           FROM filtered_snapshots
           GROUP BY cell
         )
-        SELECT 
-          ST_X(ST_Centroid(cell)) as lng,
-          ST_Y(ST_Centroid(cell)) as lat,
+        SELECT
+          ST_X(ST_Centroid(cell))      AS lng,
+          ST_Y(ST_Centroid(cell))      AS lat,
           point_count,
           health_statuses,
           avg_severity,
-          ST_XMin(ST_Envelope(cell)) as west,
-          ST_XMax(ST_Envelope(cell)) as east,
-          ST_YMin(ST_Envelope(cell)) as south,
-          ST_YMax(ST_Envelope(cell)) as north
+          ST_XMin(ST_Envelope(cell))   AS west,
+          ST_XMax(ST_Envelope(cell))   AS east,
+          ST_YMin(ST_Envelope(cell))   AS south,
+          ST_YMax(ST_Envelope(cell))   AS north
         FROM clustered
         WHERE point_count > 0
       `, {
@@ -686,7 +753,8 @@ export class BovineGeoService {
           ranchId,
           ...bounds,
           gridSize,
-          healthStatus: filters?.healthStatus
+          healthStatus: filters?.healthStatus ?? null,
+          diseases:     filters?.diseases     ?? null
         },
         type: 'SELECT'
       });
@@ -751,16 +819,16 @@ export class BovineGeoService {
   async expandCluster(
     ranchId: string,
     bounds: Bounds,
-    filters?: any
+    filters?: HeatmapFilters
   ): Promise<HeatmapPoint[]> {
     const startTime = Date.now();
     
     try {
       const points = await sequelize.query(`
-        SELECT 
+        SELECT
           bovine_id,
-          (location->>'latitude')::float as lat,
-          (location->>'longitude')::float as lng,
+          ST_Y(geom) AS lat,
+          ST_X(geom) AS lng,
           health_status,
           health_color,
           breed,
@@ -768,14 +836,15 @@ export class BovineGeoService {
           diagnosis
         FROM bovine_health_snapshots
         WHERE ranch_id = :ranchId
-          AND (location->>'latitude')::float BETWEEN :south AND :north
-          AND (location->>'longitude')::float BETWEEN :west AND :east
+          AND geom && ST_MakeEnvelope(:west, :south, :east, :north, 4326)
           ${filters?.healthStatus ? 'AND health_status = ANY(:healthStatus)' : ''}
+          ${filters?.diseases     ? 'AND diagnosis    = ANY(:diseases)'      : ''}
       `, {
         replacements: {
           ranchId,
           ...bounds,
-          healthStatus: filters?.healthStatus
+          healthStatus: filters?.healthStatus ?? null,
+          diseases:     filters?.diseases     ?? null
         },
         type: 'SELECT'
       });
@@ -832,20 +901,24 @@ export class BovineGeoService {
    * @param bovineId - ID del bovino
    * @returns Punto del bovino o null si no existe
    */
-  async getBovinePoint(bovineId: string): Promise<HeatmapPoint | null> {
+  /**
+   * Obtiene el punto geográfico de un bovino y los datos estructurados
+   * para que el frontend construya el popup sin generar HTML en el servidor.
+   *
+   * @param bovineId - ID del bovino
+   * @returns { point, popup } o null si el bovino no tiene snapshot
+   */
+  async getBovinePoint(
+    bovineId: string
+  ): Promise<{ point: HeatmapPoint; popup: PopupData } | null> {
     const startTime = Date.now();
-    
+
     try {
       const snapshot = await BovineHealthSnapshot.findOne({
         where: { bovineId },
         attributes: [
-          'bovineId',
-          'location',
-          'healthStatus',
-          'healthColor',
-          'breed',
-          'ageMonths',
-          'diagnosis'
+          'bovineId', 'location', 'healthStatus',
+          'healthColor', 'breed', 'ageMonths', 'diagnosis'
         ]
       });
 
@@ -854,28 +927,51 @@ export class BovineGeoService {
         return null;
       }
 
-      const point = {
-        id: snapshot.bovineId,
-        lat: snapshot.location.latitude,
-        lng: snapshot.location.longitude,
+      const STATUS_LABELS: Record<HealthStatus, string> = {
+        [HealthStatus.HEALTHY]:    'Saludable',
+        [HealthStatus.SICK]:       'Enfermo',
+        [HealthStatus.RECOVERING]: 'Recuperándose',
+        [HealthStatus.QUARANTINE]: 'Cuarentena',
+        [HealthStatus.DECEASED]:   'Fallecido',
+        [HealthStatus.UNKNOWN]:    'Desconocido'
+      };
+
+      const point: HeatmapPoint = {
+        id:    snapshot.bovineId,
+        lat:   snapshot.location.latitude,
+        lng:   snapshot.location.longitude,
         value: this.getHeatIntensity(snapshot.healthStatus),
         color: snapshot.healthColor,
         metadata: {
           healthStatus: snapshot.healthStatus,
-          breed: snapshot.breed,
-          age: snapshot.ageMonths,
-          diagnosis: snapshot.diagnosis
+          breed:        snapshot.breed,
+          age:          snapshot.ageMonths,
+          diagnosis:    snapshot.diagnosis
         }
       };
 
+      // Datos estructurados para el popup — el frontend los usa
+      // para construir el HTML/JSX que prefiera, en el idioma que prefiera
+      const popup: PopupData = {
+        bovineId:     snapshot.bovineId,
+        shortId:      snapshot.bovineId.slice(-6),
+        healthStatus: snapshot.healthStatus,
+        statusLabel:  STATUS_LABELS[snapshot.healthStatus] ?? snapshot.healthStatus,
+        statusColor:  snapshot.healthColor,
+        breed:        snapshot.breed,
+        ageMonths:    snapshot.ageMonths,
+        diagnosis:    snapshot.diagnosis,
+        hasDiagnosis: !!snapshot.diagnosis
+      };
+
       const duration = Date.now() - startTime;
-      
+
       logger.debug(`Punto obtenido para bovino ${bovineId}`, this.context, {
         bovineId,
         durationMs: duration
       });
 
-      return point;
+      return { point, popup };
 
     } catch (error) {
       const duration = Date.now() - startTime;
@@ -883,7 +979,7 @@ export class BovineGeoService {
         bovineId,
         durationMs: duration
       }, ensureError(error));
-      
+
       throw new BovineError(
         `Error al obtener punto para bovino ${bovineId}`,
         'POINT_GET_ERROR',
@@ -951,50 +1047,48 @@ export class BovineGeoService {
 
   /**
    * Genera HTML para popup de Leaflet
-   * 
-   * 📍 PARA LEAFLET:
-   *   Cuando el usuario hace clic en un punto, mostramos este HTML
-   * 
-   * @param point - Punto del bovino
-   * @returns HTML string para el popup
+   *
+   * @deprecated Usar `getBovinePoint()` y construir el popup en el frontend.
+   *   El backend no debe generar HTML — si cambias el idioma, el framework
+   *   de UI o el proveedor de mapas, este método rompe sin ninguna señal.
+   *   Mantenido temporalmente para no romper clientes existentes.
+   *   Se eliminará en la próxima versión mayor.
    */
   generatePopupHTML(point: HeatmapPoint): string {
-    const statusLabels = {
-      [HealthStatus.HEALTHY]: 'Saludable',
-      [HealthStatus.SICK]: 'Enfermo',
+    const statusLabels: Record<HealthStatus, string> = {
+      [HealthStatus.HEALTHY]:    'Saludable',
+      [HealthStatus.SICK]:       'Enfermo',
       [HealthStatus.RECOVERING]: 'Recuperándose',
       [HealthStatus.QUARANTINE]: 'Cuarentena',
-      [HealthStatus.DECEASED]: 'Fallecido',
-      [HealthStatus.UNKNOWN]: 'Desconocido'
+      [HealthStatus.DECEASED]:   'Fallecido',
+      [HealthStatus.UNKNOWN]:    'Desconocido'
     };
+
+    const label = statusLabels[point.metadata.healthStatus] ?? point.metadata.healthStatus;
 
     return `
       <div class="bovine-popup" style="font-family: Arial, sans-serif; padding: 8px;">
         <h3 style="margin: 0 0 8px 0; color: #333;">Bovino ${point.id.slice(-6)}</h3>
         <div style="display: flex; align-items: center; margin-bottom: 5px;">
-          <div style="width: 12px; height: 12px; border-radius: 50%; background: ${point.color}; margin-right: 8px;"></div>
-          <strong>Estado:</strong> ${statusLabels[point.metadata.healthStatus] || point.metadata.healthStatus}
+          <div style="width:12px;height:12px;border-radius:50%;background:${point.color};margin-right:8px;"></div>
+          <strong>Estado:</strong> ${label}
         </div>
-        ${point.metadata.breed ? `<p style="margin: 5px 0;"><strong>Raza:</strong> ${point.metadata.breed}</p>` : ''}
-        ${point.metadata.age ? `<p style="margin: 5px 0;"><strong>Edad:</strong> ${point.metadata.age} meses</p>` : ''}
+        ${point.metadata.breed    ? `<p style="margin:5px 0;"><strong>Raza:</strong> ${point.metadata.breed}</p>` : ''}
+        ${point.metadata.age      ? `<p style="margin:5px 0;"><strong>Edad:</strong> ${point.metadata.age} meses</p>` : ''}
         ${point.metadata.diagnosis ? `
-          <div style="margin-top: 8px; padding: 5px; background: #fff3cd; border-radius: 4px;">
-            <strong style="color: #856404;">Diagnóstico:</strong>
-            <p style="margin: 5px 0 0 0; color: #856404;">${point.metadata.diagnosis}</p>
-          </div>
-        ` : ''}
-        <button 
-          onclick="window.dispatchEvent(new CustomEvent('bovine-selected', { detail: '${point.id}' }))"
-          style="margin-top: 10px; width: 100%; padding: 5px; background: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          <div style="margin-top:8px;padding:5px;background:#fff3cd;border-radius:4px;">
+            <strong style="color:#856404;">Diagnóstico:</strong>
+            <p style="margin:5px 0 0 0;color:#856404;">${point.metadata.diagnosis}</p>
+          </div>` : ''}
+        <button
+          onclick="window.dispatchEvent(new CustomEvent('bovine-selected',{detail:'${point.id}'}))"
+          style="margin-top:10px;width:100%;padding:5px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;">
           Ver detalles
         </button>
       </div>
-    `;
+    `.trim();
   }
 }
 
 // Exportar instancia única
 export const bovineGeoService = new BovineGeoService();
-
-
-

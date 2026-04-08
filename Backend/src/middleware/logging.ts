@@ -4,7 +4,7 @@ import { UserRole } from '../models/User';
 // Niveles de logging
 export enum LogLevel {
   ERROR = 'error',
-  WARN = 'warn', 
+  WARN = 'warn',
   INFO = 'info',
   DEBUG = 'debug',
   TRACE = 'trace'
@@ -18,44 +18,44 @@ export enum CattleEventType {
   CATTLE_DELETED = 'cattle_deleted',
   CATTLE_MOVED = 'cattle_moved',
   CATTLE_DECEASED = 'cattle_deceased',
-  
+
   // Eventos de salud
   HEALTH_CHECKUP = 'health_checkup',
   ILLNESS_DIAGNOSED = 'illness_diagnosed',
   TREATMENT_STARTED = 'treatment_started',
   TREATMENT_COMPLETED = 'treatment_completed',
   RECOVERY_RECORDED = 'recovery_recorded',
-  
+
   // Eventos de vacunación
   VACCINATION_SCHEDULED = 'vaccination_scheduled',
   VACCINATION_ADMINISTERED = 'vaccination_administered',
   VACCINATION_MISSED = 'vaccination_missed',
   VACCINE_REACTION = 'vaccine_reaction',
-  
+
   // Eventos de reproducción
   BREEDING_PLANNED = 'breeding_planned',
   MATING_RECORDED = 'mating_recorded',
   PREGNANCY_DETECTED = 'pregnancy_detected',
   BIRTH_RECORDED = 'birth_recorded',
   WEANING_RECORDED = 'weaning_recorded',
-  
+
   // Eventos de producción
   MILK_PRODUCTION_RECORDED = 'milk_production_recorded',
   WEIGHT_RECORDED = 'weight_recorded',
   FEED_CONSUMPTION_RECORDED = 'feed_consumption_recorded',
-  
+
   // Eventos de inventario
   MEDICATION_USED = 'medication_used',
   MEDICATION_EXPIRED = 'medication_expired',
   INVENTORY_UPDATED = 'inventory_updated',
   SUPPLY_ORDERED = 'supply_ordered',
-  
+
   // Eventos de seguridad
   LOGIN_ATTEMPT = 'login_attempt',
   LOGOUT = 'logout',
   PASSWORD_CHANGED = 'password_changed',
   PERMISSION_CHANGED = 'permission_changed',
-  
+
   // Eventos del sistema
   BACKUP_CREATED = 'backup_created',
   DATA_EXPORTED = 'data_exported',
@@ -73,7 +73,7 @@ interface StructuredLog {
   userEmail?: string;
   userRole?: UserRole;
   requestId?: string;
-  
+
   // Datos específicos del evento
   cattleId?: string;
   cattleEarTag?: string;
@@ -82,7 +82,7 @@ interface StructuredLog {
     longitude: number;
     address?: string;
   };
-  
+
   // Datos de contexto HTTP
   method?: string;
   path?: string;
@@ -90,12 +90,12 @@ interface StructuredLog {
   responseTime?: number;
   ip?: string;
   userAgent?: string;
-  
+
   // Datos adicionales del evento
   metadata?: {
     [key: string]: any;
   };
-  
+
   // Stack trace para errores
   stack?: string;
   error?: {
@@ -123,7 +123,7 @@ interface PerformanceMetrics {
 class CattleLogger {
   private static instance: CattleLogger;
   private performanceMetrics: PerformanceMetrics;
-  
+
   private constructor() {
     this.performanceMetrics = {
       requestCount: 0,
@@ -148,7 +148,7 @@ class CattleLogger {
   public log(logData: StructuredLog): void {
     // En producción, esto se enviaría a un servicio de logging como ELK, Splunk, etc.
     const logString = this.formatLog(logData);
-    
+
     switch (logData.level) {
       case LogLevel.ERROR:
         console.error(logString);
@@ -173,7 +173,7 @@ class CattleLogger {
 
     // Almacenar métricas
     this.updateMetrics(logData);
-    
+
     // Enviar logs críticos a sistemas de monitoreo
     if (logData.level === LogLevel.ERROR) {
       this.sendCriticalAlert(logData);
@@ -185,7 +185,7 @@ class CattleLogger {
    */
   private formatLog(logData: StructuredLog): string {
     const emoji = this.getLogEmoji(logData.level, logData.eventType);
-    
+
     if (process.env.NODE_ENV === 'development') {
       // Formato legible para desarrollo
       return `${emoji} [${logData.level.toUpperCase()}] ${logData.timestamp} - ${logData.message}
@@ -207,7 +207,7 @@ class CattleLogger {
   private getLogEmoji(level: LogLevel, eventType: string): string {
     if (level === LogLevel.ERROR) return '🚨';
     if (level === LogLevel.WARN) return '⚠️';
-    
+
     // Emojis específicos por tipo de evento ganadero
     const eventEmojis: { [key: string]: string } = {
       [CattleEventType.CATTLE_CREATED]: '🐄',
@@ -220,7 +220,7 @@ class CattleLogger {
       [CattleEventType.DATA_EXPORTED]: '📊',
       [CattleEventType.BACKUP_CREATED]: '💾'
     };
-    
+
     return eventEmojis[eventType] || '📝';
   }
 
@@ -229,27 +229,27 @@ class CattleLogger {
    */
   private updateMetrics(logData: StructuredLog): void {
     this.performanceMetrics.requestCount++;
-    
+
     if (logData.userId) {
       this.performanceMetrics.activeUsers.add(logData.userId);
     }
-    
+
     if (logData.level === LogLevel.ERROR) {
       this.performanceMetrics.errorCount++;
     }
-    
+
     if (logData.path) {
       const current = this.performanceMetrics.popularEndpoints.get(logData.path) || 0;
       this.performanceMetrics.popularEndpoints.set(logData.path, current + 1);
     }
-    
+
     if (logData.responseTime) {
       // Calcular promedio de tiempo de respuesta
       const currentAvg = this.performanceMetrics.averageResponseTime;
       const count = this.performanceMetrics.requestCount;
-      this.performanceMetrics.averageResponseTime = 
+      this.performanceMetrics.averageResponseTime =
         (currentAvg * (count - 1) + logData.responseTime) / count;
-      
+
       // Registrar consultas lentas
       if (logData.responseTime > 1000) {
         this.performanceMetrics.slowQueries.push({
@@ -257,7 +257,7 @@ class CattleLogger {
           duration: logData.responseTime,
           timestamp: logData.timestamp
         });
-        
+
         // Mantener solo las últimas 100 consultas lentas
         if (this.performanceMetrics.slowQueries.length > 100) {
           this.performanceMetrics.slowQueries.shift();
@@ -275,7 +275,7 @@ class CattleLogger {
     // - Email a administradores
     // - Push notifications
     // - Integración con PagerDuty, etc.
-    
+
     console.error('🚨 ALERTA CRÍTICA DEL SISTEMA GANADERO 🚨', {
       message: logData.message,
       event: logData.eventType,
@@ -320,9 +320,9 @@ const logger = CattleLogger.getInstance();
  */
 export const requestLogger = (req: Request, res: Response, next: NextFunction): void => {
   const startTime = Date.now();
-  const requestId = req.headers['x-request-id'] as string || 
-                   `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  
+  const requestId = req.headers['x-request-id'] as string ||
+    `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
   // Agregar requestId al request para uso posterior
   (req as any).requestId = requestId;
 
@@ -349,9 +349,9 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction): 
 
   // Interceptar la respuesta para logear cuando termine
   const originalSend = res.send;
-  res.send = function(data: any) {
+  res.send = function (data: any) {
     const responseTime = Date.now() - startTime;
-    
+
     logger.log({
       timestamp: new Date().toISOString(),
       level: res.statusCode >= 400 ? LogLevel.WARN : LogLevel.INFO,
@@ -365,7 +365,7 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction): 
       path: req.originalUrl,
       statusCode: res.statusCode,
       responseTime: responseTime,
-      ip: req.ip || req.connection.remoteAddress,
+      ip: req.ip || req.socket.remoteAddress || 'unknown',
       metadata: {
         responseSize: data ? JSON.stringify(data).length : 0
       }
@@ -519,11 +519,11 @@ function calculateDistance(
   const R = 6371; // Radio de la Tierra en kilómetros
   const dLat = (point2.latitude - point1.latitude) * Math.PI / 180;
   const dLon = (point2.longitude - point1.longitude) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(point1.latitude * Math.PI / 180) * Math.cos(point2.latitude * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(point1.latitude * Math.PI / 180) * Math.cos(point2.latitude * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c; // Distancia en kilómetros
 }
 
@@ -533,8 +533,8 @@ function calculateDistance(
 export const auditTrail = (operation: 'CREATE' | 'READ' | 'UPDATE' | 'DELETE', resource: string) => {
   return (req: Request, res: Response, next: NextFunction): void => {
     const originalSend = res.send;
-    
-    res.send = function(data: any) {
+
+    res.send = function (data: any) {
       // Solo logear operaciones exitosas
       if (res.statusCode >= 200 && res.statusCode < 300) {
         logger.log({
@@ -557,10 +557,10 @@ export const auditTrail = (operation: 'CREATE' | 'READ' | 'UPDATE' | 'DELETE', r
           }
         });
       }
-      
+
       return originalSend.call(this, data);
     };
-    
+
     next();
   };
 };

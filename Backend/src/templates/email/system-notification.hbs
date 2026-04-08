@@ -1,5 +1,4 @@
 {{! templates/email/system-notification.hbs }}
-  {{#*inline "content"}}
     <div class="system-notification-container">
       <h1 style="color: #6b7280;">🔔 {{title}}</h1>
       <p>Hola <strong>{{firstName}}</strong>,</p>
@@ -15,4 +14,3 @@
         {{> button text=actionText url=actionUrl }}
       {{/if}}
     </div>
-  {{/inline}}

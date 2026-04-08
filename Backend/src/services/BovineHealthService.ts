@@ -25,10 +25,18 @@ import Event, { EventPriority } from '../models/Event';
 import { HealthStatus } from '../models/Bovine';
 import { EventType, EventStatus } from '../models/Event';
 
-// Servicios (con lazy loading para evitar dependencias circulares)
+// Tipos usados solo para anotación — no generan dependencia circular en runtime
 import type { BovineService } from './BovineService';
 import type { BovineGeoService } from './BovineGeoService';
 import type { EventService } from './EventService';
+
+// ─── Caché de instancias lazy ─────────────────────────────────────────────────
+// Se resuelven la primera vez que se usan, no en el constructor.
+// Esto elimina la race condition: nunca accedemos a un servicio antes de que
+// su módulo haya terminado de cargarse.
+let _bovineServiceInstance: BovineService   | null = null;
+let _geoServiceInstance:    BovineGeoService | null = null;
+let _eventServiceInstance:  EventService    | null = null;
 
 // ============================================================================
 // INTERFACES PÚBLICAS
@@ -42,6 +50,11 @@ export interface HealthCheckData {
     checkDate: Date;
     veterinarianId: string;
     veterinarianName?: string;
+    // Estado de salud declarado explícitamente por el veterinario.
+    // Cuando se proporciona, tiene prioridad absoluta sobre cualquier
+    // inferencia automática — el veterinario siempre sabe más que el parser.
+    // Si se omite, determineHealthStatus lo infiere como fallback.
+    newHealthStatus?: HealthStatus;
     diagnosis?: string;
     diagnosisDetails?: any;
     treatment?: string;
@@ -127,32 +140,45 @@ export interface HealthHistoryFilters {
 export class BovineHealthService {
     private readonly context = 'BovineHealthService';
 
-    // Servicios con lazy loading
-    private bovineService!: BovineService;
-    private geoService!: BovineGeoService;
-    private eventService!: EventService;
+    // ─── Getters lazy para servicios dependientes ─────────────────────────────
+    //
+    // PATRÓN: cada getter resuelve la instancia la primera vez que se invoca
+    // y la guarda en la variable de módulo (_xxxInstance).
+    //
+    // POR QUÉ NO EL CONSTRUCTOR:
+    //   Un constructor no puede ser async. El patrón anterior hacía
+    //   `this.initializeServices()` sin await, dejando una promesa flotante.
+    //   Si llegaba una request antes de que la promesa resolviera,
+    //   this.geoService era undefined y el snapshot se perdía silenciosamente.
+    //
+    // POR QUÉ VARIABLES DE MÓDULO Y NO DE INSTANCIA:
+    //   BovineHealthService se exporta como singleton (ver final del archivo).
+    //   Las variables de módulo son equivalentes a propiedades de instancia
+    //   en ese caso, pero sobreviven sin riesgo si alguien crea una segunda
+    //   instancia accidentalmente.
 
-    constructor() {
-        // Inicialización lazy para evitar dependencias circulares
-        this.initializeServices();
+    private async getBovineService(): Promise<BovineService> {
+        if (!_bovineServiceInstance) {
+            const { bovineService } = await import('./BovineService');
+            _bovineServiceInstance = bovineService;
+        }
+        return _bovineServiceInstance;
     }
 
-    private async initializeServices(): Promise<void> {
-        try {
-            const [BovineModule, GeoModule, EventModule] = await Promise.all([
-                import('./BovineService'),
-                import('./BovineGeoService'),
-                import('./EventService')
-            ]);
-
-            this.bovineService = BovineModule.bovineService;
-            this.geoService = GeoModule.bovineGeoService;
-            this.eventService = EventModule.eventService;
-
-            logger.info('Servicios inicializados', this.context);
-        } catch (error) {
-            logger.error('Error inicializando servicios', this.context, {}, ensureError(error));
+    private async getGeoService(): Promise<BovineGeoService> {
+        if (!_geoServiceInstance) {
+            const { bovineGeoService } = await import('./BovineGeoService');
+            _geoServiceInstance = bovineGeoService;
         }
+        return _geoServiceInstance;
+    }
+
+    private async getEventService(): Promise<EventService> {
+        if (!_eventServiceInstance) {
+            const { eventService } = await import('./EventService');
+            _eventServiceInstance = eventService;
+        }
+        return _eventServiceInstance;
     }
 
     // ==========================================================================
@@ -232,42 +258,49 @@ export class BovineHealthService {
 
     /**
      * Programa el próximo chequeo de salud
-     * 
-     * @param bovineId - ID del bovino
-     * @param userId - ID del usuario que programa
-     * 
-     * ¿CÓMO FUNCIONA?
-     *   1. Calcula la fecha del próximo chequeo según estado
-     *   2. Crea un evento en el sistema de agenda
-     *   3. El evento disparará un recordatorio
+     *
+     * @param bovineId    - ID del bovino
+     * @param userId      - ID del usuario que programa
+     * @param transaction - Transacción activa (opcional).
+     *                      Si se proporciona, el evento se crea dentro de ella:
+     *                      si la transacción padre hace rollback, el evento
+     *                      también revierte y no quedan registros huérfanos.
      */
-    async scheduleNextHealthCheck(bovineId: string, userId: string): Promise<void> {
+    async scheduleNextHealthCheck(
+        bovineId: string,
+        userId: string,
+        transaction?: Transaction       // ← parámetro nuevo
+    ): Promise<void> {
         const startTime = Date.now();
 
         try {
-            // Obtener bovino
+            // Leer el bovino dentro de la misma transacción para ver el estado
+            // ya actualizado (sin transaction leeríamos datos pre-commit)
             const bovine = await Bovine.findByPk(bovineId, {
-                attributes: ['id', 'earTag', 'healthStatus', 'ranchId']
+                attributes: ['id', 'earTag', 'healthStatus', 'ranchId'],
+                transaction                 // ← propagado
             });
 
             if (!bovine) {
                 throw new BovineNotFoundError(bovineId);
             }
 
-            // Calcular próxima fecha según estado
-            const interval = CHECK_INTERVALS[bovine.healthStatus] || CHECK_INTERVALS[HealthStatus.HEALTHY];
+            // Calcular próxima fecha según el estado recién actualizado
+            const interval = CHECK_INTERVALS[bovine.healthStatus]
+                ?? CHECK_INTERVALS[HealthStatus.HEALTHY];
             const nextCheckDate = new Date();
             nextCheckDate.setDate(nextCheckDate.getDate() + interval);
 
-            // Determinar prioridad según estado
-            const priority = bovine.healthStatus === HealthStatus.SICK ||
+            // Prioridad según criticidad del estado
+            const priority =
+                bovine.healthStatus === HealthStatus.SICK ||
                 bovine.healthStatus === HealthStatus.QUARANTINE
-                ? EventPriority.HIGH
-                : EventPriority.MEDIUM;
+                    ? EventPriority.HIGH
+                    : EventPriority.MEDIUM;
 
-            // Crear evento si eventService está disponible
-            if (this.eventService) {
-                await this.eventService.createEvent({
+            const eventService = await this.getEventService();
+            await eventService.createEvent(
+                {
                     bovineId,
                     eventType: EventType.HEALTH_CHECK,
                     title: `Chequeo de salud - ${bovine.earTag}`,
@@ -282,8 +315,9 @@ export class BovineHealthService {
                         interval,
                         automatic: true
                     }
-                });
-            }
+                },
+                transaction             // ← propagado: si el padre revierte, el evento también
+            );
 
             const duration = Date.now() - startTime;
 
@@ -292,6 +326,7 @@ export class BovineHealthService {
                 nextCheckDate,
                 interval,
                 healthStatus: bovine.healthStatus,
+                withinTransaction: !!transaction,
                 durationMs: duration
             });
 
@@ -332,6 +367,13 @@ export class BovineHealthService {
         const startTime = Date.now();
 
         try {
+            // Resolver servicios antes de abrir la transacción evita que un fallo
+            // de import deje la transacción abierta
+            const [geoService, eventService] = await Promise.all([
+                this.getGeoService(),
+                this.getEventService()
+            ]);
+
             // Validar que el bovino existe
             const bovine = await Bovine.findByPk(data.bovineId, {
                 transaction,
@@ -379,20 +421,19 @@ export class BovineHealthService {
                 healthStatus: newHealthStatus
             }, { transaction });
 
-            // Actualizar snapshot si cambió el estado de salud
-            if (newHealthStatus !== bovine.healthStatus) {
-                await this.geoService?.updateSnapshot(data.bovineId, {
-                    healthStatus: newHealthStatus,
-                    healthColor: HEALTH_COLORS[newHealthStatus],
-                    lastHealthCheck: data.checkDate,
-                    diagnosis: data.diagnosis,
-                    lastUpdate: new Date()
-                }, transaction);
-            }
+            // Actualizar snapshot — siempre, aunque el estado no cambie,
+            // porque el diagnóstico y la fecha de chequeo sí cambiaron
+            await geoService.updateSnapshot(data.bovineId, {
+                healthStatus: newHealthStatus,
+                healthColor: HEALTH_COLORS[newHealthStatus],
+                lastHealthCheck: data.checkDate,
+                diagnosis: data.diagnosis,
+                lastUpdate: new Date()
+            }, transaction);
 
             // Programar próximo chequeo si hay fecha de seguimiento
             if (data.followUpDate) {
-                await this.eventService?.createEvent({
+                await eventService.createEvent({
                     bovineId: data.bovineId,
                     eventType: EventType.HEALTH_CHECK,
                     title: `Chequeo de seguimiento - ${bovine.earTag}`,
@@ -409,6 +450,12 @@ export class BovineHealthService {
                         previousHealthRecordId: healthRecord.id
                     }
                 }, transaction);
+            } else {
+                // Sin fecha de seguimiento explícita: programar el próximo
+                // chequeo rutinario según el intervalo del estado de salud.
+                // Se hace dentro de la transacción: si algo falla antes del
+                // commit, el evento también revierte y no queda huérfano.
+                await this.scheduleNextHealthCheck(data.bovineId, userId, transaction);
             }
 
             await transaction.commit();
@@ -457,12 +504,21 @@ export class BovineHealthService {
         bovineId: string,
         newStatus: HealthStatus,
         userId: string,
-        reason?: string
+        reason?: string,
+        externalTransaction?: Transaction   // ← acepta transacción externa (Fix #5)
     ): Promise<void> {
-        const transaction = await sequelize.transaction();
+        // Si nos pasan una transacción externa la usamos; si no, creamos una propia
+        const transaction = externalTransaction ?? await sequelize.transaction();
+        const isOwnTransaction = !externalTransaction;
         const startTime = Date.now();
 
         try {
+            // Resolver servicios garantizando que están disponibles
+            const [geoService, eventService] = await Promise.all([
+                this.getGeoService(),
+                this.getEventService()
+            ]);
+
             const bovine = await Bovine.findByPk(bovineId, {
                 transaction,
                 attributes: ['id', 'healthStatus', 'ranchId']
@@ -477,36 +533,33 @@ export class BovineHealthService {
             // No hacer nada si es el mismo estado
             if (previousStatus === newStatus) {
                 logger.debug(`Estado de salud ya es ${newStatus} para bovino ${bovineId}`, this.context);
+                if (isOwnTransaction) await transaction.rollback();
                 return;
             }
 
             // Actualizar bovino
             await bovine.update({ healthStatus: newStatus }, { transaction });
 
-            // Actualizar snapshot
-            await this.geoService?.updateSnapshot(bovineId, {
+            // Actualizar snapshot — garantizado, sin optional chaining
+            await geoService.updateSnapshot(bovineId, {
                 healthStatus: newStatus,
                 healthColor: HEALTH_COLORS[newStatus],
                 lastUpdate: new Date()
             }, transaction);
 
-            // Crear evento de cambio de salud si eventService está disponible
-            if (this.eventService) {
-                await this.eventService.createEventFromAction('HEALTH_STATUS_CHANGED', {
-                    bovineId,
-                    userId,
-                    metadata: {
-                        from: previousStatus,
-                        to: newStatus,
-                        reason
-                    }
-                }, transaction);
-            }
+            // Crear evento de cambio de salud
+            await eventService.createEventFromAction('HEALTH_STATUS_CHANGED', {
+                bovineId,
+                userId,
+                metadata: { from: previousStatus, to: newStatus, reason }
+            }, transaction);
 
-            // Reprogramar próximo chequeo según nuevo estado
-            await this.scheduleNextHealthCheck(bovineId, userId);
+            // Reprogramar próximo chequeo dentro de la misma transacción.
+            // Sin esto, el evento se comprometería aunque el resto del bloque
+            // falle y haga rollback — dejando un evento huérfano en la BD.
+            await this.scheduleNextHealthCheck(bovineId, userId, transaction);
 
-            await transaction.commit();
+            if (isOwnTransaction) await transaction.commit();
 
             const duration = Date.now() - startTime;
 
@@ -519,7 +572,7 @@ export class BovineHealthService {
             });
 
         } catch (error) {
-            await transaction.rollback();
+            if (isOwnTransaction) await transaction.rollback();
             const duration = Date.now() - startTime;
             logger.error(`Error actualizando estado de salud para bovino ${bovineId}`, this.context, {
                 bovineId,
@@ -548,10 +601,15 @@ export class BovineHealthService {
         transaction?: Transaction
     ): Promise<void> {
         try {
-            // Ya se maneja en updateHealthStatus, pero este método existe para
-            // mantener la compatibilidad con otros servicios
-            await this.updateHealthStatus(bovine.id, newStatus, userId,
-                `Cambio automático desde ${previousStatus}`);
+            // Propagamos la transacción externa para que updateHealthStatus
+            // no abra una propia — evita transacciones anidadas no controladas
+            await this.updateHealthStatus(
+                bovine.id,
+                newStatus,
+                userId,
+                `Cambio automático desde ${previousStatus}`,
+                transaction
+            );
         } catch (error) {
             logger.error(`Error manejando cambio de estado de salud`, this.context, {
                 bovineId: bovine.id,
@@ -627,7 +685,7 @@ export class BovineHealthService {
 
     /**
      * Obtiene estadísticas de salud del hato
-     * 
+     *
      * @param ranchId - ID del rancho
      * @returns Estadísticas agregadas
      */
@@ -635,96 +693,86 @@ export class BovineHealthService {
         const startTime = Date.now();
 
         try {
-            // Consulta 1: Conteo por estado de salud
-            const statusCounts = await Bovine.findAll({
-                where: { ranchId, isActive: true },
-                attributes: [
-                    'healthStatus',
-                    [sequelize.fn('COUNT', sequelize.col('healthStatus')), 'count']
-                ],
-                group: ['healthStatus']
-            });
+            // Calcular fechas una sola vez fuera del Promise.all
+            const now            = new Date();
+            const sevenDaysAgo   = new Date(now); sevenDaysAgo.setDate(now.getDate() - 7);
+            const sevenDaysAhead = new Date(now); sevenDaysAhead.setDate(now.getDate() + 7);
+            const thirtyDaysAgo  = new Date(now); thirtyDaysAgo.setDate(now.getDate() - 30);
 
-            // Inicializar contadores
+            // ── Las 4 queries son completamente independientes entre sí.
+            // En secuencia: ~400 ms. En paralelo: ~100 ms (la más lenta).
+            const [
+                statusCounts,
+                recentChecks,
+                upcomingChecks,
+                commonDiagnosisRaw
+            ] = await Promise.all([
+
+                // Query 1: conteo de bovinos por estado de salud
+                Bovine.findAll({
+                    where: { ranchId, isActive: true },
+                    attributes: [
+                        'healthStatus',
+                        [sequelize.fn('COUNT', sequelize.col('health_status')), 'count']
+                    ],
+                    group: ['health_status']
+                }),
+
+                // Query 2: chequeos realizados en los últimos 7 días
+                Health.count({
+                    where: { recordDate: { [Op.gte]: sevenDaysAgo } },
+                    include: [{ model: Bovine, where: { ranchId }, attributes: [] }]
+                }),
+
+                // Query 3: chequeos programados en los próximos 7 días
+                Event.count({
+                    where: {
+                        eventType: EventType.HEALTH_CHECK,
+                        scheduledDate: { [Op.between]: [now, sevenDaysAhead] },
+                        status: EventStatus.SCHEDULED
+                    },
+                    include: [{ model: Bovine, where: { ranchId }, attributes: [] }]
+                }),
+
+                // Query 4: top 5 diagnósticos de los últimos 30 días
+                Health.findAll({
+                    where: { recordDate: { [Op.gte]: thirtyDaysAgo } },
+                    attributes: [
+                        [sequelize.literal("diagnosis->>'primaryDiagnosis'"), 'diagnosis'],
+                        [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+                    ],
+                    include: [{ model: Bovine, where: { ranchId }, attributes: [] }],
+                    group: [sequelize.literal("diagnosis->>'primaryDiagnosis'") as any],
+                    order: [[sequelize.literal('count'), 'DESC']],
+                    limit: 5
+                })
+            ]);
+
+            // Agregar conteos por estado
             const byStatus = {
-                [HealthStatus.HEALTHY]: 0,
-                [HealthStatus.SICK]: 0,
+                [HealthStatus.HEALTHY]:    0,
+                [HealthStatus.SICK]:       0,
                 [HealthStatus.RECOVERING]: 0,
                 [HealthStatus.QUARANTINE]: 0,
-                [HealthStatus.DECEASED]: 0,
-                [HealthStatus.UNKNOWN]: 0
+                [HealthStatus.DECEASED]:   0,
+                [HealthStatus.UNKNOWN]:    0
             };
-
             let totalBovines = 0;
 
-            // Procesar resultados
             statusCounts.forEach((item: any) => {
                 const status = item.healthStatus as HealthStatus;
-                const count = parseInt(item.getDataValue('count'));
+                const count  = parseInt(item.getDataValue('count'), 10);
                 if (status in byStatus) {
                     byStatus[status] = count;
-                    totalBovines += count;
+                    totalBovines    += count;
                 }
-            });
-
-            // Consulta 2: Chequeos recientes (últimos 7 días)
-            const sevenDaysAgo = new Date();
-            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-            const recentChecks = await Health.count({
-                where: {
-                    recordDate: { [Op.gte]: sevenDaysAgo }
-                },
-                include: [{
-                    model: Bovine,
-                    where: { ranchId }
-                }]
-            });
-
-            // Consulta 3: Próximos chequeos (próximos 7 días)
-            const sevenDaysFromNow = new Date();
-            sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-
-            const upcomingChecks = await Event.count({
-                where: {
-                    eventType: EventType.HEALTH_CHECK,
-                    scheduledDate: {
-                        [Op.between]: [new Date(), sevenDaysFromNow]
-                    },
-                    status: EventStatus.SCHEDULED
-                },
-                include: [{
-                    model: Bovine,
-                    where: { ranchId }
-                }]
-            });
-
-            // Consulta 4: Diagnósticos más comunes (últimos 30 días)
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-            const commonDiagnosisRaw = await Health.findAll({
-                where: {
-                    recordDate: { [Op.gte]: thirtyDaysAgo }
-                },
-                attributes: [
-                    [sequelize.literal("diagnosis->>'primaryDiagnosis'"), 'diagnosis'],
-                    [sequelize.fn('COUNT', sequelize.col('id')), 'count']
-                ],
-                include: [{
-                    model: Bovine,
-                    where: { ranchId }
-                }],
-                group: [sequelize.literal("diagnosis->>'primaryDiagnosis'") as any, "diagnosis"],
-                order: [[sequelize.literal('count'), 'DESC']],
-                limit: 5
             });
 
             const commonDiagnosis = commonDiagnosisRaw
                 .filter((item: any) => item.getDataValue('diagnosis'))
                 .map((item: any) => ({
-                    diagnosis: item.getDataValue('diagnosis'),
-                    count: parseInt(item.getDataValue('count'))
+                    diagnosis: item.getDataValue('diagnosis') as string,
+                    count:     parseInt(item.getDataValue('count'), 10)
                 }));
 
             const duration = Date.now() - startTime;
@@ -738,8 +786,12 @@ export class BovineHealthService {
             return {
                 totalBovines,
                 byStatus,
-                healthyPercentage: totalBovines ? (byStatus[HealthStatus.HEALTHY] / totalBovines) * 100 : 0,
-                sickPercentage: totalBovines ? ((byStatus[HealthStatus.SICK] + byStatus[HealthStatus.QUARANTINE]) / totalBovines) * 100 : 0,
+                healthyPercentage: totalBovines
+                    ? (byStatus[HealthStatus.HEALTHY] / totalBovines) * 100
+                    : 0,
+                sickPercentage: totalBovines
+                    ? ((byStatus[HealthStatus.SICK] + byStatus[HealthStatus.QUARANTINE]) / totalBovines) * 100
+                    : 0,
                 criticalCount: byStatus[HealthStatus.QUARANTINE],
                 recentChecks,
                 upcomingChecks,
@@ -875,38 +927,78 @@ export class BovineHealthService {
     }
 
     /**
-     * Determina el estado de salud basado en el diagnóstico
+     * Determina el estado de salud resultante del chequeo.
+     *
+     * JERARQUÍA DE DECISIÓN (de mayor a menor prioridad):
+     *
+     *   1. `data.newHealthStatus` — declaración explícita del veterinario.
+     *      Es la fuente más fiable. Si el veterinario lo envía, se usa siempre.
+     *
+     *   2. Inferencia por keywords — fallback cuando el veterinario no envía
+     *      `newHealthStatus`. Útil para integraciones externas o formularios
+     *      simples que aún no exponen el campo.
+     *      ⚠️ Es un heurístico frágil: documentado intencionalmente para que
+     *      sea fácil de encontrar y reemplazar cuando el frontend lo soporte.
+     *
+     *   3. `HEALTHY` — estado por defecto cuando no hay señales de enfermedad.
      */
     private determineHealthStatus(data: HealthCheckData): HealthStatus {
-        // Si hay diagnóstico de enfermedad grave
+        // ── Prioridad 1: declaración explícita del veterinario ───────────────
+        if (data.newHealthStatus) {
+            // Validar que el valor es un HealthStatus conocido
+            if (!Object.values(HealthStatus).includes(data.newHealthStatus)) {
+                throw new BovineValidationError(
+                    `newHealthStatus inválido: "${data.newHealthStatus}". ` +
+                    `Valores permitidos: ${Object.values(HealthStatus).join(', ')}`
+                );
+            }
+            return data.newHealthStatus;
+        }
+
+        // ── Prioridad 2: inferencia por keywords (fallback) ──────────────────
         if (data.diagnosis) {
             const diagnosisLower = data.diagnosis.toLowerCase();
 
-            // Palabras clave para estados críticos
-            const criticalKeywords = ['critical', 'grave', 'emergencia', 'urgencia'];
-            if (criticalKeywords.some(k => diagnosisLower.includes(k))) {
-                return HealthStatus.SICK;
-            }
-
-            // Palabras clave para cuarentena
-            const quarantineKeywords = ['contagioso', 'infeccioso', 'cuarentena', 'aislamiento'];
+            // Cuarentena tiene prioridad sobre SICK — es más restrictiva
+            const quarantineKeywords = [
+                'contagioso', 'contagiosa',
+                'infeccioso', 'infecciosa',
+                'cuarentena', 'aislamiento',
+                'zoonosis', 'epizootia'
+            ];
             if (quarantineKeywords.some(k => diagnosisLower.includes(k))) {
                 return HealthStatus.QUARANTINE;
             }
 
-            // Palabras clave para enfermedad
-            const sickKeywords = ['enfermo', 'infección', 'enfermedad', 'diagnóstico'];
+            // Señales claras de enfermedad activa
+            const sickKeywords = [
+                'crítico', 'critico', 'grave',
+                'emergencia', 'urgencia',
+                'infección', 'infeccion',
+                'fiebre', 'mastitis', 'neumonía', 'neumonia',
+                'diarrea', 'cojera', 'parásito', 'parasito'
+            ];
             if (sickKeywords.some(k => diagnosisLower.includes(k))) {
                 return HealthStatus.SICK;
             }
+
+            // Señales de recuperación en curso
+            const recoveringKeywords = [
+                'recuperación', 'recuperacion',
+                'mejorando', 'convalecencia',
+                'post-tratamiento', 'seguimiento'
+            ];
+            if (recoveringKeywords.some(k => diagnosisLower.includes(k))) {
+                return HealthStatus.RECOVERING;
+            }
         }
 
-        // Si hay tratamiento pero no diagnóstico claro
+        // Tratamiento activo sin diagnóstico de enfermedad → recuperándose
         if (data.treatment && !data.diagnosis) {
             return HealthStatus.RECOVERING;
         }
 
-        // Por defecto, si todo está bien
+        // ── Prioridad 3: default ─────────────────────────────────────────────
         return HealthStatus.HEALTHY;
     }
 

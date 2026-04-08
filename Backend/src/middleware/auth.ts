@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { tokenService } from '../services/auth';
 import { permissionService } from '../services/permission';
-import  User, { UserRole } from '../models/User';
+import User, { UserRole } from '../models/User';
 import logger from '../utils/logger';
 
 /*
@@ -86,12 +86,10 @@ interface TokenPayload {
   email: string;
   role: UserRole;
   permissions?: Permission[];
-  iat?: number;  
-  exp?: number;  
+  iat?: number;
+  exp?: number;
   jti?: string;
 }
-
-export const mockUserDatabase: Record<string, User> = {};
 
 /**
  * Función helper para buscar usuario por ID
@@ -109,7 +107,10 @@ const findUserById = async (userId: string): Promise<User | null> => {
         'securityInfo',
         'personalInfo',
         'created_at',
-        'updated_at'
+        'updated_at',
+        'isActive',
+        'emailVerified',
+        'subscriptionInfo'
       ]
     });
   } catch (error) {
@@ -123,11 +124,10 @@ const findUserById = async (userId: string): Promise<User | null> => {
  * En producción, esta sería reemplazada por el modelo de Sequelize
  */
 const updateUserActivity = async (userId: string): Promise<void> => {
-  // TODO: Reemplazar con actualización real en la base de datos
-  // await User.update({ lastLoginAt: new Date() }, { where: { id: userId } });
-  if (mockUserDatabase[userId]) {
-    mockUserDatabase[userId].lastLoginAt = new Date();
-  }
+  await User.update(
+    { lastLoginAt: new Date() },
+    { where: { id: userId } }
+  );
 };
 
 /**
@@ -168,7 +168,7 @@ export const authenticateToken = async (
     if (user.securityInfo?.passwordLastChanged) {
       const tokenIssuedAt = decoded.iat ? new Date(decoded.iat * 1000) : null;
       const passwordChangedAt = new Date(user.securityInfo.passwordLastChanged);
-      
+
       if (tokenIssuedAt && tokenIssuedAt < passwordChangedAt) {
         // El token fue emitido ANTES de que cambiara la contraseña
         // Por lo tanto, es inválido
@@ -179,15 +179,18 @@ export const authenticateToken = async (
         );
       }
     }
-    
+
 
     // Verificar si el usuario está activo
-    if (!user.isActive) {
+    if (!user.isActive || user.status !== 'ACTIVE') {
       throw new ApiError(401, 'Cuenta de usuario desactivada', 'USER_INACTIVE');
     }
 
+    const exemptPaths = ['/verify-email', '/resend-verification', '/logout'];
+    const isExempt = exemptPaths.some(p => req.path.endsWith(p));
+
     // Verificar si la cuenta está verificada (para ciertos endpoints)
-    if (!user.emailVerified && req.path !== '/auth/verify-email') {
+    if (!user.emailVerified && !isExempt) {
       throw new ApiError(401, 'Email no verificado', 'EMAIL_NOT_VERIFIED');
     }
 
@@ -204,7 +207,7 @@ export const authenticateToken = async (
     if (error instanceof jwt.JsonWebTokenError) {
       return next(new ApiError(401, 'Token inválido', 'INVALID_TOKEN'));
     }
-    
+
     if (error instanceof jwt.TokenExpiredError) {
       return next(new ApiError(401, 'Token expirado', 'EXPIRED_TOKEN'));
     }
@@ -334,7 +337,7 @@ export const checkResourceOwnership = (userIdField: string = 'userId') => {
 
     // Verificar propiedad del recurso
     const resourceUserId = req.params[userIdField] || req.body[userIdField];
-    
+
     if (resourceUserId && resourceUserId !== req.userId) {
       return next(new ApiError(403, 'Sin acceso a este recurso', 'RESOURCE_ACCESS_DENIED'));
     }
@@ -401,15 +404,15 @@ export const optionalAuth = async (
  * Middleware para verificar límites de API basados en el rol del usuario
  */
 export const checkApiLimits = (req: Request, res: Response, next: NextFunction): void => {
- 
+
   if (!req.user) {
     return next(new ApiError(401, 'Usuario no autenticado', 'NOT_AUTHENTICATED'));
   }
-  
+
   if (!req.userRole) {
     return next(new ApiError(500, 'userRole no está definido', 'MISSING_USER_ROLE'));
   }
-  
+
 
   // Definir límites por rol
   const roleLimits: Record<UserRole, { requestsPerHour: number }> = {
@@ -423,7 +426,7 @@ export const checkApiLimits = (req: Request, res: Response, next: NextFunction):
   };
 
   const userLimit = roleLimits[req.userRole];
-  
+
   // Aquí se implementaría la lógica de rate limiting
   // Por ahora solo añadimos la información al request
   req.apiLimits = userLimit;
@@ -464,7 +467,7 @@ export const logUserActivity = (action: string) => {
     if (req.user) {
       // Aquí se registraría la actividad del usuario
       console.log(`Usuario ${req.user.email} realizó acción: ${action} en ${new Date().toISOString()}`);
-      
+
       // En un entorno real, esto se guardaría en base de datos
       // await UserActivity.create({
       //   userId: req.userId,

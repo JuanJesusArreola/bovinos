@@ -4,6 +4,7 @@ import { financeController } from '../controllers/finance.controller';
 import { authenticateToken } from '../middleware/auth';
 import { requireMinimumRole } from '../middleware/role';
 import { UserRole } from '../models/User';
+import { validateFinance } from '../validators/finance.validators';
 
 const router = Router();
 
@@ -13,6 +14,7 @@ router.use(authenticateToken);
 router.post(
   '/',
   requireMinimumRole(UserRole.MANAGER),
+  validateFinance('createTransaction'),
   financeController.createTransaction
 );
 router.get(
@@ -28,6 +30,7 @@ router.get(
 router.put(
   '/:id',
   requireMinimumRole(UserRole.MANAGER),
+  validateFinance('updateTransaction'),
   financeController.updateTransaction
 );
 router.delete(

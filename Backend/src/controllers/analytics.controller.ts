@@ -4,20 +4,29 @@ import { analyticsService } from '../services/analytics/';
 import { BovineError } from '../utils/BovineErrors';
 import logger from '../utils/logger';
 import { HealthStatus } from '../models/Bovine';
-
-// controllers/AnalyticsController.ts
+import { UserRole } from '../models/User';
+import { dashboardService } from '../services/analytics/DashboardService';
 
 export class AnalyticsController {
     private readonly context = 'AnalyticsController';
 
     /**
      * GET /api/analytics/dashboard
-     * Obtiene dashboard completo (salud, producción, finanzas)
+     * Obtiene dashboard filtrado por rol del usuario autenticado.
+     *
+     * El servicio decide qué secciones incluir según el rol:
+     * - SUPER_ADMIN/OWNER: todo + sección de usuarios
+     * - RANCH_MANAGER: salud completa + producción + finanzas parciales
+     * - MANAGER: salud resumida + producción + finanzas mínimas
+     * - VETERINARIAN: salud completa + producción resumida, sin finanzas
+     * - WORKER/VIEWER: resúmenes básicos, sin finanzas
      */
     async getDashboard(req: Request, res: Response): Promise<void> {
         try {
-            const userId = req.user?.id;
-            if (!userId) {
+            const user = req.user;
+            const userRole = req.userRole;
+
+            if (!user || !userRole) {
                 res.status(401).json({
                     success: false,
                     error: 'Usuario no autenticado'
@@ -43,7 +52,11 @@ export class AnalyticsController {
                 compareWithPrevious: compareWithPrevious === 'true'
             };
 
-            const dashboard = await analyticsService.getDashboard(filters);
+            const dashboard = await dashboardService.getRoleDashboard(filters, {
+                id: user.id,
+                role: userRole,
+                ranchAccess: user.ranchAccess?.filter(a => a.isActive)
+            });
 
             res.json({
                 success: true,

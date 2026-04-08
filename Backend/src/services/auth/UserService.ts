@@ -463,11 +463,11 @@ export class UserService {
                 isVerified: false,
                 emailVerified: false,
                 phoneVerified: false,
-                createdBy: data.createdBy||null,
+                createdBy: data.createdBy || null,
                 pushTokens: []       // ← PASADO EXPLÍCITAMENTE
             } as UserCreationAttributes, { transaction: t });
 
-            
+
 
             if (isOwnTransaction) await t.commit();
 
@@ -586,7 +586,17 @@ export class UserService {
             }
 
             const offset = (page - 1) * limit;
-            const sortBy = filters.sortBy || 'createdAt';
+
+            const sortMap: Record<string, string> = {
+                createdAt: 'created_at',
+                updatedAt: 'updated_at',
+                email: 'email',
+                username: 'username',
+                role: 'role',
+                status: 'status'
+            };
+
+            const sortBy = sortMap[filters.sortBy || 'createdAt'] || 'created_at';
             const sortOrder = filters.sortOrder || 'DESC';
 
             const { rows, count } = await User.findAndCountAll({

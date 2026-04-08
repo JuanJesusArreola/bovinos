@@ -156,137 +156,141 @@ export class TokenBlacklist extends Model<
 // INICIALIZACIÓN DEL MODELO
 // =============================================
 
-  TokenBlacklist.init(
-    {
-      id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        primaryKey: true,
-        allowNull: false,
-        comment: 'ID único del registro de blacklist',
+TokenBlacklist.init(
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+      allowNull: false,
+      comment: 'ID único del registro de blacklist',
+    },
+    user_id: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: 'users',
+        key: 'id',
       },
-      user_id: {
-        type: DataTypes.UUID,
-        allowNull: false,
-        references: {
-          model: 'users',
-          key: 'id',
-        },
-        onUpdate: 'CASCADE',
-        onDelete: 'CASCADE',
-        comment: 'ID del usuario propietario del token (opcional)',
-      },
-      token_type: {
-        type: DataTypes.ENUM(...Object.values(TokenType)),
-        allowNull: false,
-        validate: {
-          isIn: [[TokenType.ACCESS, TokenType.REFRESH]],
-        },
-      },
-      token_jti: {
-        type: DataTypes.STRING(255),
-        allowNull: false,
-        comment: 'JWT ID único del token para identificación específica',
-      },
-      token_hash: {
-        type: DataTypes.STRING(255),
-        allowNull: false,
-        comment: 'Hash del token para búsquedas rápidas sin exponer el token completo',
-      },
-      expires_at: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        validate: {
-          isDate: true,
-          isAfterCreated(value: Date): void {
-            if (this.created_at && value <= this.created_at) {
-              throw new Error('La fecha de expiración debe ser posterior a la fecha de creación');
-            }
-          }
-        },
-        comment: 'Fecha y hora de expiración del token original',
-      },
-      reason: {
-        type: DataTypes.ENUM(...Object.values(RevocationReason)),
-        allowNull: true,
-        validate: {
-          isIn: [[RevocationReason.LOGOUT,
-          RevocationReason.PASSWORD_CHANGE,
-          RevocationReason.ACCOUNT_LOCKED,
-          RevocationReason.ADMIN_REVOKE,
-          RevocationReason.SECURITY_BREACH,
-          RevocationReason.TOKEN_ROTATION]],
-        },
-      },
-      ip_address: {
-        type: DataTypes.STRING(45),
-        allowNull: true,
-        validate: {
-          isIP: true,
-        },
-        comment: 'Dirección IP desde donde se revocó el token',
-      },
-      user_agent: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-        comment: 'User agent del navegador que revocó el token',
-      },
-      revoked_by: {
-        type: DataTypes.UUID,
-        allowNull: true,
-        references: {
-          model: 'users',
-          key: 'id',
-        },
-        onUpdate: 'CASCADE',
-        onDelete: 'SET NULL',
-        comment: 'ID del usuario que revocó el token (opcional)',
-      },
-      created_at: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        defaultValue: DataTypes.NOW,
-        comment: 'Fecha y hora de creación del registro',
-      },
-      updated_at: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        defaultValue: DataTypes.NOW,
-        comment: 'Fecha y hora de última actualización del registro',
+      onUpdate: 'CASCADE',
+      onDelete: 'CASCADE',
+      comment: 'ID del usuario propietario del token (opcional)',
+    },
+    token_type: {
+      type: DataTypes.ENUM(...Object.values(TokenType)),
+      allowNull: false,
+      validate: {
+        isIn: [[TokenType.ACCESS, TokenType.REFRESH]],
       },
     },
-    {
-      sequelize,
-      tableName: 'token_blacklist',
-      timestamps: true,
-      createdAt: 'created_at',
-      updatedAt: 'updated_at',
-      comment: 'Lista negra de tokens JWT revocados. Incluye tokens de acceso y refresh que han sido invalidados por logout, cambio de contraseña u otras razones de seguridad.',
-      indexes: [
-        {
-          fields: ['user_id'],
-        },
-        {
-          fields: ['token_jti'],
-          unique: true,
-        },
-        {
-          fields: ['expires_at'],
-        },
-        {
-          fields: ['token_hash', 'expires_at'],
-        },
-        {
-          fields: ['token_hash', 'expires_at'],
-          name: 'idx_token_blacklist_lookup',
-        },
-        {
-          fields: ['user_id', 'token_type', 'created_at'],
-          name: 'idx_token_blacklist_user_type_time',
+    token_jti: {
+      type: DataTypes.STRING(255),
+      allowNull: false,
+      comment: 'JWT ID único del token para identificación específica',
+    },
+    token_hash: {
+      type: DataTypes.STRING(255),
+      allowNull: false,
+      comment: 'Hash del token para búsquedas rápidas sin exponer el token completo',
+    },
+    expires_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      validate: {
+        isDate: true,
+        isAfterCreated(value: Date): void {
+          if (this.created_at && value <= this.created_at) {
+            throw new Error('La fecha de expiración debe ser posterior a la fecha de creación');
+          }
         }
-      ],
-    }
-  );
+      },
+      comment: 'Fecha y hora de expiración del token original',
+    },
+    reason: {
+      type: DataTypes.ENUM(...Object.values(RevocationReason)),
+      allowNull: true,
+      validate: {
+        isIn: [[RevocationReason.LOGOUT,
+        RevocationReason.PASSWORD_CHANGE,
+        RevocationReason.ACCOUNT_LOCKED,
+        RevocationReason.ADMIN_REVOKE,
+        RevocationReason.SECURITY_BREACH,
+        RevocationReason.TOKEN_ROTATION,
+        RevocationReason.PASSWORD_RESET,
+        RevocationReason.ACCOUNT_DELETED,
+        RevocationReason.ACCOUNT_SUSPENDED,
+        RevocationReason.LOGOUT_ALL_DEVICES]],
+      },
+    },
+    ip_address: {
+      type: DataTypes.STRING(45),
+      allowNull: true,
+      validate: {
+        isIP: true,
+      },
+      comment: 'Dirección IP desde donde se revocó el token',
+    },
+    user_agent: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'User agent del navegador que revocó el token',
+    },
+    revoked_by: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'users',
+        key: 'id',
+      },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+      comment: 'ID del usuario que revocó el token (opcional)',
+    },
+    created_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+      comment: 'Fecha y hora de creación del registro',
+    },
+    updated_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+      comment: 'Fecha y hora de última actualización del registro',
+    },
+  },
+  {
+    sequelize,
+    tableName: 'token_blacklist',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    comment: 'Lista negra de tokens JWT revocados. Incluye tokens de acceso y refresh que han sido invalidados por logout, cambio de contraseña u otras razones de seguridad.',
+    indexes: [
+      {
+        fields: ['user_id'],
+      },
+      {
+        fields: ['token_jti'],
+        unique: true,
+      },
+      {
+        fields: ['expires_at'],
+      },
+      {
+        fields: ['token_hash', 'expires_at'],
+      },
+      {
+        fields: ['token_hash', 'expires_at'],
+        name: 'idx_token_blacklist_lookup',
+      },
+      {
+        fields: ['user_id', 'token_type', 'created_at'],
+        name: 'idx_token_blacklist_user_type_time',
+      }
+    ],
+  }
+);
 
 
 export default TokenBlacklist;
