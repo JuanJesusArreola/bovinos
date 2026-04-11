@@ -140,16 +140,23 @@ class CattleValidator {
     }
     
     // Rangos típicos por tipo de ganado (en kg)
-    const weightRanges = {
+    // Soporta tanto minúsculas (enum de validación) como mayúsculas (enum del modelo)
+    const defaultRange = { min: 25, max: 1200 };
+    const weightRanges: Record<string, { min: number; max: number }> = {
       [CattleType.CALF]: { min: 25, max: 150 },
       [CattleType.HEIFER]: { min: 150, max: 500 },
       [CattleType.COW]: { min: 400, max: 800 },
       [CattleType.BULL]: { min: 500, max: 1200 },
       [CattleType.STEER]: { min: 300, max: 800 },
-      [CattleType.CATTLE]: { min: 25, max: 1200 } // Rango general
+      [CattleType.CATTLE]: defaultRange,
+      // Variantes en mayúsculas del modelo Bovine
+      'CALF': { min: 25, max: 150 },
+      'COW': { min: 400, max: 800 },
+      'BULL': { min: 500, max: 1200 },
+      'CATTLE': defaultRange,
     };
-    
-    const range = weightRanges[cattleType];
+
+    const range = weightRanges[cattleType] || defaultRange;
     if (weight < range.min || weight > range.max) {
       errors.push({
         field: 'weight',

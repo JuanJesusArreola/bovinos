@@ -65,12 +65,12 @@ router.get(
 
 /**
  * POST /api/bovines
- * Crea un nuevo bovino (requiere rol ADMIN o MANAGER)
+ * Crea un nuevo bovino (requiere rol ADMIN o MANAGER o OWNER)
  */
 router.post(
     '/',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER),
     ...createBovineSchema,
     runValidation,
     bovineController.createBovine
@@ -78,12 +78,12 @@ router.post(
 
 /**
  * PUT /api/bovines/:id
- * Actualiza un bovino existente (requiere rol ADMIN o MANAGER)
+ * Actualiza un bovino existente (requiere rol ADMIN o MANAGER o OWNER)
  */
 router.put(
     '/:id',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER),
     validateId('id'),
     ...updateBovineSchema,
     runValidation,
@@ -95,9 +95,9 @@ router.put(
  * Elimina (soft delete) un bovino (requiere rol ADMIN)
  */
 router.delete(
-    '/:id',
+    '/:id', 
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN), // CORREGIDO: solo un rol
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER,), // CORREGIDO: solo un rol
     validateId('id'),
     bovineController.deleteBovine
 );
@@ -109,7 +109,7 @@ router.delete(
 router.post(
     '/:id/regenerate-qr',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER), // CORREGIDO
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER), // CORREGIDO
     validateId('id'),
     bovineController.regenerateQR
 );

@@ -35,6 +35,7 @@ declare global {
 // Rutas de autenticación y usuarios
 
 
+import bovineRoutes from './bovine.routes';
 import eventRoutes from './event.routes';
 import notificationRoutes from './notification.routes';
 import medicationRoutes from './medication.routes';
@@ -63,11 +64,7 @@ import userRoutes from './auth/user.routes';
 import productionRoutes from './production.routes';
 
 
-import { bovineController } from '../controllers/bovine.controller';
-import { bovineGeoController } from '../controllers/bovine-geo.controller';
-import { bovineHealthController } from '../controllers/bovine-health.controller';
-import { bovineTrackingController } from '../controllers/bovine-tracking.controller';
-import { bovineLocationController } from '../controllers/bovine-location.controller';
+// Bovine controllers are loaded through bovine.routes.ts
 
 // ===================================================================
 // CONFIGURACIÓN DEL ROUTER PRINCIPAL
@@ -417,6 +414,7 @@ router.post('/echo', (req: Request, res: Response) => {
   });
 });
 
+router.use('/bovines', bovineRoutes);
 router.use('/events', eventRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/health', healthRoutes);
