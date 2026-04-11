@@ -5,7 +5,8 @@ import { bovineHealthController } from '../controllers/bovine-health.controller'
 import { bovineTrackingController } from '../controllers/bovine-tracking.controller';
 import { bovineLocationController } from '../controllers/bovine-location.controller';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
-import { validate, validateId, sanitizeInput } from '../middleware/validation';
+import { validateId, sanitizeInput } from '../middleware/validation';
+import { createBovineSchema, updateBovineSchema, listBovinesSchema, runValidation } from '../validators';
 import { UserRole } from '../models/User';
 
 const router = Router();
@@ -26,7 +27,8 @@ router.use(sanitizeInput);
 router.get(
     '/',
     authenticateToken,
-    validate('search'),
+    ...listBovinesSchema,
+    runValidation,
     bovineController.listBovines
 );
 
@@ -68,8 +70,9 @@ router.get(
 router.post(
     '/',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER), // CORREGIDO: argumentos separados
-    validate('cattle'),
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
+    ...createBovineSchema,
+    runValidation,
     bovineController.createBovine
 );
 
@@ -80,9 +83,10 @@ router.post(
 router.put(
     '/:id',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER), // CORREGIDO
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
     validateId('id'),
-    validate('cattle'),
+    ...updateBovineSchema,
+    runValidation,
     bovineController.updateBovine
 );
 
