@@ -42,8 +42,9 @@ export interface RanchFinancialAttributes {
   lastFinancialAudit?: Date;
   auditor?: string;
   notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -52,7 +53,7 @@ export interface RanchFinancialCreationAttributes
     'id' | 'annualRevenue' | 'annualExpenses' | 'netProfit' | 'profitMargin' |
     'roi' | 'totalAssets' | 'totalLiabilities' | 'equity' | 'cashFlow' |
     'debtToEquityRatio' | 'lastFinancialAudit' | 'auditor' | 'notes' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
   > {}
 
 class RanchFinancial extends Model<RanchFinancialAttributes, RanchFinancialCreationAttributes>
@@ -208,16 +209,6 @@ RanchFinancial.init(
       type: DataTypes.TEXT,
       allowNull: true,
       comment: 'Notas adicionales'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

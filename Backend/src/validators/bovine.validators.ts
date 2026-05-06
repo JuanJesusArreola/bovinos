@@ -82,18 +82,16 @@ export const createBovineSchema = [
     .withMessage('El peso debe estar entre 1 y 2000 kg')
     .toFloat(),
 
-  // Ubicación - Latitud (obligatorio)
+  // Ubicación - Latitud (opcional — el animal puede registrarse sin coordenadas GPS)
   body('location.latitude')
-    .notEmpty()
-    .withMessage('La latitud es requerida')
+    .optional({ nullable: true })
     .isFloat({ min: -90, max: 90 })
     .withMessage('La latitud debe estar entre -90 y 90 grados')
     .toFloat(),
 
-  // Ubicación - Longitud (obligatorio)
+  // Ubicación - Longitud (opcional)
   body('location.longitude')
-    .notEmpty()
-    .withMessage('La longitud es requerida')
+    .optional({ nullable: true })
     .isFloat({ min: -180, max: 180 })
     .withMessage('La longitud debe estar entre -180 y 180 grados')
     .toFloat(),
@@ -338,6 +336,31 @@ export const listBovinesSchema = [
     .optional()
     .isUUID()
     .withMessage('ID de rancho inválido'),
+
+  query('ranchIds')
+    .optional()
+    .custom((value) => {
+      // CSV de UUIDs
+      if (typeof value !== 'string') {
+        throw new Error('ranchIds debe ser CSV de UUIDs');
+      }
+      const ids = value.split(',').map((s: string) => s.trim()).filter(Boolean);
+      if (ids.length === 0) {
+        throw new Error('ranchIds no puede estar vacío');
+      }
+      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      for (const id of ids) {
+        if (!uuidRe.test(id)) {
+          throw new Error(`ranchIds contiene un UUID inválido: ${id}`);
+        }
+      }
+      return true;
+    }),
+
+  query('locationId')
+    .optional()
+    .isUUID()
+    .withMessage('ID de ubicación inválido'),
 
   query('ageMin')
     .optional()

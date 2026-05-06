@@ -20,6 +20,8 @@ import BovineLocationHistory, {
 } from '../models/BovineLocationHistory';
 import Location from '../models/Location';
 import Bovine from '../models/Bovine';
+import BovineTracking from '../models/BovineTracking';
+import { bovineFullService } from './BovineFullService';
 
 // Servicios (con lazy loading para evitar dependencias circulares)
 import type { EventService } from './EventService';
@@ -58,6 +60,41 @@ export interface CurrentLocationInfo {
     location: Location;
     entry: BovineLocationHistory;
     timeSpent: number;          // Minutos en la ubicación actual
+}
+
+/**
+ * Status del bovino respecto a su ubicación actual.
+ *  - IN_LOCATION: hay stay activa (BovineLocationHistory.exitedAt = null)
+ *  - GPS_ONLY:    no stay activa pero hay punto GPS reciente (< 24h)
+ *  - GPS_STALE:   no stay activa, GPS existe pero es viejo (>= 24h)
+ *  - UNKNOWN:     ni stay ni GPS — el bovino existe pero no se sabe dónde está
+ */
+export type CurrentLocationStatus = 'IN_LOCATION' | 'GPS_ONLY' | 'GPS_STALE' | 'UNKNOWN';
+
+export interface ConsolidatedCurrentLocation {
+    bovineId: string;
+    status: CurrentLocationStatus;
+    location: {
+        id: string;
+        name: string;
+        type: string;
+        enteredAt: Date;
+        timeSpentMinutes: number;
+        reason: string | null;
+    } | null;
+    gpsPoint: {
+        latitude: number;
+        longitude: number;
+        altitude: number | null;
+        accuracy: number | null;
+        speed: number | null;
+        heading: number | null;
+        recordedAt: Date;
+        batteryLevel: number | null;
+        deviceId: string | null;
+        source: string;
+    } | null;
+    lastSeenAt: Date | null;
 }
 
 /**
@@ -230,6 +267,9 @@ export class BovineLocationService {
 
             await transaction.commit();
 
+            // Invalidar cache compuesto del bovino
+            bovineFullService.invalidate(data.bovineId);
+
             logger.info(`Entrada registrada para bovino ${data.bovineId}`, this.context, {
                 bovineId: data.bovineId,
                 locationId: data.locationId,
@@ -299,6 +339,9 @@ export class BovineLocationService {
 
             await transaction.commit();
 
+            // Invalidar cache compuesto del bovino
+            bovineFullService.invalidate(data.bovineId);
+
             logger.info(`Salida registrada para bovino ${data.bovineId}`, this.context, {
                 bovineId: data.bovineId,
                 locationId: activeEntry.locationId,
@@ -355,6 +398,127 @@ export class BovineLocationService {
             logger.error(`Error obteniendo ubicación actual para bovino ${bovineId}`, this.context, {
                 bovineId
             }, ensureError(error));
+            throw error;
+        }
+    }
+
+    /**
+     * Devuelve la ubicación actual CONSOLIDADA del bovino: combina la stay
+     * activa (BovineLocationHistory.exitedAt = null) con el último punto GPS
+     * registrado (BovineTracking).
+     *
+     * Reglas de status:
+     *  - IN_LOCATION: hay stay activa (puede o no haber GPS)
+     *  - GPS_ONLY:    no stay, GPS reciente (< 24h)
+     *  - GPS_STALE:   no stay, GPS antiguo (>= 24h)
+     *  - UNKNOWN:     ni stay ni GPS
+     *
+     * NO lanza 404 si el bovino no tiene ubicación: devuelve UNKNOWN. Sí
+     * valida que el bovino exista (404 explícito si no).
+     *
+     * Performance: dos queries puntuales con índices apropiados (~5ms total).
+     */
+    async getCurrentLocationConsolidated(bovineId: string): Promise<ConsolidatedCurrentLocation> {
+        try {
+            // Verificar que el bovino existe (404 si no)
+            const bovine = await Bovine.findByPk(bovineId, { attributes: ['id'] });
+            if (!bovine) {
+                throw new BovineNotFoundError(bovineId);
+            }
+
+            // Ejecutar en paralelo: stay activa + último GPS
+            const [activeEntry, lastGps] = await Promise.all([
+                BovineLocationHistory.findOne({
+                    where: {
+                        bovineId,
+                        exitedAt: { [Op.is]: null } as any,
+                    },
+                    include: [{
+                        model: Location,
+                        as: 'location',
+                        required: true,
+                        attributes: ['id', 'name', 'type'],
+                    }],
+                    order: [['enteredAt', 'DESC']],
+                }),
+                BovineTracking.findOne({
+                    where: { bovineId },
+                    order: [['recordedAt', 'DESC']],
+                    limit: 1,
+                }),
+            ]);
+
+            const now = new Date();
+            const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+            // Construir el bloque de location si hay stay activa
+            let locationBlock: ConsolidatedCurrentLocation['location'] = null;
+            if (activeEntry && (activeEntry as any).location) {
+                const loc: any = (activeEntry as any).location;
+                const timeSpentMinutes = Math.floor(
+                    (now.getTime() - activeEntry.enteredAt.getTime()) / (1000 * 60)
+                );
+                locationBlock = {
+                    id: loc.id,
+                    name: loc.name,
+                    type: loc.type,
+                    enteredAt: activeEntry.enteredAt,
+                    timeSpentMinutes,
+                    reason: (activeEntry as any).reason ?? null,
+                };
+            }
+
+            // Construir el bloque de GPS si existe
+            let gpsBlock: ConsolidatedCurrentLocation['gpsPoint'] = null;
+            if (lastGps) {
+                gpsBlock = {
+                    latitude: Number(lastGps.latitude),
+                    longitude: Number(lastGps.longitude),
+                    altitude: lastGps.altitude !== undefined ? Number(lastGps.altitude) : null,
+                    accuracy: lastGps.accuracy !== undefined ? Number(lastGps.accuracy) : null,
+                    speed: lastGps.speed !== undefined ? Number(lastGps.speed) : null,
+                    heading: lastGps.heading !== undefined ? Number(lastGps.heading) : null,
+                    recordedAt: lastGps.recordedAt,
+                    batteryLevel: lastGps.batteryLevel ?? null,
+                    deviceId: lastGps.deviceId ?? null,
+                    source: lastGps.source,
+                };
+            }
+
+            // Determinar status
+            let status: CurrentLocationStatus;
+            if (locationBlock) {
+                status = 'IN_LOCATION';
+            } else if (gpsBlock) {
+                const ageMs = now.getTime() - gpsBlock.recordedAt.getTime();
+                status = ageMs < TWENTY_FOUR_HOURS_MS ? 'GPS_ONLY' : 'GPS_STALE';
+            } else {
+                status = 'UNKNOWN';
+            }
+
+            // lastSeenAt = la fecha más reciente entre stay y GPS
+            let lastSeenAt: Date | null = null;
+            const candidates: Date[] = [];
+            if (locationBlock) candidates.push(locationBlock.enteredAt);
+            if (gpsBlock) candidates.push(gpsBlock.recordedAt);
+            if (candidates.length > 0) {
+                lastSeenAt = new Date(Math.max(...candidates.map((d) => d.getTime())));
+            }
+
+            return {
+                bovineId,
+                status,
+                location: locationBlock,
+                gpsPoint: gpsBlock,
+                lastSeenAt,
+            };
+        } catch (error) {
+            logger.error(
+                `Error obteniendo ubicación consolidada para bovino ${bovineId}`,
+                this.context,
+                { bovineId },
+                ensureError(error)
+            );
             throw error;
         }
     }

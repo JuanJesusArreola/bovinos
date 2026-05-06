@@ -7,6 +7,13 @@ import logger from '../utils/logger';
 export class HealthController {
     private readonly context = 'HealthController';
 
+    constructor() {
+        this.createHealthRecord = this.createHealthRecord.bind(this);
+        this.getBovineHealthHistory = this.getBovineHealthHistory.bind(this);
+        this.getHealthRecordById = this.getHealthRecordById.bind(this);
+        this.getHealthSummary = this.getHealthSummary.bind(this);
+    }
+
     /**
      * POST /api/health/records
      * Crea un nuevo registro de salud.

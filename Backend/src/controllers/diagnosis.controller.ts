@@ -7,6 +7,12 @@ import logger from '../utils/logger';
 export class DiagnosisController {
   private readonly context = 'DiagnosisController';
 
+  constructor() {
+    this.recordDiagnosis = this.recordDiagnosis.bind(this);
+    this.confirmDiagnosis = this.confirmDiagnosis.bind(this);
+    this.getDiagnosisStats = this.getDiagnosisStats.bind(this);
+  }
+
   /**
    * POST /api/health/diagnosis/record
    * Registra un diagnóstico en un registro de salud existente.

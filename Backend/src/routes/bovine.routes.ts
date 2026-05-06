@@ -4,9 +4,11 @@ import { bovineGeoController } from '../controllers/bovine-geo.controller';
 import { bovineHealthController } from '../controllers/bovine-health.controller';
 import { bovineTrackingController } from '../controllers/bovine-tracking.controller';
 import { bovineLocationController } from '../controllers/bovine-location.controller';
+import { bovineFiltersController } from '../controllers/bovineFilters.controller';
+import { bovineFullController } from '../controllers/bovineFull.controller';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { validateId, sanitizeInput } from '../middleware/validation';
-import { createBovineSchema, updateBovineSchema, listBovinesSchema, runValidation } from '../validators';
+import { createBovineSchema, updateBovineSchema, listBovinesSchema, recordHealthCheckSchema, runValidation } from '../validators';
 import { UserRole } from '../models/User';
 
 const router = Router();
@@ -53,6 +55,17 @@ router.get(
 );
 
 /**
+ * GET /api/bovines/filters/options
+ * Catálogo para dropdowns: tipos, géneros, estados de salud, vacunas, razas.
+ * Cache 1h. Debe ir ANTES de /:id para no chocar con la ruta paramétrica.
+ */
+router.get(
+    '/filters/options',
+    authenticateToken,
+    bovineFiltersController.getFilterOptions
+);
+
+/**
  * GET /api/bovines/:id
  * Obtiene un bovino por su ID
  */
@@ -64,13 +77,25 @@ router.get(
 );
 
 /**
+ * GET /api/bovines/:id/full
+ * Detalle COMPLETO del bovino (compuesto). Reduce 6+ round-trips a 1.
+ * Cache 5min en memoria, invalidación cruzada con mutaciones.
+ */
+router.get(
+    '/:id/full',
+    authenticateToken,
+    validateId('id'),
+    bovineFullController.getFullDetail
+);
+
+/**
  * POST /api/bovines
  * Crea un nuevo bovino (requiere rol ADMIN o MANAGER o OWNER)
  */
 router.post(
     '/',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER),
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER, UserRole.RANCH_MANAGER),
     ...createBovineSchema,
     runValidation,
     bovineController.createBovine
@@ -83,7 +108,7 @@ router.post(
 router.put(
     '/:id',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER),
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER, UserRole.RANCH_MANAGER),
     validateId('id'),
     ...updateBovineSchema,
     runValidation,
@@ -97,7 +122,7 @@ router.put(
 router.delete(
     '/:id', 
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER,), // CORREGIDO: solo un rol
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER), // CORREGIDO: solo un rol
     validateId('id'),
     bovineController.deleteBovine
 );
@@ -109,7 +134,7 @@ router.delete(
 router.post(
     '/:id/regenerate-qr',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER), // CORREGIDO
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER, UserRole.RANCH_MANAGER), // CORREGIDO
     validateId('id'),
     bovineController.regenerateQR
 );
@@ -127,6 +152,18 @@ router.get(
     authenticateToken,
     validateId('ranchId'),
     bovineGeoController.getHeatmap
+);
+
+/**
+ * GET /api/bovines/geo/map-markers
+ * Markers individuales (o clusters) con TODOS los filtros del listado.
+ * Soporta multi-rancho (ranchIds CSV), bbox (north/south/east/west) y zoom.
+ * Aplica permisos del usuario sobre ranchos automáticamente.
+ */
+router.get(
+    '/geo/map-markers',
+    authenticateToken,
+    bovineGeoController.getMapMarkers
 );
 
 /**
@@ -169,7 +206,7 @@ router.get(
 router.post(
     '/geo/refresh/:ranchId',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN), // CORREGIDO
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.RANCH_MANAGER), // CORREGIDO
     validateId('ranchId'),
     bovineGeoController.refreshSnapshots
 );
@@ -185,7 +222,8 @@ router.post(
 router.post(
     '/health/check',
     authenticateToken,
-    validate('vaccination'), // Ajusta según tu esquema real (puede ser 'healthCheck')
+    ...recordHealthCheckSchema,
+    runValidation,
     bovineHealthController.recordHealthCheck
 );
 
@@ -219,7 +257,7 @@ router.post(
 router.put(
     '/:bovineId/health/status',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.VETERINARIAN), // CORREGIDO
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.VETERINARIAN, UserRole.OWNER, UserRole.RANCH_MANAGER, UserRole.MANAGER), // CORREGIDO
     validateId('bovineId'),
     bovineHealthController.updateHealthStatus
 );
@@ -278,7 +316,7 @@ router.post(
 router.post(
     '/tracking/batch',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN), // CORREGIDO
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.RANCH_MANAGER), // CORREGIDO
     bovineTrackingController.recordBatchLocations
 );
 
@@ -383,13 +421,26 @@ router.post(
 
 /**
  * GET /api/bovines/:bovineId/location/current
- * Obtiene ubicación actual de un bovino
+ * Obtiene ubicación actual de un bovino (formato legacy: solo stay).
  */
 router.get(
     '/:bovineId/location/current',
     authenticateToken,
     validateId('bovineId'),
     bovineLocationController.getCurrentLocation
+);
+
+/**
+ * GET /api/bovines/:id/current-location
+ * Ubicación actual CONSOLIDADA: stay activa + último GPS + status derivado.
+ * Endpoint preferido para vista de detalle del bovino. No retorna 404 si no
+ * hay ubicación; retorna status UNKNOWN.
+ */
+router.get(
+    '/:id/current-location',
+    authenticateToken,
+    validateId('id'),
+    bovineLocationController.getCurrentLocationConsolidated
 );
 
 /**
@@ -458,7 +509,7 @@ router.get(
 router.post(
     '/tracking/geofence',
     authenticateToken,
-    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER),
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.MANAGER, UserRole.OWNER, UserRole.RANCH_MANAGER),
     bovineTrackingController.createGeofence
 );
 

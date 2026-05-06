@@ -83,15 +83,16 @@ export interface NotificationAttributes {
         [key: string]: any;
     };
     createdBy?: string;
-    createdAt: Date;
-    updatedAt: Date;
+
+    createdAt?: Date;
+    updatedAt?: Date;
     deletedAt?: Date;
 }
 
 export interface NotificationCreationAttributes extends Optional<NotificationAttributes,
     'id' | 'sentAt' | 'deliveredAt' | 'readAt' | 'error' | 'retryCount' |
     'maxRetries' | 'scheduledFor' | 'expiresAt' | 'metadata' | 'createdBy' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
 > { }
 
 // ============================================================================
@@ -251,16 +252,6 @@ Notification.init(
         createdBy: {
             type: DataTypes.UUID,
             allowNull: true
-        },
-        createdAt: {
-            type: DataTypes.DATE,
-            allowNull: false,
-            defaultValue: DataTypes.NOW
-        },
-        updatedAt: {
-            type: DataTypes.DATE,
-            allowNull: false,
-            defaultValue: DataTypes.NOW
         },
         deletedAt: {
             type: DataTypes.DATE,

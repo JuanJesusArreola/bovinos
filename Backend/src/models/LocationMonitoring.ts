@@ -96,8 +96,8 @@ export interface LocationMonitoringAttributes {
   lastUpdated: Date;
   updatedBy: string;
   
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;                // Soft delete
 }
 
@@ -110,7 +110,7 @@ export interface LocationMonitoringCreationAttributes
     'signalStrength' | 'signalQuality' | 'temperature' | 'humidity' |
     'pressure' | 'lastReadingAt' | 'lastMaintenanceAt' | 'nextMaintenanceAt' |
     'maintenanceNotes' | 'alertThresholds' | 'notificationRecipients' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
   > {}
 
 // Clase del modelo LocationMonitoring
@@ -374,16 +374,6 @@ LocationMonitoring.init(
       type: DataTypes.UUID,
       allowNull: false,
       comment: 'ID del usuario que actualizó'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

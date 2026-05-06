@@ -285,7 +285,7 @@ export class NotificationService {
                     where,
                     limit,
                     offset,
-                    order: [['createdAt', 'DESC']]
+                    order: [['created_at', 'DESC']]
                 }),
                 Notification.count({ where }),
                 Notification.count({

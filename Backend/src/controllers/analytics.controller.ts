@@ -10,6 +10,17 @@ import { dashboardService } from '../services/analytics/DashboardService';
 export class AnalyticsController {
     private readonly context = 'AnalyticsController';
 
+    constructor() {
+        this.getDashboard = this.getDashboard.bind(this);
+        this.getMapData = this.getMapData.bind(this);
+        this.getHeatmapStats = this.getHeatmapStats.bind(this);
+        this.getWeightedHeatmap = this.getWeightedHeatmap.bind(this);
+        this.getTemporalHeatmap = this.getTemporalHeatmap.bind(this);
+        this.expandCluster = this.expandCluster.bind(this);
+        this.getClusterStats = this.getClusterStats.bind(this);
+        this.findNearbyClusters = this.findNearbyClusters.bind(this);
+    }
+
     /**
      * GET /api/analytics/dashboard
      * Obtiene dashboard filtrado por rol del usuario autenticado.

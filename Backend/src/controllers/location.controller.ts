@@ -7,6 +7,19 @@ import logger from '../utils/logger';
 export class LocationController {
   private readonly context = 'LocationController';
 
+  constructor() {
+    this.createLocation = this.createLocation.bind(this);
+    this.updateLocation = this.updateLocation.bind(this);
+    this.deleteLocation = this.deleteLocation.bind(this);
+    this.getLocationById = this.getLocationById.bind(this);
+    this.listLocations = this.listLocations.bind(this);
+    this.calculateDistance = this.calculateDistance.bind(this);
+    this.getNearbyLocations = this.getNearbyLocations.bind(this);
+    this.getLocationTypeLabel = this.getLocationTypeLabel.bind(this);
+    this.getStatusLabel = this.getStatusLabel.bind(this);
+    this.getLocationSummary = this.getLocationSummary.bind(this);
+  }
+
   // ==============================================================
   // CRUD
   // ==============================================================
@@ -32,7 +45,10 @@ export class LocationController {
     } catch (error) {
       logger.error('Error en createLocation', this.context, { body: req.body }, error as Error);
       if (error instanceof LocationError) {
-        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+        const body: any = { success: false, error: error.message, code: error.code };
+        // Si el error tiene `details` (p. ej. LocationOutsideRanchError), incluirlo.
+        if ((error as any).details) body.details = (error as any).details;
+        res.status(error.statusCode).json(body);
       } else {
         res.status(500).json({ success: false, error: 'Error interno del servidor' });
       }
@@ -62,7 +78,10 @@ export class LocationController {
     } catch (error) {
       logger.error('Error en updateLocation', this.context, { params: req.params, body: req.body }, error as Error);
       if (error instanceof LocationError) {
-        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+        const body: any = { success: false, error: error.message, code: error.code };
+        // Si el error tiene `details` (p. ej. LocationOutsideRanchError), incluirlo.
+        if ((error as any).details) body.details = (error as any).details;
+        res.status(error.statusCode).json(body);
       } else {
         res.status(500).json({ success: false, error: 'Error interno del servidor' });
       }
@@ -84,7 +103,10 @@ export class LocationController {
     } catch (error) {
       logger.error('Error en deleteLocation', this.context, { params: req.params }, error as Error);
       if (error instanceof LocationError) {
-        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+        const body: any = { success: false, error: error.message, code: error.code };
+        // Si el error tiene `details` (p. ej. LocationOutsideRanchError), incluirlo.
+        if ((error as any).details) body.details = (error as any).details;
+        res.status(error.statusCode).json(body);
       } else {
         res.status(500).json({ success: false, error: 'Error interno del servidor' });
       }
@@ -103,7 +125,10 @@ export class LocationController {
     } catch (error) {
       logger.error('Error en getLocationById', this.context, { params: req.params }, error as Error);
       if (error instanceof LocationError) {
-        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+        const body: any = { success: false, error: error.message, code: error.code };
+        // Si el error tiene `details` (p. ej. LocationOutsideRanchError), incluirlo.
+        if ((error as any).details) body.details = (error as any).details;
+        res.status(error.statusCode).json(body);
       } else {
         res.status(500).json({ success: false, error: 'Error interno del servidor' });
       }
@@ -148,7 +173,10 @@ export class LocationController {
     } catch (error) {
       logger.error('Error en listLocations', this.context, { query: req.query }, error as Error);
       if (error instanceof LocationError) {
-        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+        const body: any = { success: false, error: error.message, code: error.code };
+        // Si el error tiene `details` (p. ej. LocationOutsideRanchError), incluirlo.
+        if ((error as any).details) body.details = (error as any).details;
+        res.status(error.statusCode).json(body);
       } else {
         res.status(500).json({ success: false, error: 'Error interno del servidor' });
       }
@@ -167,7 +195,10 @@ export class LocationController {
     } catch (error) {
       logger.error('Error en calculateDistance', this.context, { params: req.params }, error as Error);
       if (error instanceof LocationError) {
-        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+        const body: any = { success: false, error: error.message, code: error.code };
+        // Si el error tiene `details` (p. ej. LocationOutsideRanchError), incluirlo.
+        if ((error as any).details) body.details = (error as any).details;
+        res.status(error.statusCode).json(body);
       } else {
         res.status(500).json({ success: false, error: 'Error interno del servidor' });
       }
@@ -198,7 +229,10 @@ export class LocationController {
     } catch (error) {
       logger.error('Error en getNearbyLocations', this.context, { query: req.query }, error as Error);
       if (error instanceof LocationError) {
-        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+        const body: any = { success: false, error: error.message, code: error.code };
+        // Si el error tiene `details` (p. ej. LocationOutsideRanchError), incluirlo.
+        if ((error as any).details) body.details = (error as any).details;
+        res.status(error.statusCode).json(body);
       } else {
         res.status(500).json({ success: false, error: 'Error interno del servidor' });
       }

@@ -16,7 +16,9 @@ import {
 // Modelos
 import BovineHealthSnapshot from '../models/BovineHealthSnapshot';
 import Bovine from '../models/Bovine';
-import { HealthStatus, LocationData } from '../models/Bovine';
+import BovineLocationHistory from '../models/BovineLocationHistory';
+import BovineVaccinationStatus from '../models/BovineVaccinationStatus';
+import { HealthStatus, LocationData, GenderType, CattleType, VaccinationStatus } from '../models/Bovine';
 
 
 // ============================================================================
@@ -1088,6 +1090,368 @@ export class BovineGeoService {
       </div>
     `.trim();
   }
+}
+
+// ============================================================================
+// MAP MARKERS — vista mapa con TODOS los filtros del listado
+// ============================================================================
+// Reusa BovineHealthSnapshot como fuente de coords + color (denormalizado,
+// rápido). Hace JOINs con Bovine / BovineVaccinationStatus /
+// BovineLocationHistory según los filtros que vengan.
+//
+// Decisión markers vs clusters:
+//   - zoom < 10  → clusters (vista regional)
+//   - count > maxMarkers (default 5000) → clusters (forzado por volumen)
+//   - else → markers individuales
+// ============================================================================
+
+export interface MapMarker {
+  bovineId: string;
+  earTag?: string;
+  lat: number;
+  lng: number;
+  color: string;
+  healthStatus: HealthStatus;
+  breed?: string;
+  ageMonths?: number;
+  diagnosis?: string;
+}
+
+export interface MapClusterPoint {
+  lat: number;
+  lng: number;
+  count: number;
+  // estado dominante por color (el más frecuente entre los puntos del cluster)
+  dominantColor: string;
+}
+
+export interface MapMarkersFilters {
+  /** Multi-rancho permitido. Si null, sin restricción de rancho (SUPER_ADMIN). */
+  ranchIds?: string[] | null;
+  healthStatus?: HealthStatus[];
+  breeds?: string[];
+  cattleTypes?: CattleType[];
+  genders?: GenderType[];
+  ageRange?: { min: number; max: number };
+  diseases?: string[];
+  vaccinationStatus?: VaccinationStatus;
+  /** Filtro por ubicación actual (stay activa) */
+  locationId?: string;
+}
+
+export interface MapMarkersOptions {
+  /** Bounding box opcional (recortar a viewport del mapa) */
+  bbox?: { north: number; south: number; east: number; west: number };
+  /** Nivel de zoom de Leaflet (0-22). <10 fuerza clusters. */
+  zoom?: number;
+  /** Si el resultado supera este número, se devuelven clusters. Default 5000. */
+  maxMarkers?: number;
+  /** Tamaño de grid (grados) para clustering. Default según zoom. */
+  gridSize?: number;
+}
+
+export type MapMarkersResult =
+  | { mode: 'markers'; total: number; items: MapMarker[] }
+  | { mode: 'clusters'; total: number; items: MapClusterPoint[] };
+
+// Extiendo la clase del servicio con el método nuevo
+declare module './BovineGeoService' {
+  interface BovineGeoService {
+    getMapMarkers(filters: MapMarkersFilters, opts?: MapMarkersOptions): Promise<MapMarkersResult>;
+  }
+}
+
+BovineGeoService.prototype.getMapMarkers = async function (
+  this: BovineGeoService,
+  filters: MapMarkersFilters,
+  opts: MapMarkersOptions = {}
+): Promise<MapMarkersResult> {
+  const startTime = Date.now();
+  const maxMarkers = opts.maxMarkers ?? 5000;
+  const zoom = opts.zoom ?? 12;
+
+  try {
+    // ────────────────────────────────────────────────────────────────────
+    // 1. WHERE para BovineHealthSnapshot (filtros que viven aquí)
+    // ────────────────────────────────────────────────────────────────────
+    const where: any = {};
+
+    // Permisos: si ranchIds es null, sin restricción; si [], no hay nada.
+    if (filters.ranchIds !== null && filters.ranchIds !== undefined) {
+      if (filters.ranchIds.length === 0) {
+        return { mode: 'markers', total: 0, items: [] };
+      }
+      where.ranchId = { [Op.in]: filters.ranchIds };
+    }
+
+    if (filters.healthStatus?.length) {
+      where.healthStatus = { [Op.in]: filters.healthStatus };
+    }
+    if (filters.breeds?.length) {
+      where.breed = { [Op.in]: filters.breeds };
+    }
+    if (filters.ageRange) {
+      where.ageMonths = { [Op.between]: [filters.ageRange.min, filters.ageRange.max] };
+    }
+    if (filters.diseases?.length) {
+      where.diagnosis = { [Op.in]: filters.diseases };
+    }
+
+    // Bbox: filtrar por geom si está disponible (más rápido), sino por
+    // location.latitude / longitude del JSONB.
+    if (opts.bbox) {
+      const { north, south, east, west } = opts.bbox;
+      // Usamos sequelize.literal sobre la columna geom (PostGIS, índice GIST).
+      where[Op.and as any] = [
+        sequelize.literal(
+          `ST_Within(geom, ST_MakeEnvelope(${Number(west)}, ${Number(south)}, ${Number(east)}, ${Number(north)}, 4326))`
+        ),
+      ];
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 2. Includes (filtros que NO viven en el snapshot)
+    // ────────────────────────────────────────────────────────────────────
+    const includes: any[] = [];
+
+    // Filtros que viven en Bovine: gender, cattleType
+    const needsBovineJoin = !!(filters.genders?.length || filters.cattleTypes?.length);
+    if (needsBovineJoin) {
+      const bovineWhere: any = {};
+      if (filters.genders?.length) bovineWhere.gender = { [Op.in]: filters.genders };
+      if (filters.cattleTypes?.length) bovineWhere.cattleType = { [Op.in]: filters.cattleTypes };
+      includes.push({
+        model: Bovine,
+        as: 'bovine',
+        attributes: ['id', 'earTag'],
+        required: true,
+        where: bovineWhere,
+      });
+    } else {
+      // Aún así traemos earTag para mostrar en el popup
+      includes.push({
+        model: Bovine,
+        as: 'bovine',
+        attributes: ['id', 'earTag'],
+        required: false,
+      });
+    }
+
+    // vaccinationStatus → JOIN con BovineVaccinationStatus
+    if (filters.vaccinationStatus !== undefined) {
+      if (filters.vaccinationStatus === VaccinationStatus.NONE) {
+        includes.push({
+          model: BovineVaccinationStatus,
+          as: 'vaccinationStatus',
+          attributes: [],
+          required: false,
+          where: {
+            [Op.or]: [
+              { status: VaccinationStatus.NONE },
+              { bovineId: null },
+            ],
+          },
+        });
+      } else {
+        includes.push({
+          model: BovineVaccinationStatus,
+          as: 'vaccinationStatus',
+          attributes: [],
+          required: true,
+          where: { status: filters.vaccinationStatus },
+        });
+      }
+    }
+
+    // locationId → JOIN con BovineLocationHistory (stay activa)
+    if (filters.locationId) {
+      includes.push({
+        model: BovineLocationHistory,
+        as: 'visits',
+        attributes: [],
+        required: true,
+        where: {
+          locationId: filters.locationId,
+          exitedAt: { [Op.is]: null as any },
+        },
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 3. NOTA sobre joins: BovineHealthSnapshot está asociado a Bovine como
+    // 'bovine' (1:1). Las relaciones BovineVaccinationStatus y
+    // BovineLocationHistory cuelgan de Bovine, NO de Snapshot. Si las
+    // queremos via include directo desde Snapshot, debemos usar `through`
+    // pasando por bovine. Más simple: nesting include.
+    // ────────────────────────────────────────────────────────────────────
+
+    // Para los includes que cuelgan de Bovine, los movemos como nested:
+    const nestedBovineInclude = includes.find((i: any) => i.as === 'bovine');
+    if (nestedBovineInclude) {
+      const childIncludes: any[] = [];
+      // Mover vaccinationStatus include si existe
+      const vsIdx = includes.findIndex((i: any) => i.as === 'vaccinationStatus');
+      if (vsIdx >= 0) {
+        childIncludes.push(includes[vsIdx]);
+        includes.splice(vsIdx, 1);
+      }
+      const visitsIdx = includes.findIndex((i: any) => i.as === 'visits');
+      if (visitsIdx >= 0) {
+        childIncludes.push(includes[visitsIdx]);
+        includes.splice(visitsIdx, 1);
+      }
+      if (childIncludes.length > 0) {
+        // Si hay joins anidados, el include de bovine debe ser required:true
+        // para que los filtros propaguen.
+        nestedBovineInclude.required = true;
+        nestedBovineInclude.include = childIncludes;
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 4. Query
+    // ────────────────────────────────────────────────────────────────────
+    const rows = await BovineHealthSnapshot.findAll({
+      where,
+      attributes: [
+        'bovineId',
+        'location',
+        'healthStatus',
+        'healthColor',
+        'breed',
+        'ageMonths',
+        'diagnosis',
+      ],
+      include: includes,
+      // Limitamos a maxMarkers + 1 para detectar si hay que clusterizar.
+      // Si no hay limit, queries sobre rancho con miles de bovinos saturan red.
+      limit: maxMarkers + 1,
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // 5. Decidir markers vs clusters
+    // ────────────────────────────────────────────────────────────────────
+    const exceededLimit = rows.length > maxMarkers;
+    const lowZoom = zoom < 10;
+
+    if (exceededLimit || lowZoom) {
+      const clusters = clusterRows(rows, opts.gridSize ?? gridSizeForZoom(zoom));
+      logger.debug(
+        `Map markers → modo CLUSTERS`,
+        'BovineGeoService',
+        {
+          totalRaw: rows.length,
+          clusters: clusters.length,
+          zoom,
+          exceededLimit,
+          lowZoom,
+          durationMs: Date.now() - startTime,
+        }
+      );
+      return {
+        mode: 'clusters',
+        total: rows.length,
+        items: clusters,
+      };
+    }
+
+    const items: MapMarker[] = rows.map((s: any) => ({
+      bovineId: s.bovineId,
+      earTag: s.bovine?.earTag,
+      lat: s.location.latitude,
+      lng: s.location.longitude,
+      color: s.healthColor,
+      healthStatus: s.healthStatus,
+      breed: s.breed,
+      ageMonths: s.ageMonths,
+      diagnosis: s.diagnosis,
+    }));
+
+    logger.debug(
+      `Map markers → modo MARKERS (${items.length})`,
+      'BovineGeoService',
+      { count: items.length, zoom, durationMs: Date.now() - startTime }
+    );
+
+    return { mode: 'markers', total: items.length, items };
+  } catch (error) {
+    logger.error(
+      `Error obteniendo map-markers`,
+      'BovineGeoService',
+      { filters, opts, durationMs: Date.now() - startTime },
+      ensureError(error)
+    );
+    throw new BovineError(
+      `Error al obtener map-markers`,
+      'MAP_MARKERS_ERROR',
+      500,
+      ensureError(error)
+    );
+  }
+};
+
+// ============================================================================
+// HELPERS internos para clustering (grid simple en JS — no usa PostGIS aquí
+// para evitar otra query). Apto para hasta ~50k puntos.
+// ============================================================================
+
+function gridSizeForZoom(zoom: number): number {
+  // Tamaño de celda en grados según zoom. Coherente con GRID_SIZES si existe.
+  if (zoom <= 5) return 1.0;
+  if (zoom <= 8) return 0.5;
+  if (zoom <= 10) return 0.1;
+  if (zoom <= 13) return 0.05;
+  if (zoom <= 16) return 0.01;
+  return 0.005;
+}
+
+function clusterRows(rows: any[], gridSize: number): MapClusterPoint[] {
+  const cells = new Map<
+    string,
+    { latSum: number; lngSum: number; count: number; colorCount: Map<string, number> }
+  >();
+
+  for (const r of rows) {
+    const lat = r.location?.latitude;
+    const lng = r.location?.longitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+
+    const cellLat = Math.floor(lat / gridSize) * gridSize;
+    const cellLng = Math.floor(lng / gridSize) * gridSize;
+    const key = `${cellLat},${cellLng}`;
+
+    let cell = cells.get(key);
+    if (!cell) {
+      cell = { latSum: 0, lngSum: 0, count: 0, colorCount: new Map() };
+      cells.set(key, cell);
+    }
+    cell.latSum += lat;
+    cell.lngSum += lng;
+    cell.count += 1;
+    const color = r.healthColor || '#999999';
+    cell.colorCount.set(color, (cell.colorCount.get(color) ?? 0) + 1);
+  }
+
+  const result: MapClusterPoint[] = [];
+  for (const cell of cells.values()) {
+    // Color dominante
+    let dominantColor = '#999999';
+    let maxCount = 0;
+    for (const [color, count] of cell.colorCount.entries()) {
+      if (count > maxCount) {
+        maxCount = count;
+        dominantColor = color;
+      }
+    }
+    result.push({
+      lat: cell.latSum / cell.count,
+      lng: cell.lngSum / cell.count,
+      count: cell.count,
+      dominantColor,
+    });
+  }
+
+  return result;
 }
 
 // Exportar instancia única

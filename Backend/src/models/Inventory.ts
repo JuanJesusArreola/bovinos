@@ -269,8 +269,9 @@ export interface InventoryAttributes {
   warehouseId?: string;                 // ID del almacén
   createdBy: string;                    // ID del usuario que creó
   updatedBy?: string;                   // ID del usuario que actualizó
-  createdAt: Date;
-  updatedAt: Date;
+  
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
   medicationId?: string;
 }
@@ -285,7 +286,7 @@ export interface InventoryCreationAttributes
     'technicalSpecs' | 'qualityControl' | 'images' | 'documents' | 'tags' |
     'notes' | 'lastInventoryDate' | 'lastMovementDate' | 'temperatureMin' |
     'temperatureMax' | 'humidityMin' | 'humidityMax' | 'ranchId' |
-    'warehouseId' | 'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'medicationId'
+    'warehouseId' | 'updatedBy' |  'deletedAt' | 'medicationId'
   > { }
 
 // Clase del modelo Inventory
@@ -999,16 +1000,6 @@ Inventory.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó el registro'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

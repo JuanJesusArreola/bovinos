@@ -35,8 +35,8 @@ export interface LocationInfoAttributes {
   lastUpdated: Date;                          // Fecha última actualización
   updatedBy: string;                           // Usuario que actualizó
   
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;                            // Soft delete
 }
 
@@ -46,7 +46,7 @@ export interface LocationInfoCreationAttributes
     'description' | 'currentNotes' | 'images' | 'documents' | 
     'videos' | 'maps' | 'lastInspectionDate' | 'nextInspectionDate' | 
     'inspectionNotes' | 'inspectedBy' | 'lastReviewedAt' | 'reviewedBy' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
   > {}
 
 
@@ -278,16 +278,6 @@ LocationInfo.init(
       type: DataTypes.UUID,
       allowNull: false,
       comment: 'ID del usuario que actualizó'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

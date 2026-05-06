@@ -36,6 +36,11 @@ declare global {
 
 
 import bovineRoutes from './bovine.routes';
+import {
+  vaccinationBovineNestedRouter,
+  vaccinationGlobalRouter,
+} from './vaccination.routes';
+import bovineMediaRoutes from './bovineMedia.routes';
 import eventRoutes from './event.routes';
 import notificationRoutes from './notification.routes';
 import medicationRoutes from './medication.routes';
@@ -44,7 +49,14 @@ import locationRoutes from './location.routes';
 import locationGeofenceRoutes from './locationGeofence.routes';
 import locationCapacityRoutes from './locationCapacity.routes';
 import locationAccessRoutes from './locationAccess.routes';
+import locationInfoRoutes from './locationInfo.routes';
+import locationMonitoringRoutes from './locationMonitoring.routes';
+import locationRelationRoutes from './locationRelation.routes';
+import locationRelationByLocationRoutes from './locationRelationByLocation.routes';
+import locationMediaRoutes from './locationMedia.routes';
+import locationMovementsRoutes from './locationMovements.routes';
 import ranchCoreRoutes from './ranch/ranch.routes';
+import ranchOccupancyRoutes from './ranchOccupancy.routes';
 import ranchLegalRoutes from './ranch/ranchLegal.routes'
 import ranchOperationsRoutes from './ranch/ranchOperations.routes';
 import ranchManagementRoutes from './ranch/ranchManagement.routes';
@@ -62,6 +74,7 @@ import userRoutes from './auth/user.routes';
 // Rutas adicionales (comentadas hasta que se implementen)
 //import healthRoutes from './health';
 import productionRoutes from './production.routes';
+import uploadRoutes from './upload.routes';
 
 
 // Bovine controllers are loaded through bovine.routes.ts
@@ -415,6 +428,11 @@ router.post('/echo', (req: Request, res: Response) => {
 });
 
 router.use('/bovines', bovineRoutes);
+// Vacunación — anidada bajo /bovines/:id/* y endpoint global
+router.use('/bovines', vaccinationBovineNestedRouter);
+router.use('/vaccinations', vaccinationGlobalRouter);
+// Multimedia de bovinos — bajo /bovines/:id/media[/*]
+router.use('/bovines', bovineMediaRoutes);
 router.use('/events', eventRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/health', healthRoutes);
@@ -424,7 +442,18 @@ router.use('/locations', locationRoutes);
 router.use('/geofence', locationGeofenceRoutes);
 router.use('/locations', locationCapacityRoutes);
 router.use('/locations', locationAccessRoutes);
+router.use('/locations', locationInfoRoutes);
+router.use('/locations', locationMonitoringRoutes);
+router.use('/locations', locationRelationByLocationRoutes);
+router.use('/locations', locationMediaRoutes);
+router.use('/locations', locationMovementsRoutes);
+router.use('/location-relations', locationRelationRoutes);
 router.use('/ranch', ranchCoreRoutes);
+router.use('/ranches', ranchOccupancyRoutes);
+// Alias plural — el frontend usa /api/ranches/* para todas las rutas de rancho
+// (boundary, summary, métricas, etc.). Lo montamos DESPUÉS de occupancyRoutes
+// para que /:ranchId/occupancy se siga resolviendo allí.
+router.use('/ranches', ranchCoreRoutes);
 router.use('/ranch/legal', ranchLegalRoutes);
 router.use('/ranch/operations', ranchOperationsRoutes);
 router.use('/ranch/management', ranchManagementRoutes);
@@ -438,6 +467,7 @@ router.use('/auth', authRoutes);
 router.use('/security', securityRoutes);
 router.use('/users', userRoutes);
 router.use('/production', productionRoutes);
+router.use('/uploads', uploadRoutes);
 
 
 // ===================================================================

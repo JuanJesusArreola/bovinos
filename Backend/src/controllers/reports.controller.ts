@@ -8,6 +8,11 @@ import logger from '../utils/logger';
 export class ReportsController {
   private readonly context = 'ReportsController';
 
+  constructor() {
+    this.generateReport = this.generateReport.bind(this);
+    this.exportReport = this.exportReport.bind(this);
+  }
+
   /**
    * POST /api/reports/generate
    * Genera un reporte según el tipo y filtros especificados.

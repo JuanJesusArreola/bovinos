@@ -7,6 +7,13 @@ import logger from '../utils/logger';
 export class LaboratoryController {
   private readonly context = 'LaboratoryController';
 
+  constructor() {
+    this.addLaboratoryResults = this.addLaboratoryResults.bind(this);
+    this.getAbnormalResults = this.getAbnormalResults.bind(this);
+    this.getAbnormalResultsByBovine = this.getAbnormalResultsByBovine.bind(this);
+    this.getAbnormalResultsByRanch = this.getAbnormalResultsByRanch.bind(this);
+  }
+
   /**
    * POST /api/health/laboratory/results
    * Agrega resultados de laboratorio a un registro de salud.

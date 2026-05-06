@@ -110,8 +110,9 @@ export interface RanchInsuranceAttributes {
   
   createdBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -122,7 +123,7 @@ export interface RanchInsuranceCreationAttributes
     'agentName' | 'agentPhone' | 'agentEmail' | 'policyDocumentUrl' |
     'claimForms' | 'claimsCount' | 'lastClaimDate' | 'totalClaimedAmount' |
     'renewalDate' | 'renewalPremium' | 'notes' | 'updatedBy' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
   > {}
 
 class RanchInsurance extends Model<RanchInsuranceAttributes, RanchInsuranceCreationAttributes>
@@ -376,16 +377,6 @@ RanchInsurance.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

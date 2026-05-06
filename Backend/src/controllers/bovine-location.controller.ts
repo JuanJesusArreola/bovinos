@@ -7,6 +7,17 @@ import logger from '../utils/logger';
 export class BovineLocationController {
     private readonly context = 'BovineLocationController';
 
+    constructor() {
+        this.recordEntry = this.recordEntry.bind(this);
+        this.recordExit = this.recordExit.bind(this);
+        this.getCurrentLocation = this.getCurrentLocation.bind(this);
+        this.getCurrentBovinesAtLocation = this.getCurrentBovinesAtLocation.bind(this);
+        this.getLocationHistory = this.getLocationHistory.bind(this);
+        this.getTimeSpentPerLocation = this.getTimeSpentPerLocation.bind(this);
+        this.generateMovementReport = this.generateMovementReport.bind(this);
+        this.getPastureUtilization = this.getPastureUtilization.bind(this);
+    }
+
     /**
      * POST /api/bovines/location/entry
      * Registra entrada a una ubicación
@@ -133,6 +144,31 @@ export class BovineLocationController {
                     success: false,
                     error: 'Error interno del servidor'
                 });
+            }
+        }
+    }
+
+    /**
+     * GET /api/bovines/:id/current-location
+     * Versión CONSOLIDADA: combina stay activa + último GPS.
+     * No retorna 404 si no hay ubicación: devuelve status UNKNOWN.
+     * Sí retorna 404 si el bovino no existe.
+     */
+    async getCurrentLocationConsolidated(req: Request, res: Response): Promise<void> {
+        try {
+            const { id } = req.params;
+            const data = await bovineLocationService.getCurrentLocationConsolidated(id);
+            res.json({ success: true, data });
+        } catch (error) {
+            logger.error('Error en getCurrentLocationConsolidated', this.context, { params: req.params }, error as Error);
+            if (error instanceof BovineError) {
+                res.status(error.statusCode).json({
+                    success: false,
+                    error: error.message,
+                    code: error.code,
+                });
+            } else {
+                res.status(500).json({ success: false, error: 'Error interno del servidor' });
             }
         }
     }

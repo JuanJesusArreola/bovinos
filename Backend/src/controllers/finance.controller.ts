@@ -7,6 +7,17 @@ import logger from '../utils/logger';
 export class FinanceController {
   private readonly context = 'FinanceController';
 
+  constructor() {
+    this.createTransaction = this.createTransaction.bind(this);
+    this.getTransactionById = this.getTransactionById.bind(this);
+    this.listTransactions = this.listTransactions.bind(this);
+    this.updateTransaction = this.updateTransaction.bind(this);
+    this.deleteTransaction = this.deleteTransaction.bind(this);
+    this.getFinancialSummary = this.getFinancialSummary.bind(this);
+    this.getVeterinaryCosts = this.getVeterinaryCosts.bind(this);
+    this.getROIAnalysis = this.getROIAnalysis.bind(this);
+  }
+
   async createTransaction(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user?.id;

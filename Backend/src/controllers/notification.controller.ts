@@ -7,6 +7,15 @@ import logger from '../utils/logger';
 export class NotificationController {
     private readonly context = 'NotificationController';
 
+    constructor() {
+        this.listNotifications = this.listNotifications.bind(this);
+        this.getUnreadCount = this.getUnreadCount.bind(this);
+        this.getNotificationById = this.getNotificationById.bind(this);
+        this.markAsRead = this.markAsRead.bind(this);
+        this.markAllAsRead = this.markAllAsRead.bind(this);
+        this.deleteNotification = this.deleteNotification.bind(this);
+    }
+
     /**
      * GET /api/notifications
      * Lista notificaciones del usuario autenticado con filtros opcionales.

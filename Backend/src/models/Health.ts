@@ -296,8 +296,9 @@ export interface HealthAttributes {
   // Auditoría
   createdBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -310,7 +311,7 @@ export interface HealthCreationAttributes
     'nutritionalAssessment' | 'reproductiveAssessment' | 'recommendations' |
     'attachments' | 'photos' | 'xrays' | 'videos' | 'notes' | 'privateNotes' |
     'cost' | 'currency' | 'followUpDate' | 'followUpNotes' | 'weatherConditions' |
-    'environmentalFactors' | 'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'environmentalFactors' | 'updatedBy' |  'deletedAt'
   > { }
 
 // Clase del modelo Health
@@ -582,16 +583,6 @@ Health.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó el registro'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

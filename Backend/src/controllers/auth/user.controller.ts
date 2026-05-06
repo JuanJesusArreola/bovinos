@@ -8,6 +8,16 @@ import logger from '../../utils/logger';
 export class UserController {
     private readonly context = 'UserController';
 
+    constructor() {
+        this.getProfile = this.getProfile.bind(this);
+        this.updateProfile = this.updateProfile.bind(this);
+        this.listUsers = this.listUsers.bind(this);
+        this.getUserById = this.getUserById.bind(this);
+        this.updateUser = this.updateUser.bind(this);
+        this.deactivateUser = this.deactivateUser.bind(this);
+        this.activateUser = this.activateUser.bind(this);
+    }
+
     /**
      * GET /api/users/profile
      * Obtiene el perfil del usuario autenticado

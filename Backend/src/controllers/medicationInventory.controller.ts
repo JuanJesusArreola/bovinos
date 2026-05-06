@@ -7,6 +7,14 @@ import logger from '../utils/logger';
 export class MedicationInventoryController {
   private readonly context = 'MedicationInventoryController';
 
+  constructor() {
+    this.getAvailableStock = this.getAvailableStock.bind(this);
+    this.checkStockLevels = this.checkStockLevels.bind(this);
+    this.getExpiringMedications = this.getExpiringMedications.bind(this);
+    this.recordConsumption = this.recordConsumption.bind(this);
+    this.recordPurchase = this.recordPurchase.bind(this);
+  }
+
   async getAvailableStock(req: Request, res: Response): Promise<void> {
     try {
       const { medicationCode } = req.params;

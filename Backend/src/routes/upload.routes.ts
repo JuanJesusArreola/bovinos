@@ -3,7 +3,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { authenticateToken } from '../middleware/auth';
 import { FileCategory, FILE_CONFIGS } from '../middleware/upload';
-import { StorageService } from '../services/StorageService';
+import { storageService } from '../container';
 import { UserRole } from '../models/User';
 import logger from '../utils/logger';
 
@@ -28,7 +28,6 @@ import logger from '../utils/logger';
  */
 
 const router = Router();
-const storageService = new StorageService();
 const context = 'UploadRoutes';
 
 // ============================================================================

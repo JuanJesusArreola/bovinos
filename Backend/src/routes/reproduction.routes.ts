@@ -16,7 +16,7 @@ router.use(authenticateToken);
 // ==========================================================================
 router.post(
   '/heat',
-  requireMinimumRole(UserRole.WORKER),
+  requireMinimumRole(UserRole.VIEWER),
   validateReproduction('recordHeat'),
   reproductionController.recordHeat
 );

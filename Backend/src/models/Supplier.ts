@@ -19,8 +19,9 @@ export interface SupplierAttributes {
   notes?: string;
   createdBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -28,7 +29,7 @@ export interface SupplierCreationAttributes
   extends Optional<SupplierAttributes,
     'id' | 'contactPerson' | 'email' | 'phone' | 'alternativePhone' |
     'address' | 'taxId' | 'paymentTerms' | 'leadTimeDays' | 'minimumOrder' |
-    'currency' | 'notes' | 'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'currency' | 'notes' | 'updatedBy' |'deletedAt'
   > {}
 
 class Supplier extends Model<SupplierAttributes, SupplierCreationAttributes>
@@ -131,16 +132,6 @@ Supplier.init(
     updatedBy: {
       type: DataTypes.UUID,
       allowNull: true,
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
     },
     deletedAt: {
       type: DataTypes.DATE,

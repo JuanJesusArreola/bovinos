@@ -50,6 +50,41 @@ export class GeofenceValidationError extends LocationError {
   }
 }
 
+/**
+ * Punto fuera del perímetro del rancho.
+ * Adjunta `details` con info útil para el frontend (point, ranchName, boundaryType).
+ */
+export class LocationOutsideRanchError extends LocationError {
+  public readonly details: {
+    point: { latitude: number; longitude: number };
+    ranchName: string;
+    ranchId: string;
+    boundaryType: string;
+  };
+
+  constructor(
+    point: { latitude: number; longitude: number },
+    ranchName: string,
+    ranchId: string,
+    boundaryType: string
+  ) {
+    super(
+      `Las coordenadas están fuera del perímetro del rancho "${ranchName}".`,
+      'POINT_OUTSIDE_RANCH_BOUNDARY',
+      400
+    );
+    this.name = 'LocationOutsideRanchError';
+    this.details = { point, ranchName, ranchId, boundaryType };
+  }
+
+  toJSON() {
+    return {
+      ...super.toJSON(),
+      details: this.details,
+    };
+  }
+}
+
 /*export class CapacityError extends LocationError {
   constructor(message: string) {
     super(message, 'CAPACITY_ERROR', 400);
@@ -75,6 +110,42 @@ export class RelationError extends LocationError {
   constructor(message: string) {
     super(message, 'RELATION_ERROR', 400);
     this.name = 'RelationError';
+  }
+}
+
+/**
+ * Intento de crear/actualizar una relación entre ubicaciones de ranchos distintos.
+ * Adjunta `details` con los IDs y ranchos involucrados para que el frontend
+ * pueda mostrar mensajes específicos.
+ */
+export class RelationCrossRanchError extends LocationError {
+  public readonly details: {
+    fromLocationId: string;
+    fromRanchId: string;
+    toLocationId: string;
+    toRanchId: string;
+  };
+
+  constructor(details: {
+    fromLocationId: string;
+    fromRanchId: string;
+    toLocationId: string;
+    toRanchId: string;
+  }) {
+    super(
+      'No se permite crear relaciones entre ubicaciones de ranchos distintos.',
+      'RELATION_CROSS_RANCH',
+      409
+    );
+    this.name = 'RelationCrossRanchError';
+    this.details = details;
+  }
+
+  toJSON() {
+    return {
+      ...super.toJSON(),
+      details: this.details,
+    };
   }
 }
 

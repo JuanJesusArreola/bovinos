@@ -18,6 +18,9 @@ export * from './bovine-geo.validators';
 // Salud
 export * from './bovine-health.validators';
 
+// Vacunación
+export * from './vaccination.validators';
+
 // Tracking GPS
 export * from './bovine-tracking.validators';
 

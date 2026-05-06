@@ -148,8 +148,9 @@ export interface RanchEmergencyAttributes {
   
   createdBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -161,7 +162,7 @@ export interface RanchEmergencyCreationAttributes
     'emergencyRadio' | 'satellitePhone' | 'backupCommunication' |
     'alertSystem' | 'warningSigns' | 'mutualAidAgreements' |
     'lastEmergencyAssessment' | 'nextEmergencyAssessment' | 'assessedBy' |
-    'notes' | 'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'notes' | 'updatedBy' | 'deletedAt'
   > {}
 
 class RanchEmergency extends Model<RanchEmergencyAttributes, RanchEmergencyCreationAttributes>
@@ -419,16 +420,6 @@ RanchEmergency.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

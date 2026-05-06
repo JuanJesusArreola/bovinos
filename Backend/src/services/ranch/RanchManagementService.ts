@@ -35,9 +35,7 @@ import RanchMedia, {
   RanchMediaCreationAttributes,
 } from '../../models/RanchMedia';
 
-import { FileService } from '../file';
-import { FileCategory } from '../../middleware/upload';
-import { mapMediaCategoryToFileCategory } from '../../utils/fileCategoryMapping';
+// FileService ya no se usa — archivos van directo a R2 via StorageService
 
 // ============================================================================
 // DTOs para RRHH
@@ -138,7 +136,7 @@ export interface MediaDTO {
 
 export class RanchManagementService {
   private readonly context = 'RanchManagementService';
-  constructor(private fileService: FileService) { }
+  constructor() { }
 
   // ==========================================================================
   // RRHH (RanchHR)
@@ -391,10 +389,12 @@ export class RanchManagementService {
   async uploadMedia(
     ranchId: string,
     fileData: {
-      filePath: string;        // ruta del archivo ya guardado por Multer
+      url: string;              // URL pública en R2
+      storagePath: string;      // Key en R2 (para eliminar después)
       originalName: string;
       mimeType: string;
       size: number;
+      thumbnailUrl?: string;
     },
     metadata: {
       type: MediaType;
@@ -416,35 +416,19 @@ export class RanchManagementService {
       const ranch = await Ranch.findByPk(ranchId, { transaction: t });
       if (!ranch) throw new RanchNotFoundError(ranchId);
 
-      // Mapear MediaCategory a FileCategory
-      const fileCategory = mapMediaCategoryToFileCategory(metadata.category);
-
-      // Procesar archivo con FileService
-      const processed = await this.fileService.processUploadedFile(
-        fileData.filePath,
-        fileData.originalName,
-        fileData.mimeType,
-        fileCategory,
-        userId,
-        { generateThumbnails: metadata.type === MediaType.IMAGE }
-      );
-
-
-
-      // Crear registro en RanchMedia
+      // Crear registro en RanchMedia con URLs de R2
       const mediaData: RanchMediaCreationAttributes = {
         ranchId,
         type: metadata.type,
         category: metadata.category,
         title: metadata.title,
         description: metadata.description,
-        url: processed.url,
-        filename: processed.filename,
-        filesize: processed.size,
-        mimeType: processed.mimeType,
-        thumbnailUrl: processed.thumbnails?.[0]?.url,
-        width: processed.metadata?.width,
-        height: processed.metadata?.height,
+        url: fileData.url,
+        storagePath: fileData.storagePath,
+        filename: fileData.originalName,
+        filesize: fileData.size,
+        mimeType: fileData.mimeType,
+        thumbnailUrl: fileData.thumbnailUrl,
         takenDate: metadata.takenDate,
         latitude: metadata.latitude,
         longitude: metadata.longitude,
@@ -469,7 +453,7 @@ export class RanchManagementService {
     } catch (error) {
       await t.rollback();
       logger.error(`Error subiendo archivo multimedia para rancho ${ranchId}`, this.context, { error });
-      throw error; // Re-lanzar para que el controlador lo maneje
+      throw error;
     }
   }
 
@@ -481,6 +465,13 @@ export class RanchManagementService {
     try {
       const media = await RanchMedia.findByPk(mediaId, { transaction: t });
       if (!media) throw new MediaNotFoundError(mediaId);
+
+      // Eliminar archivo de R2 si tiene storagePath
+      if (media.storagePath) {
+        const { StorageService } = await import('../StorageService');
+        const storage = new StorageService();
+        await storage.delete(media.storagePath);
+      }
 
       await media.destroy({ transaction: t });
 
@@ -513,7 +504,7 @@ export class RanchManagementService {
         where,
         limit,
         offset,
-        order: [['createdAt', 'DESC']],
+        order: [['created_at', 'DESC']],
       });
 
       return { rows, count };
@@ -530,5 +521,4 @@ export class RanchManagementService {
 }
 
 
-const fileService = new FileService();
-export const ranchManagementService = new RanchManagementService(fileService);
+export const ranchManagementService = new RanchManagementService();

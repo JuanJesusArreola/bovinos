@@ -79,8 +79,9 @@ export interface RanchCertificationAttributes {
   
   createdBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -90,7 +91,7 @@ export interface RanchCertificationCreationAttributes
     'auditReportUrl' | 'documents' | 'lastAuditDate' | 'nextAuditDate' |
     'auditor' | 'auditScore' | 'cost' | 'currency' | 'responsiblePerson' |
     'contactEmail' | 'contactPhone' | 'notes' | 'updatedBy' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
   > {}
 
 class RanchCertification extends Model<RanchCertificationAttributes, RanchCertificationCreationAttributes>
@@ -286,16 +287,6 @@ RanchCertification.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

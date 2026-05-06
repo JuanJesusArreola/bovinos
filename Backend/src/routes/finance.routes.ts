@@ -35,7 +35,7 @@ router.put(
 );
 router.delete(
   '/:id',
-  requireMinimumRole(UserRole.OWNER),
+  requireMinimumRole(UserRole.SUPER_ADMIN),
   financeController.deleteTransaction
 );
 

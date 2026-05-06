@@ -69,8 +69,9 @@ export interface LocationRelationAttributes {
   // Auditoría
   createdBy: string;
   updatedBy: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;               // Soft delete
 }
 
@@ -78,7 +79,7 @@ export interface LocationRelationAttributes {
 export interface LocationRelationCreationAttributes
   extends Optional<LocationRelationAttributes,
     'id' | 'distance' | 'metadata' | 'usageCount' | 'lastUsedAt' |
-    'validTo' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'validTo' | 'deletedAt'
   > {}
 
 // Clase del modelo LocationRelation
@@ -250,16 +251,6 @@ LocationRelation.init(
       type: DataTypes.UUID,
       allowNull: false,
       comment: 'ID del usuario que actualizó la relación'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

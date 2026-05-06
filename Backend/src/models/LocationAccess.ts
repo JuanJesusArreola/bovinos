@@ -62,8 +62,8 @@ export interface LocationAccessAttributes {
   
   createdBy: string;
   updatedBy: string;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;              // Soft delete
 }
 
@@ -72,7 +72,7 @@ export interface LocationAccessCreationAttributes
   extends Optional<LocationAccessAttributes,
     'id' | 'expiresAt' | 'timeRestrictions' | 'purposeRestrictions' |
     'revokedAt' | 'revokedBy' | 'revocationReason' | 'lastAccessedAt' |
-    'accessCount' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'accessCount' | 'deletedAt'
   > {}
 
 // Clase del modelo LocationAccess
@@ -249,16 +249,6 @@ LocationAccess.init(
       type: DataTypes.UUID,
       allowNull: false,
       comment: 'ID del usuario que actualizó el registro'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

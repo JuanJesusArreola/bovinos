@@ -41,6 +41,8 @@ import SecurityEvent from './SecurityEvent';
 import BovineTracking from './BovineTracking';  // ← FALTA
 import BovineLocationHistory from './BovineLocationHistory';  // ← FALTA
 import BovineHealthSnapshot from './BovineHealthSnapshot';  // ← FALTA
+import Vaccination from './Vaccination';
+import BovineVaccinationStatus from './BovineVaccinationStatus';
 
 import Notification from './Notification';
 
@@ -119,6 +121,8 @@ class Database {
     BovineHealthSnapshot: typeof BovineHealthSnapshot;
     BovineTracking: typeof BovineTracking;
     BovineLocationHistory: typeof BovineLocationHistory;
+    Vaccination: typeof Vaccination;
+    BovineVaccinationStatus: typeof BovineVaccinationStatus;
 
     Notification: typeof Notification;
 
@@ -164,6 +168,8 @@ class Database {
       BovineTracking,
       BovineLocationHistory,
       BovineHealthSnapshot,
+      Vaccination,
+      BovineVaccinationStatus,
       Notification,
       InventoryMovement,
       PurchaseOrder,
@@ -828,6 +834,51 @@ class Database {
     });
 
     // =============================================
+    // ✅ VACUNACIÓN — Vaccination y BovineVaccinationStatus
+    // =============================================
+
+    // Un bovino tiene muchas vacunas (historial)
+    Bovine.hasMany(Vaccination, {
+      foreignKey: 'bovineId',
+      as: 'vaccinations',
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE'
+    });
+
+    Vaccination.belongsTo(Bovine, {
+      foreignKey: 'bovineId',
+      as: 'bovine',
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE'
+    });
+
+    // Vaccination pertenece a un User (el aplicador / veterinario)
+    Vaccination.belongsTo(User, {
+      foreignKey: 'applicatorId',
+      as: 'applicator'
+    });
+
+    User.hasMany(Vaccination, {
+      foreignKey: 'applicatorId',
+      as: 'appliedVaccinations'
+    });
+
+    // Un bovino tiene UN snapshot de estado de vacunación (1:1)
+    Bovine.hasOne(BovineVaccinationStatus, {
+      foreignKey: 'bovineId',
+      as: 'vaccinationStatus',
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE'
+    });
+
+    BovineVaccinationStatus.belongsTo(Bovine, {
+      foreignKey: 'bovineId',
+      as: 'bovine',
+      onDelete: 'CASCADE',
+      onUpdate: 'CASCADE'
+    });
+
+    // =============================================
     // ✅ NUEVAS RELACIONES DE NOTIFICACIONES
     // =============================================
 
@@ -1483,7 +1534,7 @@ export {
   LocationCapacity, LocationInfo, LocationMonitoring, LocationAccess, LocationRelation,
 
   // Bovine sub-modelos
-  BovineTracking, BovineLocationHistory,
+  BovineTracking, BovineLocationHistory, Vaccination, BovineVaccinationStatus,
 
   // Ranch sub-modelos
   RanchOwnership, RanchProduction, RanchFinancial, RanchSustainability,

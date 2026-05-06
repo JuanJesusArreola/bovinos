@@ -1,9 +1,10 @@
 // routes/ranchCore.routes.ts
 import { Router } from 'express';
 import { ranchCoreController } from '../../controllers/ranch/ranch.controller';
-import { authenticateToken } from '../../middleware/auth';
+import { authenticateToken, authorizeRoles } from '../../middleware/auth';
 import { validateId } from '../../middleware/validation';
 import { validateRanch } from '../../validators/ranch.validators';
+import { UserRole } from '../../models/User';
 
 const router = Router();
 
@@ -14,7 +15,7 @@ router.post('/', validateRanch('createRanch'), ranchCoreController.createRanch);
 router.get('/', ranchCoreController.listRanches);
 router.get('/:id', validateId('id'), ranchCoreController.getRanchById);
 router.put('/:id', validateId('id'), validateRanch('updateRanch'), ranchCoreController.updateRanch);
-router.delete('/:id', validateId('id'), ranchCoreController.deleteRanch);
+router.delete('/:id', authorizeRoles(UserRole.OWNER, UserRole.SUPER_ADMIN), validateId('id'), ranchCoreController.deleteRanch);
 
 // Métricas
 router.get('/:id/occupancy', validateId('id'), ranchCoreController.getOccupancyRate);
@@ -24,6 +25,22 @@ router.get('/:id/cattle-density', validateId('id'), ranchCoreController.getCattl
 
 // Resumen
 router.get('/:id/summary', validateId('id'), ranchCoreController.getRanchSummary);
+
+// ── Perímetro (boundary) — endpoint dedicado ─────────────────────────────────
+// GET  → devuelve solo el boundary (cualquier rol autenticado puede leer)
+// PUT  → actualiza boundary; valida que las locations existentes sigan dentro.
+router.get(
+  '/:id/boundary',
+  validateId('id'),
+  ranchCoreController.getRanchBoundary
+);
+router.put(
+  '/:id/boundary',
+  authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.RANCH_MANAGER),
+  validateId('id'),
+  validateRanch('updateBoundary'),
+  ranchCoreController.updateRanchBoundary
+);
 
 // Utilidades (etiquetas)
 router.get('/type/:type/label', ranchCoreController.getRanchTypeLabel);

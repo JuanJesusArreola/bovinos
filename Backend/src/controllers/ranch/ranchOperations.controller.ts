@@ -7,6 +7,27 @@ import logger from '../../utils/logger';
 export class RanchOperationsController {
   private readonly context = 'RanchOperationsController';
 
+  constructor() {
+    this.getProduction = this.getProduction.bind(this);
+    this.createProduction = this.createProduction.bind(this);
+    this.updateProduction = this.updateProduction.bind(this);
+    this.getProductionTrends = this.getProductionTrends.bind(this);
+    this.compareWithIndustry = this.compareWithIndustry.bind(this);
+    this.getSustainability = this.getSustainability.bind(this);
+    this.createOrUpdateSustainability = this.createOrUpdateSustainability.bind(this);
+    this.updateGoalProgress = this.updateGoalProgress.bind(this);
+    this.getTechnology = this.getTechnology.bind(this);
+    this.createOrUpdateTechnology = this.createOrUpdateTechnology.bind(this);
+    this.getTechReadiness = this.getTechReadiness.bind(this);
+    this.recommendTechInvestments = this.recommendTechInvestments.bind(this);
+    this.getFinancial = this.getFinancial.bind(this);
+    this.createFinancial = this.createFinancial.bind(this);
+    this.updateFinancial = this.updateFinancial.bind(this);
+    this.calculateProfitability = this.calculateProfitability.bind(this);
+    this.analyzeRevenueStreams = this.analyzeRevenueStreams.bind(this);
+    this.compareWithPreviousYears = this.compareWithPreviousYears.bind(this);
+  }
+
   // ==========================================================================
   // Producción
   // ==========================================================================

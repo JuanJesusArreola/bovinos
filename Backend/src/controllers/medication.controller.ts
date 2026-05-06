@@ -7,6 +7,21 @@ import logger from '../utils/logger';
 export class MedicationController {
   private readonly context = 'MedicationController';
 
+  constructor() {
+    this.createMedication = this.createMedication.bind(this);
+    this.updateMedication = this.updateMedication.bind(this);
+    this.deleteMedication = this.deleteMedication.bind(this);
+    this.getMedicationById = this.getMedicationById.bind(this);
+    this.listMedications = this.listMedications.bind(this);
+    this.getMedicationTypeLabel = this.getMedicationTypeLabel.bind(this);
+    this.getStorageRequirementsLabels = this.getStorageRequirementsLabels.bind(this);
+    this.calculateDose = this.calculateDose.bind(this);
+    this.checkCompatibilityWithSpecies = this.checkCompatibilityWithSpecies.bind(this);
+    this.checkCompatibilityWithConditions = this.checkCompatibilityWithConditions.bind(this);
+    this.getMedicationSummary = this.getMedicationSummary.bind(this);
+    this.getSafetyWarnings = this.getSafetyWarnings.bind(this);
+  }
+
   // ==============================================================
   // CRUD BÁSICO
   // ==============================================================

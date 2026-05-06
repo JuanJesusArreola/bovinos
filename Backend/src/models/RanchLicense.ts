@@ -82,8 +82,9 @@ export interface RanchLicenseAttributes {
   
   createdBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -93,7 +94,7 @@ export interface RanchLicenseCreationAttributes
     'supportingDocuments' | 'cost' | 'currency' | 'renewalCost' |
     'responsiblePerson' | 'contactEmail' | 'contactPhone' |
     'renewalReminderSent' | 'renewalDate' | 'autoRenewal' | 'notes' |
-    'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'updatedBy' | 'deletedAt'
   > {}
 
 class RanchLicense extends Model<RanchLicenseAttributes, RanchLicenseCreationAttributes>
@@ -289,16 +290,6 @@ RanchLicense.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

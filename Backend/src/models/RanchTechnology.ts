@@ -131,8 +131,8 @@ export interface RanchTechnologyAttributes {
   
   notes?: string;
   
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -141,7 +141,7 @@ export interface RanchTechnologyCreationAttributes
     'internetSpeed' | 'cellularCoverage' | 'satelliteInternet' | 'fiberOptic' |
     'annualTechBudget' | 'techInvestmentLastYear' | 'techInvestmentNextYear' |
     'lastTechAudit' | 'nextTechAudit' | 'techReadinessLevel' | 'notes' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
   > {}
 
 class RanchTechnology extends Model<RanchTechnologyAttributes, RanchTechnologyCreationAttributes>
@@ -343,16 +343,6 @@ RanchTechnology.init(
       type: DataTypes.TEXT,
       allowNull: true,
       comment: 'Notas adicionales'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

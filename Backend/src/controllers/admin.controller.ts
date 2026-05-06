@@ -36,6 +36,12 @@ const ROLE_CREATION_HIERARCHY: Record<string, UserRole[]> = {
 export class AdminController {
     private readonly context = 'AdminController';
 
+    constructor() {
+        this.createUser = this.createUser.bind(this);
+        this.getAssignableRoles = this.getAssignableRoles.bind(this);
+        this.triggerProductionUpdate = this.triggerProductionUpdate.bind(this);
+    }
+
     // ========================================================================
     // GESTIÓN DE USUARIOS
     // ========================================================================

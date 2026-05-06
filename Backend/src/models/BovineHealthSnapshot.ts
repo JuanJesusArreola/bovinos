@@ -25,16 +25,16 @@ export interface BovineHealthSnapshotAttributes {
   lastHealthCheck?: Date;
 
   // Timestamps
-  createdAt: Date;
-  updatedAt: Date;
   deletedAt?: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 // Atributos opcionales al crear
 export interface BovineHealthSnapshotCreationAttributes
   extends Optional<BovineHealthSnapshotAttributes,
     'id' | 'breed' | 'ageMonths' | 'diagnosis' | 'lastHealthCheck' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+     'deletedAt'
   > { }
 
 // Clase del modelo
@@ -155,18 +155,6 @@ BovineHealthSnapshot.init(
       type: DataTypes.GEOMETRY('POINT', 4326),
       allowNull: true,
       comment: 'Punto geográfico PostGIS — sincronizado con location (lat/lng)'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-      comment: 'Fecha de creación del snapshot'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

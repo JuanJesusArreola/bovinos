@@ -7,6 +7,19 @@ import logger from '../utils/logger';
 export class BovineController {
     private readonly context = 'BovineController';
 
+    constructor() {
+        // Binding de métodos para que `this` esté disponible
+        // cuando Express los ejecute como callbacks.
+        this.listBovines = this.listBovines.bind(this);
+        this.getBovineById = this.getBovineById.bind(this);
+        this.createBovine = this.createBovine.bind(this);
+        this.updateBovine = this.updateBovine.bind(this);
+        this.deleteBovine = this.deleteBovine.bind(this);
+        this.getBovineByEarTag = this.getBovineByEarTag.bind(this);
+        this.getStatistics = this.getStatistics.bind(this);
+        this.regenerateQR = this.regenerateQR.bind(this);
+    }
+
     /**
      * GET /api/bovines
      * Lista bovinos con filtros y paginación
@@ -21,6 +34,12 @@ export class BovineController {
                 });
                 return;
             }
+            // Parsear ranchIds (CSV) — multi-rancho
+            const rawRanchIds = req.query.ranchIds as string | undefined;
+            const ranchIds = rawRanchIds
+                ? rawRanchIds.split(',').map((s) => s.trim()).filter(Boolean)
+                : undefined;
+
             const filters = {
                 searchTerm: req.query.search as string,
                 cattleType: req.query.cattleType as any,
@@ -29,6 +48,8 @@ export class BovineController {
                 healthStatus: req.query.healthStatus as any,
                 vaccinationStatus: req.query.vaccinationStatus as any,
                 ranchId: req.query.ranchId as string,
+                ranchIds, // multi-rancho (CSV → string[])
+                locationId: req.query.locationId as string, // ubicación actual (stay activa)
                 ownerId: req.query.ownerId as string,
                 ageRange: req.query.ageMin && req.query.ageMax ? {
                     min: parseInt(req.query.ageMin as string),
@@ -39,12 +60,27 @@ export class BovineController {
                     max: parseInt(req.query.weightMax as string)
                 } : undefined,
                 isPregnant: req.query.isPregnant === 'true'
+                    ? true
+                    : req.query.isPregnant === 'false'
+                    ? false
+                    : undefined,
             };
+
+            // Whitelist de campos permitidos para ordenar (nombres de columnas reales)
+            const ALLOWED_SORT_FIELDS = [
+                'created_at', 'updated_at', 'ear_tag', 'name',
+                'weight', 'birth_date', 'health_status', 'cattle_type',
+                'breed', 'gender', 'vaccination_status'
+            ];
+            const requestedSort = req.query.sortBy as string;
+            const safeSortBy = ALLOWED_SORT_FIELDS.includes(requestedSort)
+                ? requestedSort
+                : 'created_at';
 
             const pagination = {
                 page: parseInt(req.query.page as string) || 1,
                 limit: parseInt(req.query.limit as string) || 20,
-                sortBy: req.query.sortBy as string,
+                sortBy: safeSortBy,
                 sortOrder: (req.query.sortOrder as 'ASC' | 'DESC') || 'DESC'
             };
 

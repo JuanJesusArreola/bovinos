@@ -51,8 +51,9 @@ export interface InventoryMovementAttributes {
   treatmentId?: string;
   notes?: string;
   attachments?: string[];
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -61,7 +62,7 @@ export interface InventoryMovementCreationAttributes
     'id' | 'medicationId' | 'unitCost' | 'totalCost' | 'reference' |
     'supplierId' | 'supplierName' | 'batchNumber' | 'expirationDate' |
     'location' | 'approvedBy' | 'bovineId' | 'treatmentId' | 'notes' |
-    'attachments' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'attachments' | 'deletedAt'
   > {}
 
 class InventoryMovement extends Model<InventoryMovementAttributes, InventoryMovementCreationAttributes>
@@ -203,16 +204,6 @@ InventoryMovement.init(
       type: DataTypes.ARRAY(DataTypes.STRING),
       allowNull: true,
       defaultValue: [],
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
     },
     deletedAt: {
       type: DataTypes.DATE,

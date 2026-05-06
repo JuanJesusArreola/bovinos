@@ -109,8 +109,9 @@ export interface BovineAttributes {
   isActive: boolean; // Si el animal está activo en el sistema
   lastHealthCheck?: Date; // Fecha del último chequeo de salud
   nextHealthCheck?: Date; // Fecha del próximo chequeo programado
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date; // Para soft delete
   currentLocationId?: string;
 }
@@ -122,7 +123,7 @@ export interface BovineCreationAttributes
     'trackingConfig' | 'ownerId' | 'ranchId' | 'motherId' | 'fatherId' |
     'acquisitionDate' | 'acquisitionPrice' | 'currentValue' | 'notes' |
     'images' | 'qrCode' | 'rfidTag' | 'lastHealthCheck' | 'nextHealthCheck' |
-    'createdAt' | 'updatedAt' | 'deletedAt' | "currentLocationId"
+    'deletedAt' | "currentLocationId"
   > { }
 
 // Clase del modelo Bovine
@@ -246,21 +247,20 @@ Bovine.init(
     },
     location: {
       type: DataTypes.JSONB,
-      allowNull: false,
+      allowNull: true,
       validate: {
-        isValidLocation(value: LocationData) {
-          if (!value.latitude || !value.longitude) {
-            throw new Error('Latitud y longitud son requeridas');
-          }
-          if (value.latitude < -90 || value.latitude > 90) {
+        isValidLocation(value: LocationData | null) {
+          // Location is optional — skip validation when not provided
+          if (!value) return;
+          if (value.latitude != null && (value.latitude < -90 || value.latitude > 90)) {
             throw new Error('Latitud debe estar entre -90 y 90');
           }
-          if (value.longitude < -180 || value.longitude > 180) {
+          if (value.longitude != null && (value.longitude < -180 || value.longitude > 180)) {
             throw new Error('Longitud debe estar entre -180 y 180');
           }
         }
       },
-      comment: 'Ubicación geográfica actual del animal'
+      comment: 'Ubicación geográfica actual del animal (opcional)'
     },
     physicalMetrics: {
       type: DataTypes.JSONB,
@@ -355,16 +355,6 @@ Bovine.init(
       allowNull: true,
       comment: 'Fecha del próximo chequeo programado'
     },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización del registro'
-    },
     deletedAt: {
       type: DataTypes.DATE,
       allowNull: true,
@@ -380,7 +370,7 @@ Bovine.init(
     indexes: [
       // Índices para mejorar el rendimiento de las consultas
       {
-        
+
         fields: ['ear_tag']
       },
       {
@@ -436,7 +426,7 @@ Bovine.init(
 
       // Hook para actualizar el timestamp de ubicación
       beforeUpdate: async (bovine: Bovine) => {
-        if (bovine.changed('location')) {
+        if (bovine.changed('location') && bovine.location) {
           bovine.location = {
             ...bovine.location,
             timestamp: new Date()

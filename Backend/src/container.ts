@@ -1,5 +1,6 @@
 //Servicios
 import { FileService } from './services/file';
+import { StorageService } from './services/StorageService';
 import { RanchManagementService } from './services/ranch/RanchManagementService';
 import { RanchCoreService } from './services/ranch/RanchService';
 import { RanchLegalService } from './services/ranch/RanchLegalService';
@@ -28,12 +29,13 @@ import Inventory from './models/Inventory';
 
 //Exportaciones
 export const fileService = new FileService();
+export const storageService = new StorageService();
 export const ranchCoreService = new RanchCoreService();
 export const ranchLegalService = new RanchLegalService();
 export const productionService = new ProductionService(Production, Bovine, notificationService);
 export const reproductionService = new ReproductionService(Reproduction, Bovine, notificationService);
 export const ranchOperationsService = new RanchOperationsService();
-export const ranchManagementService = new RanchManagementService(fileService);
+export const ranchManagementService = new RanchManagementService();
 export const healthRecordService = new HealthRecordService();
 export const laboratoryService = new LaboratoryService();
 export const inventoryService = new InventoryService(Inventory, InventoryMovement, PurchaseOrder, Supplier, Medication);

@@ -7,6 +7,21 @@ import logger from '../utils/logger';
 export class BovineTrackingController {
     private readonly context = 'BovineTrackingController';
 
+    constructor() {
+        this.recordLocation = this.recordLocation.bind(this);
+        this.recordBatchLocations = this.recordBatchLocations.bind(this);
+        this.getLastLocation = this.getLastLocation.bind(this);
+        this.getLocationHistory = this.getLocationHistory.bind(this);
+        this.getMovementPath = this.getMovementPath.bind(this);
+        this.getMovementStats = this.getMovementStats.bind(this);
+        this.calculateDistance = this.calculateDistance.bind(this);
+        this.getDeviceStatus = this.getDeviceStatus.bind(this);
+        this.websocketInfo = this.websocketInfo.bind(this);
+        this.createGeofence = this.createGeofence.bind(this);
+        this.findBovinesInRadius = this.findBovinesInRadius.bind(this);
+        this.getGeoStatistics = this.getGeoStatistics.bind(this);
+    }
+
     /**
      * POST /api/bovines/tracking/location
      * Registra un nuevo punto de ubicación

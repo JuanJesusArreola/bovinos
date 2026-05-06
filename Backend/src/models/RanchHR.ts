@@ -125,8 +125,9 @@ export interface RanchHRAttributes {
   // Notas
   notes?: string;
   
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -136,7 +137,7 @@ export interface RanchHRCreationAttributes
     'satisfactionScore' | 'absenteeismRate' | 'productivityScore' |
     'lastLaborAudit' | 'nextLaborAudit' | 'unionName' |
     'collectiveBargainingAgreement' | 'averageHiringTime' | 'notes' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
   > {}
 
 class RanchHR extends Model<RanchHRAttributes, RanchHRCreationAttributes>
@@ -362,16 +363,6 @@ RanchHR.init(
       type: DataTypes.TEXT,
       allowNull: true,
       comment: 'Notas adicionales'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

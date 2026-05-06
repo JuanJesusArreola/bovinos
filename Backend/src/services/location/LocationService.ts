@@ -2,8 +2,9 @@
 import { Op, Transaction, Sequelize } from 'sequelize';
 import sequelize from '../../config/database';
 import logger from '../../utils/logger';
-import { LocationError, LocationNotFoundError, LocationValidationError } from '../../utils/LocationErrors';
+import { LocationError, LocationNotFoundError, LocationValidationError, LocationOutsideRanchError } from '../../utils/LocationErrors';
 import { ensureError } from '../../utils/errorUtils';
+import { isPointInBoundary } from '../../utils/geoUtils';
 
 import Location, {
   LocationAttributes,
@@ -14,6 +15,44 @@ import Location, {
   Coordinates,
 } from '../../models/Location';
 import Ranch from '../../models/Ranch';
+import LocationCapacity from '../../models/LocationCapacity';
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+/**
+ * Subquery literal que calcula `currentAnimals` on-the-fly desde
+ * BovineLocationHistory (estancias abiertas, exitedAt IS NULL).
+ *
+ * Se usa en los `attributes.include` del `LocationCapacity` cuando éste
+ * se eager-loadea desde Location. Sequelize alias la tabla padre como
+ * `"Location"`, por eso la subquery referencia `"Location"."id"`.
+ */
+const buildCurrentAnimalsLiteral = () =>
+  sequelize.literal(`(
+    SELECT COUNT(*)::int
+    FROM bovine_location_history bh
+    WHERE bh.location_id = "Location"."id"
+      AND bh.exited_at IS NULL
+      AND bh.deleted_at IS NULL
+  )`);
+
+/**
+ * Include estándar de capacity con currentAnimals calculado on-the-fly.
+ * NO lee la columna cacheada current_animals (deprecada).
+ */
+const capacityIncludeWithLiveCount = () => ({
+  model: LocationCapacity,
+  as: 'capacity' as const,
+  required: false,
+  attributes: {
+    exclude: ['currentAnimals'],
+    include: [
+      [buildCurrentAnimalsLiteral(), 'currentAnimals'] as any,
+    ],
+  },
+});
 
 // ============================================================================
 // INTERFACES PÚBLICAS
@@ -102,6 +141,15 @@ export class LocationService {
         throw new LocationValidationError(`Rancho con ID ${data.ranchId} no encontrado`);
       }
 
+      // ================================================================
+      // VALIDACIÓN POINT-IN-BOUNDARY (defensa en profundidad)
+      // ================================================================
+      // Si el rancho tiene un boundary configurado (POLYGON, RECTANGULAR,
+      // CIRCULAR), verificamos que las coordenadas de la nueva location
+      // caigan dentro. Si el rancho no tiene boundary, modo permisivo
+      // (igual que hoy con boundaryRadius).
+      this.validatePointInRanchBoundary(data.coordinates, ranch);
+
       // Construir el objeto de creación
       const locationData: LocationCreationAttributes = {
         locationCode: data.locationCode,
@@ -170,6 +218,14 @@ export class LocationService {
       // Si se cambia la coordenada, actualizar geom también
       const updateData: any = { ...data };
       if (data.coordinates) {
+        // Validación point-in-boundary contra el rancho dueño de la location.
+        // Usamos el ranchId actual del registro (no el del payload) por
+        // seguridad: el ranchId de una location no debería cambiar via update.
+        const ranch = await Ranch.findByPk(location.ranchId, { transaction: t });
+        if (ranch) {
+          this.validatePointInRanchBoundary(data.coordinates, ranch);
+        }
+
         updateData.geom = {
           type: 'Point',
           coordinates: [data.coordinates.longitude, data.coordinates.latitude],
@@ -228,6 +284,7 @@ export class LocationService {
             as: 'ranch',
             attributes: ['id', 'name', 'ranchCode'],
           },
+          capacityIncludeWithLiveCount(),
         ],
       });
     } catch (error) {
@@ -269,7 +326,10 @@ export class LocationService {
             as: 'ranch',
             attributes: ['id', 'name'],
           },
+          capacityIncludeWithLiveCount(),
         ],
+        // distinct evita inflado del count cuando hay includes con LEFT JOIN
+        distinct: true,
       });
 
       logger.debug(`Ubicaciones listadas`, this.context, { count, filters });
@@ -277,6 +337,59 @@ export class LocationService {
     } catch (error) {
       logger.error('Error listando ubicaciones', this.context, { filters }, ensureError(error));
       throw error;
+    }
+  }
+
+  // ==========================================================================
+  // VALIDACIÓN POINT-IN-BOUNDARY
+  // ==========================================================================
+
+  /**
+   * Verifica que un punto (coordinates) caiga dentro del perímetro del rancho.
+   *
+   * Modo de operación:
+   *  - Si `ranch.boundary` está configurado (POLYGON/RECTANGULAR/CIRCULAR/CORRIDOR)
+   *    se evalúa con `isPointInBoundary`. Si el punto cae fuera lanza
+   *    `LocationOutsideRanchError` (400, code POINT_OUTSIDE_RANCH_BOUNDARY).
+   *
+   *  - Si NO tiene `boundary` pero sí `boundaryRadius` (legacy en km),
+   *    se construye un boundary CIRCULAR sintético usando
+   *    `ranch.coordinates` como centro y se valida igual.
+   *
+   *  - Si no tiene ni boundary ni boundaryRadius → modo permisivo (no valida).
+   *
+   * Esta validación es defensa en profundidad: aunque el frontend ya bloquee
+   * visualmente, cualquier llamada directa al API (curl, Postman, scripts,
+   * mobile app, race conditions con cambios de boundary) debe ser bloqueada
+   * aquí.
+   */
+  private validatePointInRanchBoundary(point: Coordinates, ranch: Ranch): void {
+    const r: any = ranch;
+    let boundary: any = r.boundary;
+
+    // Fallback: si no hay boundary pero hay boundaryRadius, construir uno CIRCULAR
+    if (!boundary && r.boundaryRadius && r.coordinates) {
+      boundary = {
+        type: 'CIRCULAR',
+        center: {
+          latitude: r.coordinates.latitude,
+          longitude: r.coordinates.longitude,
+        },
+        radius: r.boundaryRadius * 1000, // km → metros
+      };
+    }
+
+    // Sin boundary y sin boundaryRadius → permisivo (no valida)
+    if (!boundary) return;
+
+    const inside = isPointInBoundary(point, boundary);
+    if (!inside) {
+      throw new LocationOutsideRanchError(
+        { latitude: point.latitude, longitude: point.longitude },
+        r.name,
+        r.id,
+        boundary.type
+      );
     }
   }
 

@@ -1,14 +1,30 @@
 // controllers/ranch/ranchManagement.controller.ts
 import { Request, Response } from 'express';
+import multer from 'multer';
 import { RanchError } from '../../utils/RanchErrors';
 import logger from '../../utils/logger';
-import { ranchManagementService } from '../../container';
-import { createUploadMiddleware, handleUploadErrors, FileCategory } from '../../middleware/upload';
+import { ranchManagementService, storageService } from '../../container';
+import { FileCategory, FILE_CONFIGS } from '../../middleware/upload';
 import { MediaType, MediaCategory } from '../../models/RanchMedia';
 import { mapMediaCategoryToFileCategory } from '../../utils/fileCategoryMapping';
 
 export class RanchManagementController {
   private readonly context = 'RanchManagementController';
+
+  constructor() {
+    this.getHR = this.getHR.bind(this);
+    this.createOrUpdateHR = this.createOrUpdateHR.bind(this);
+    this.calculateProductivity = this.calculateProductivity.bind(this);
+    this.analyzeTurnover = this.analyzeTurnover.bind(this);
+    this.getEmergencyPlan = this.getEmergencyPlan.bind(this);
+    this.createOrUpdateEmergencyPlan = this.createOrUpdateEmergencyPlan.bind(this);
+    this.assessReadiness = this.assessReadiness.bind(this);
+    this.getEmergencyRecommendations = this.getEmergencyRecommendations.bind(this);
+    this.uploadMedia = this.uploadMedia.bind(this);
+    this.deleteMedia = this.deleteMedia.bind(this);
+    this.listMedia = this.listMedia.bind(this);
+    this.getMediaById = this.getMediaById.bind(this);
+  }
 
   // ==========================================================================
   // RRHH
@@ -111,10 +127,23 @@ export class RanchManagementController {
   async uploadMedia(req: Request, res: Response): Promise<void> {
     const { category } = req.body;
     const fileCategory = mapMediaCategoryToFileCategory(category as MediaCategory);
-    const upload = createUploadMiddleware(fileCategory).single('file');
+    const config = FILE_CONFIGS[fileCategory];
+
+    // multer memoryStorage — archivo queda como Buffer, nunca toca disco
+    const upload = multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize: config.maxSize, files: 1 },
+    }).single('file');
 
     upload(req, res, async (err) => {
-      if (err) return handleUploadErrors(err, req, res, () => { });
+      if (err instanceof multer.MulterError) {
+        res.status(400).json({ success: false, error: `Error de upload: ${err.message}` });
+        return;
+      }
+      if (err) {
+        res.status(400).json({ success: false, error: err.message });
+        return;
+      }
 
       try {
         const userId = req.user?.id;
@@ -126,11 +155,40 @@ export class RanchManagementController {
         const file = req.file;
         if (!file) return res.status(400).json({ success: false, error: 'Archivo no recibido' });
 
+        // Validar MIME type contra config de la categoría
+        if (!config.allowedTypes.includes(file.mimetype)) {
+          res.status(400).json({
+            success: false,
+            error: `Tipo de archivo no permitido: ${file.mimetype}. Permitidos: ${config.allowedTypes.join(', ')}`,
+          });
+          return;
+        }
+
+        // Determinar thumbnail según config
+        const thumbnailConfig = config.thumbnailSizes?.[0];
+        const thumbnail = thumbnailConfig
+          ? { width: thumbnailConfig.width, height: thumbnailConfig.height, suffix: thumbnailConfig.name }
+          : undefined;
+
+        // Subir a Cloudflare R2
+        const uploadResult = await storageService.upload(
+          {
+            buffer: file.buffer,
+            originalname: file.originalname,
+            mimetype: file.mimetype,
+            size: file.size,
+          },
+          fileCategory, // carpeta en R2
+          thumbnail
+        );
+
         const fileData = {
-          filePath: file.path,
-          originalName: file.originalname,
-          mimeType: file.mimetype,
-          size: file.size,
+          url: uploadResult.url,
+          storagePath: uploadResult.storagePath,
+          originalName: uploadResult.originalName,
+          mimeType: uploadResult.mimeType,
+          size: uploadResult.size,
+          thumbnailUrl: uploadResult.thumbnailUrl,
         };
 
         const metadata = {

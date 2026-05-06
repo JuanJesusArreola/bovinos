@@ -496,8 +496,8 @@ export interface ReproductionAttributes {
   seasonYear?: number;                         // Año de la temporada
   createdBy: string;                           // ID del usuario que creó
   updatedBy?: string;                          // ID del usuario que actualizó
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -508,7 +508,7 @@ export interface ReproductionCreationAttributes
     'calvingInfo' | 'calfInfo' | 'weaningInfo' | 'reproductiveEfficiency' | 
     'economicAnalysis' | 'geneticAnalysis' | 'healthRecords' | 'images' | 
     'documents' | 'videos' | 'notes' | 'qualityScore' | 'ranchId' | 
-    'seasonYear' | 'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'seasonYear' | 'updatedBy' | 'deletedAt'
   > {}
 
 // Clase del modelo Reproduction
@@ -1152,17 +1152,7 @@ Reproduction.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó el registro'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
-    },
+    },    
     deletedAt: {
       type: DataTypes.DATE,
       allowNull: true,

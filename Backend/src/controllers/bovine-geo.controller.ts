@@ -1,12 +1,27 @@
 // controllers/bovine-geo.controller.ts
 import { Request, Response } from 'express';
-import { bovineGeoService } from '../services/BovineGeoService';
-import { HealthStatus } from '../models/Bovine';
+import { bovineGeoService, MapMarkersFilters } from '../services/BovineGeoService';
+import { bovineService } from '../services/BovineService';
+import {
+    HealthStatus,
+    GenderType,
+    CattleType,
+    VaccinationStatus,
+} from '../models/Bovine';
 import { BovineError } from '../utils/BovineErrors';
 import logger from '../utils/logger';
 
 export class BovineGeoController {
     private readonly context = 'BovineGeoController';
+
+    constructor() {
+        this.getHeatmap = this.getHeatmap.bind(this);
+        this.getClusters = this.getClusters.bind(this);
+        this.expandCluster = this.expandCluster.bind(this);
+        this.getBovinePoint = this.getBovinePoint.bind(this);
+        this.refreshSnapshots = this.refreshSnapshots.bind(this);
+        this.getMapMarkers = this.getMapMarkers.bind(this);
+    }
 
     /**
      * GET /api/bovines/geo/heatmap
@@ -245,6 +260,117 @@ export class BovineGeoController {
                     success: false,
                     error: 'Error interno del servidor'
                 });
+            }
+        }
+    }
+
+    /**
+     * GET /api/bovines/geo/map-markers
+     * Markers individuales (o clusters si zoom bajo / volumen alto) con
+     * TODOS los filtros del listado de bovinos.
+     *
+     * Query params:
+     *   ranchId | ranchIds (CSV)
+     *   healthStatus (CSV) | breeds (CSV) | cattleTypes (CSV) | genders (CSV)
+     *   ageMin | ageMax
+     *   diseases (CSV)
+     *   vaccinationStatus
+     *   locationId
+     *   zoom (number)  default 12
+     *   north,south,east,west (bbox)
+     *   maxMarkers (default 5000)
+     */
+    async getMapMarkers(req: Request, res: Response): Promise<void> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                res.status(401).json({ success: false, error: 'Usuario no autenticado' });
+                return;
+            }
+
+            // Resolver ranchos accesibles del usuario
+            const allowedRanchIds = await bovineService.getAccessibleRanchIds(userId);
+
+            // Parsear filtros del query string
+            const parseCsv = (raw: any): string[] | undefined =>
+                typeof raw === 'string' && raw.length > 0
+                    ? raw.split(',').map((s) => s.trim()).filter(Boolean)
+                    : undefined;
+
+            // Resolver ranchIds: querystring → intersección con permisos
+            let effectiveRanchIds: string[] | null | undefined;
+            const queryRanchIds = parseCsv(req.query.ranchIds) ??
+                (req.query.ranchId ? [req.query.ranchId as string] : undefined);
+
+            if (allowedRanchIds === null) {
+                // SUPER_ADMIN / OWNER → sin restricción salvo lo que pidan explícitamente
+                effectiveRanchIds = queryRanchIds ?? null;
+            } else if (allowedRanchIds.length === 0) {
+                // Sin acceso a ningún rancho
+                res.json({ success: true, data: { mode: 'markers', total: 0, items: [] } });
+                return;
+            } else if (queryRanchIds) {
+                effectiveRanchIds = queryRanchIds.filter((id) => allowedRanchIds.includes(id));
+                if (effectiveRanchIds.length === 0) {
+                    res.json({ success: true, data: { mode: 'markers', total: 0, items: [] } });
+                    return;
+                }
+            } else {
+                effectiveRanchIds = allowedRanchIds;
+            }
+
+            const filters: MapMarkersFilters = {
+                ranchIds: effectiveRanchIds,
+                healthStatus: parseCsv(req.query.healthStatus) as HealthStatus[] | undefined,
+                breeds: parseCsv(req.query.breeds),
+                cattleTypes: parseCsv(req.query.cattleTypes) as CattleType[] | undefined,
+                genders: parseCsv(req.query.genders) as GenderType[] | undefined,
+                diseases: parseCsv(req.query.diseases),
+                vaccinationStatus: req.query.vaccinationStatus
+                    ? (req.query.vaccinationStatus as VaccinationStatus)
+                    : undefined,
+                locationId: (req.query.locationId as string) || undefined,
+                ageRange:
+                    req.query.ageMin && req.query.ageMax
+                        ? {
+                              min: parseInt(req.query.ageMin as string, 10),
+                              max: parseInt(req.query.ageMax as string, 10),
+                          }
+                        : undefined,
+            };
+
+            // Bounding box (opcional)
+            const north = req.query.north ? parseFloat(req.query.north as string) : undefined;
+            const south = req.query.south ? parseFloat(req.query.south as string) : undefined;
+            const east = req.query.east ? parseFloat(req.query.east as string) : undefined;
+            const west = req.query.west ? parseFloat(req.query.west as string) : undefined;
+            const bbox =
+                north !== undefined && south !== undefined && east !== undefined && west !== undefined
+                    ? { north, south, east, west }
+                    : undefined;
+
+            const zoom = req.query.zoom ? parseInt(req.query.zoom as string, 10) : 12;
+            const maxMarkers = req.query.maxMarkers
+                ? parseInt(req.query.maxMarkers as string, 10)
+                : undefined;
+
+            const data = await bovineGeoService.getMapMarkers(filters, {
+                bbox,
+                zoom,
+                maxMarkers,
+            });
+
+            res.json({ success: true, data });
+        } catch (error) {
+            logger.error('Error en getMapMarkers', this.context, { query: req.query }, error as Error);
+            if (error instanceof BovineError) {
+                res.status(error.statusCode).json({
+                    success: false,
+                    error: error.message,
+                    code: error.code,
+                });
+            } else {
+                res.status(500).json({ success: false, error: 'Error interno del servidor' });
             }
         }
     }

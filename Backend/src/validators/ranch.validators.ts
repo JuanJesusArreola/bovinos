@@ -461,6 +461,113 @@ const isValidTemperature = (fieldName: string): FieldValidator => (value) => {
 };
 
 /**
+ * Valida el radio operativo del rancho en kilómetros (Capa 3 geo-validación).
+ * Rango práctico: 0.5 km (rancho muy pequeño) a 500 km (explotación extensiva enorme).
+ *
+ * Este valor define cuándo el frontend muestra advertencia o bloqueo al colocar
+ * una ubicación o geocerca fuera del área esperada del rancho.
+ */
+const isValidBoundaryRadius = (fieldName: string): FieldValidator => (value) => {
+  if (value === undefined || value === null) return { isValid: true };
+
+  const num = Number(value);
+  if (isNaN(num) || num < 0.5 || num > 500) {
+    return {
+      isValid: false,
+      error: {
+        field: fieldName,
+        value,
+        message: `${fieldName} debe estar entre 0.5 y 500 km`,
+        code: 'INVALID_BOUNDARY_RADIUS',
+      },
+    };
+  }
+  return { isValid: true, sanitizedValue: Math.round(num * 10) / 10 };
+};
+
+/**
+ * Valida la estructura de Ranch.boundary (GeofenceConfig).
+ * Reglas según el `type`:
+ *   - CIRCULAR    → exige center{latitude,longitude} y radius > 0 (metros)
+ *   - RECTANGULAR → exige boundingBox{north,south,east,west} con south<north y west<east
+ *   - POLYGON     → exige coordinates con ≥3 vértices {latitude,longitude}
+ *   - CORRIDOR    → exige coordinates con ≥2 puntos y width > 0 (metros)
+ *
+ * `null` se permite (para borrar el boundary y volver al fallback).
+ */
+const isValidBoundary = (fieldName: string): FieldValidator => (value) => {
+  // null o undefined → permitido (no se está modificando o se está borrando)
+  if (value === undefined || value === null) return { isValid: true, sanitizedValue: value };
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      isValid: false,
+      error: { field: fieldName, value, message: `${fieldName} debe ser un objeto`, code: 'INVALID_BOUNDARY' },
+    };
+  }
+
+  const cfg = value as any;
+  const ALLOWED = ['CIRCULAR', 'RECTANGULAR', 'POLYGON', 'CORRIDOR'];
+  if (!ALLOWED.includes(cfg.type)) {
+    return {
+      isValid: false,
+      error: {
+        field: fieldName,
+        value: cfg.type,
+        message: `${fieldName}.type debe ser uno de: ${ALLOWED.join(', ')}`,
+        code: 'INVALID_BOUNDARY_TYPE',
+      },
+    };
+  }
+
+  const fail = (msg: string, code: string) => ({
+    isValid: false,
+    error: { field: fieldName, value: cfg, message: msg, code },
+  });
+
+  if (cfg.type === 'CIRCULAR') {
+    if (!cfg.center || typeof cfg.center.latitude !== 'number' || typeof cfg.center.longitude !== 'number') {
+      return fail(`${fieldName} CIRCULAR requiere center.latitude y center.longitude numéricos`, 'INVALID_BOUNDARY_CIRCULAR');
+    }
+    if (typeof cfg.radius !== 'number' || cfg.radius <= 0) {
+      return fail(`${fieldName} CIRCULAR requiere radius > 0 (metros)`, 'INVALID_BOUNDARY_CIRCULAR');
+    }
+  }
+
+  if (cfg.type === 'RECTANGULAR') {
+    const bb = cfg.boundingBox;
+    if (!bb || typeof bb.north !== 'number' || typeof bb.south !== 'number' ||
+        typeof bb.east !== 'number' || typeof bb.west !== 'number') {
+      return fail(`${fieldName} RECTANGULAR requiere boundingBox {north,south,east,west} numéricos`, 'INVALID_BOUNDARY_RECTANGULAR');
+    }
+    if (bb.south >= bb.north) return fail(`${fieldName}.boundingBox.south debe ser menor que north`, 'INVALID_BOUNDARY_BBOX');
+    if (bb.west >= bb.east)   return fail(`${fieldName}.boundingBox.west debe ser menor que east`,  'INVALID_BOUNDARY_BBOX');
+  }
+
+  if (cfg.type === 'POLYGON') {
+    if (!Array.isArray(cfg.coordinates) || cfg.coordinates.length < 3) {
+      return fail(`${fieldName} POLYGON requiere coordinates con al menos 3 vértices`, 'INVALID_BOUNDARY_POLYGON');
+    }
+    for (const c of cfg.coordinates) {
+      if (!c || typeof c.latitude !== 'number' || typeof c.longitude !== 'number') {
+        return fail(`Cada vértice debe tener latitude y longitude numéricos`, 'INVALID_BOUNDARY_POLYGON');
+      }
+    }
+  }
+
+  if (cfg.type === 'CORRIDOR') {
+    if (!Array.isArray(cfg.coordinates) || cfg.coordinates.length < 2) {
+      return fail(`${fieldName} CORRIDOR requiere coordinates con al menos 2 puntos`, 'INVALID_BOUNDARY_CORRIDOR');
+    }
+    if (typeof cfg.width !== 'number' || cfg.width <= 0) {
+      return fail(`${fieldName} CORRIDOR requiere width > 0 (metros)`, 'INVALID_BOUNDARY_CORRIDOR');
+    }
+  }
+
+  return { isValid: true, sanitizedValue: cfg };
+};
+
+/**
  * Valida texto libre (dirección, ciudad, estado, país, etc.).
  */
 const isValidText = (fieldName: string, minLength = 2, maxLength = 255): FieldValidator => (value) => {
@@ -679,6 +786,18 @@ export const RanchSchemas = {
       source: 'body',
       validators: [isRequired('maxCattleCapacity'), isValidCattleCapacity('maxCattleCapacity')],
     },
+
+    // ── Geo-validación (Capa 3) ───────────────────────────────────────────────
+    boundaryRadius: {
+      required: false,
+      source: 'body',
+      validators: [isValidBoundaryRadius('boundaryRadius')],
+    },
+    boundary: {
+      required: false,
+      source: 'body',
+      validators: [isValidBoundary('boundary')],
+    },
   } satisfies RanchSchema,
 
   /**
@@ -791,6 +910,31 @@ export const RanchSchemas = {
       required: false,
       source: 'body',
       validators: [isValidCattleCapacity('maxCattleCapacity')],
+    },
+
+    // ── Geo-validación (Capa 3) ───────────────────────────────────────────────
+    boundaryRadius: {
+      required: false,
+      source: 'body',
+      validators: [isValidBoundaryRadius('boundaryRadius')],
+    },
+    boundary: {
+      required: false,
+      source: 'body',
+      validators: [isValidBoundary('boundary')],
+    },
+  } satisfies RanchSchema,
+
+  /**
+   * PUT /api/ranches/:id/boundary
+   * Endpoint dedicado para editar SOLO el perímetro del rancho.
+   * Acepta `boundary: GeofenceConfig | null` (null borra y vuelve a fallback CIRCULAR).
+   */
+  updateBoundary: {
+    boundary: {
+      required: false, // null permitido (borrado)
+      source: 'body',
+      validators: [isValidBoundary('boundary')],
     },
   } satisfies RanchSchema,
 

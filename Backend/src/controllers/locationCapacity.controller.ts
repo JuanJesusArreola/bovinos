@@ -7,6 +7,138 @@ import logger from '../utils/logger';
 export class LocationCapacityController {
   private readonly context = 'LocationCapacityController';
 
+  constructor() {
+    this.getCapacity = this.getCapacity.bind(this);
+    this.getOccupancyPercentage = this.getOccupancyPercentage.bind(this);
+    this.isAtCapacity = this.isAtCapacity.bind(this);
+    this.getAvailableCapacity = this.getAvailableCapacity.bind(this);
+    this.incrementAnimals = this.incrementAnimals.bind(this);
+    this.decrementAnimals = this.decrementAnimals.bind(this);
+    this.meetsRequirements = this.meetsRequirements.bind(this);
+    this.getCapacityStats = this.getCapacityStats.bind(this);
+    this.recommendCapacityAdjustment = this.recommendCapacityAdjustment.bind(this);
+    this.createCapacity = this.createCapacity.bind(this);
+    this.updateCapacity = this.updateCapacity.bind(this);
+    this.upsertCapacity = this.upsertCapacity.bind(this);
+    this.getCurrentOccupancy = this.getCurrentOccupancy.bind(this);
+    this.getRanchOccupancy = this.getRanchOccupancy.bind(this);
+  }
+
+  /**
+   * GET /api/locations/:locationId/current-occupancy
+   * Devuelve la ocupación actual de la ubicación (currentAnimals, maxAnimals, available, %).
+   */
+  async getCurrentOccupancy(req: Request, res: Response): Promise<void> {
+    try {
+      const { locationId } = req.params;
+      const data = await locationCapacityService.getCurrentOccupancy(locationId);
+      res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Error en getCurrentOccupancy', this.context, { params: req.params }, error as Error);
+      if (error instanceof LocationError) {
+        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+      } else {
+        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+      }
+    }
+  }
+
+  /**
+   * GET /api/ranches/:ranchId/occupancy
+   * Suma las ocupaciones actuales de todas las ubicaciones del rancho.
+   */
+  async getRanchOccupancy(req: Request, res: Response): Promise<void> {
+    try {
+      const { ranchId } = req.params;
+      const data = await locationCapacityService.getRanchOccupancy(ranchId);
+      res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Error en getRanchOccupancy', this.context, { params: req.params }, error as Error);
+      if (error instanceof LocationError) {
+        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+      } else {
+        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+      }
+    }
+  }
+
+  /**
+   * POST /api/locations/:locationId/capacity
+   * Crea el registro de capacidad. Falla si ya existe.
+   */
+  async createCapacity(req: Request, res: Response): Promise<void> {
+    try {
+      const { locationId } = req.params;
+      const userId = req.userId;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Usuario no autenticado', code: 'UNAUTHORIZED' });
+        return;
+      }
+      const capacity = await locationCapacityService.createCapacity(locationId, req.body, userId);
+      res.status(201).json({ success: true, data: capacity });
+    } catch (error) {
+      logger.error('Error en createCapacity', this.context, { params: req.params }, error as Error);
+      if (error instanceof LocationError) {
+        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+      } else {
+        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+      }
+    }
+  }
+
+  /**
+   * PUT /api/locations/:locationId/capacity
+   * Actualiza el registro. Falla si no existe.
+   */
+  async updateCapacity(req: Request, res: Response): Promise<void> {
+    try {
+      const { locationId } = req.params;
+      const userId = req.userId;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Usuario no autenticado', code: 'UNAUTHORIZED' });
+        return;
+      }
+      const capacity = await locationCapacityService.updateCapacity(locationId, req.body, userId);
+      res.json({ success: true, data: capacity });
+    } catch (error) {
+      logger.error('Error en updateCapacity', this.context, { params: req.params }, error as Error);
+      if (error instanceof LocationError) {
+        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+      } else {
+        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+      }
+    }
+  }
+
+  /**
+   * PATCH /api/locations/:locationId/capacity
+   * Upsert: crea si no existe, actualiza si existe.
+   * Devuelve 201 si creó, 200 si actualizó.
+   */
+  async upsertCapacity(req: Request, res: Response): Promise<void> {
+    try {
+      const { locationId } = req.params;
+      const userId = req.userId;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Usuario no autenticado', code: 'UNAUTHORIZED' });
+        return;
+      }
+      const { capacity, created } = await locationCapacityService.upsertCapacity(
+        locationId,
+        req.body,
+        userId
+      );
+      res.status(created ? 201 : 200).json({ success: true, data: capacity, created });
+    } catch (error) {
+      logger.error('Error en upsertCapacity', this.context, { params: req.params }, error as Error);
+      if (error instanceof LocationError) {
+        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+      } else {
+        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+      }
+    }
+  }
+
   async getCapacity(req: Request, res: Response): Promise<void> {
     try {
       const { locationId } = req.params;
@@ -67,46 +199,34 @@ export class LocationCapacityController {
     }
   }
 
-  async incrementAnimals(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ success: false, error: 'Usuario no autenticado' });
-        return;
-      }
-      const { locationId } = req.params;
-      const { amount = 1 } = req.body;
-      const capacity = await locationCapacityService.incrementAnimals(locationId, amount, userId);
-      res.json({ success: true, data: capacity, message: `Animales incrementados en ${amount}` });
-    } catch (error) {
-      logger.error('Error en incrementAnimals', this.context, { params: req.params, body: req.body }, error as Error);
-      if (error instanceof LocationError) {
-        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
-      } else {
-        res.status(500).json({ success: false, error: 'Error interno del servidor' });
-      }
-    }
+  /**
+   * @deprecated 410 Gone — currentAnimals se calcula on-the-fly desde
+   * BovineLocationHistory. La fuente de verdad para entradas/salidas es
+   * el flujo de registerEntry/registerExit en el servicio de bovinos.
+   */
+  async incrementAnimals(_req: Request, res: Response): Promise<void> {
+    res.status(410).json({
+      success: false,
+      error:
+        'Endpoint deprecado. currentAnimals se calcula automáticamente desde BovineLocationHistory. ' +
+        'Para registrar entrada de un bovino usa POST /api/bovines/:id/register-entry.',
+      code: 'GONE_USE_BOVINE_LOCATION_HISTORY',
+    });
   }
 
-  async decrementAnimals(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ success: false, error: 'Usuario no autenticado' });
-        return;
-      }
-      const { locationId } = req.params;
-      const { amount = 1 } = req.body;
-      const capacity = await locationCapacityService.decrementAnimals(locationId, amount, userId);
-      res.json({ success: true, data: capacity, message: `Animales decrementados en ${amount}` });
-    } catch (error) {
-      logger.error('Error en decrementAnimals', this.context, { params: req.params, body: req.body }, error as Error);
-      if (error instanceof LocationError) {
-        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
-      } else {
-        res.status(500).json({ success: false, error: 'Error interno del servidor' });
-      }
-    }
+  /**
+   * @deprecated 410 Gone — currentAnimals se calcula on-the-fly desde
+   * BovineLocationHistory. La fuente de verdad para entradas/salidas es
+   * el flujo de registerEntry/registerExit en el servicio de bovinos.
+   */
+  async decrementAnimals(_req: Request, res: Response): Promise<void> {
+    res.status(410).json({
+      success: false,
+      error:
+        'Endpoint deprecado. currentAnimals se calcula automáticamente desde BovineLocationHistory. ' +
+        'Para registrar salida de un bovino usa POST /api/bovines/:id/register-exit.',
+      code: 'GONE_USE_BOVINE_LOCATION_HISTORY',
+    });
   }
 
   async meetsRequirements(req: Request, res: Response): Promise<void> {

@@ -7,6 +7,13 @@ import logger from '../utils/logger';
 export class TreatmentController {
   private readonly context = 'TreatmentController';
 
+  constructor() {
+    this.startTreatment = this.startTreatment.bind(this);
+    this.recordMedicationAdministration = this.recordMedicationAdministration.bind(this);
+    this.completeTreatment = this.completeTreatment.bind(this);
+    this.checkWithdrawalPeriods = this.checkWithdrawalPeriods.bind(this);
+  }
+
   /**
    * POST /api/health/treatment/start
    * Inicia un tratamiento en un registro de salud.

@@ -1,6 +1,7 @@
 import { DataTypes, Model, Optional, Op } from 'sequelize';
 import sequelize from '../config/database';
 import { LocationData } from './Bovine';
+import type { GeofenceConfig } from './Location';
 
 // Enums para tipos de rancho
 export enum RanchType {
@@ -76,6 +77,8 @@ export interface RanchAttributes {
   elevation?: number;                          // Elevación (metros)
   annualRainfall?: number;                     // Precipitación anual (mm)
   averageTemperature?: number;                 // Temperatura promedio (°C)
+  boundaryRadius?: number;                     // Radio operativo del rancho (km) — legacy / fallback CIRCULAR
+  boundary?: GeofenceConfig;                   // Perímetro real del rancho (CIRCULAR | RECTANGULAR | POLYGON | CORRIDOR). JSONB.
 
   totalArea: number;
   grazingArea: number;
@@ -89,64 +92,65 @@ export interface RanchAttributes {
 
   createdBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
-  
+
 }
 
 // Atributos opcionales al crear un nuevo rancho
-export interface RanchCreationAttributes 
-  extends Optional<RanchAttributes, 
+export interface RanchCreationAttributes
+  extends Optional<RanchAttributes,
     'id' | 'description' | 'postalCode' | 'elevation' | 'annualRainfall' |
-    'averageTemperature' | 'verifiedBy' | 'verifiedDate' | 'updatedBy' | 'createdAt' |
-    'updatedAt' | 'deletedAt'
-  > {}
+    'averageTemperature' | 'boundaryRadius' | 'boundary' | 'verifiedBy' | 'verifiedDate' | 'updatedBy' | 'deletedAt'
+  > { }
 
 // Clase del modelo Ranch
-class Ranch extends Model<RanchAttributes, RanchCreationAttributes> 
+class Ranch extends Model<RanchAttributes, RanchCreationAttributes>
   implements RanchAttributes {
 
-    public id!: string;
-    public ranchCode!: string;
-    public name!: string;
-    public description?: string;
-    public type!: RanchType;
-    public status!: RanchStatus;
-    
-    public address!: string;
-    public city!: string;
-    public state!: string;
-    public country!: string;
-    public postalCode?: string;
-    public timezone!: string;
-    
-    public coordinates!: LocationData;
-    public landTenure!: LandTenure;
-    public climateZone!: ClimateZone;
-    public elevation?: number;
-    public annualRainfall?: number;
-    public averageTemperature?: number;
-    
-    public totalArea!: number;
-    public grazingArea!: number;
-    public maxCattleCapacity!: number;
-    public currentCattleCount!: number;
-    
-    public isActive!: boolean;
-    public isVerified!: boolean;
-    public verifiedBy?: string;
-    public verifiedDate?: Date;
-    
-    public lastInspectionDate?: Date;
-    public nextInspectionDate?: Date;
-    public complianceScore?: number;
-    
-    public createdBy!: string;
-    public updatedBy?: string;
-    public readonly createdAt!: Date;
-    public readonly updatedAt!: Date;
-    public deletedAt?: Date; 
+  public id!: string;
+  public ranchCode!: string;
+  public name!: string;
+  public description?: string;
+  public type!: RanchType;
+  public status!: RanchStatus;
+
+  public address!: string;
+  public city!: string;
+  public state!: string;
+  public country!: string;
+  public postalCode?: string;
+  public timezone!: string;
+
+  public coordinates!: LocationData;
+  public landTenure!: LandTenure;
+  public climateZone!: ClimateZone;
+  public elevation?: number;
+  public annualRainfall?: number;
+  public averageTemperature?: number;
+  public boundaryRadius?: number;
+  public boundary?: GeofenceConfig;
+
+  public totalArea!: number;
+  public grazingArea!: number;
+  public maxCattleCapacity!: number;
+  public currentCattleCount!: number;
+
+  public isActive!: boolean;
+  public isVerified!: boolean;
+  public verifiedBy?: string;
+  public verifiedDate?: Date;
+
+  public lastInspectionDate?: Date;
+  public nextInspectionDate?: Date;
+  public complianceScore?: number;
+
+  public createdBy!: string;
+  public updatedBy?: string;
+  public readonly createdAt!: Date;
+  public readonly updatedAt!: Date;
+  public deletedAt?: Date;
 }
 
 // Definición del modelo en Sequelize
@@ -229,15 +233,34 @@ Ranch.init(
     coordinates: {
       type: DataTypes.JSONB,
       allowNull: false,
+      // Setter que normaliza {lat, lng} → {latitude, longitude} antes de guardar
+      set(value: any) {
+        let coords = typeof value === 'string' ? JSON.parse(value) : value;
+
+        // Normalizar: si el frontend envía {lat, lng}, convertir a {latitude, longitude}
+        if (coords && coords.lat !== undefined && coords.latitude === undefined) {
+          coords = { latitude: coords.lat, longitude: coords.lng, ...coords };
+          delete coords.lat;
+          delete coords.lng;
+        }
+
+        this.setDataValue('coordinates', coords);
+      },
       validate: {
-        isValidCoordinates(value: LocationData) {
-          if (!value.latitude || !value.longitude) {
+        isValidCoordinates(value: LocationData | string) {
+          let coords = value as any;
+
+          if (typeof value === 'string') {
+            coords = JSON.parse(value);
+          }
+
+          if (coords.latitude === undefined || coords.longitude === undefined) {
             throw new Error('Latitud y longitud son requeridas');
           }
-          if (value.latitude < -90 || value.latitude > 90) {
+          if (coords.latitude < -90 || coords.latitude > 90) {
             throw new Error('Latitud debe estar entre -90 y 90');
           }
-          if (value.longitude < -180 || value.longitude > 180) {
+          if (coords.longitude < -180 || coords.longitude > 180) {
             throw new Error('Longitud debe estar entre -180 y 180');
           }
         }
@@ -267,6 +290,70 @@ Ranch.init(
       type: DataTypes.DECIMAL(5, 2),
       allowNull: true,
       comment: 'Temperatura promedio (°C)'
+    },
+    boundaryRadius: {
+      type: DataTypes.DECIMAL(8, 2),
+      allowNull: true,
+      validate: { min: 0.5, max: 500 },
+      comment: 'Radio operativo del rancho en kilómetros — legacy / fallback cuando boundary no está configurado'
+    },
+    boundary: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      validate: {
+        /**
+         * Valida la forma del GeofenceConfig según su tipo.
+         * Los tipos permitidos coinciden con `GeofenceType` de Location.
+         */
+        isValidBoundary(value: any) {
+          if (value === null || value === undefined) return;
+
+          const cfg = typeof value === 'string' ? JSON.parse(value) : value;
+          if (!cfg || typeof cfg !== 'object') {
+            throw new Error('boundary debe ser un objeto');
+          }
+          const type = cfg.type;
+          if (!['CIRCULAR', 'RECTANGULAR', 'POLYGON', 'CORRIDOR'].includes(type)) {
+            throw new Error(`boundary.type inválido: ${type}`);
+          }
+          if (type === 'CIRCULAR') {
+            if (!cfg.center || typeof cfg.center.latitude !== 'number' || typeof cfg.center.longitude !== 'number') {
+              throw new Error('boundary CIRCULAR requiere center.latitude y center.longitude');
+            }
+            if (typeof cfg.radius !== 'number' || cfg.radius <= 0) {
+              throw new Error('boundary CIRCULAR requiere radius > 0 (metros)');
+            }
+          }
+          if (type === 'RECTANGULAR') {
+            const bb = cfg.boundingBox;
+            if (!bb || typeof bb.north !== 'number' || typeof bb.south !== 'number' ||
+                typeof bb.east !== 'number' || typeof bb.west !== 'number') {
+              throw new Error('boundary RECTANGULAR requiere boundingBox {north, south, east, west}');
+            }
+            if (bb.south >= bb.north) throw new Error('boundingBox.south debe ser menor que north');
+            if (bb.west >= bb.east) throw new Error('boundingBox.west debe ser menor que east');
+          }
+          if (type === 'POLYGON') {
+            if (!Array.isArray(cfg.coordinates) || cfg.coordinates.length < 3) {
+              throw new Error('boundary POLYGON requiere coordinates con al menos 3 vértices');
+            }
+            for (const c of cfg.coordinates) {
+              if (typeof c.latitude !== 'number' || typeof c.longitude !== 'number') {
+                throw new Error('Cada vértice de POLYGON debe tener latitude y longitude numéricos');
+              }
+            }
+          }
+          if (type === 'CORRIDOR') {
+            if (!Array.isArray(cfg.coordinates) || cfg.coordinates.length < 2) {
+              throw new Error('boundary CORRIDOR requiere coordinates con al menos 2 puntos');
+            }
+            if (typeof cfg.width !== 'number' || cfg.width <= 0) {
+              throw new Error('boundary CORRIDOR requiere width > 0 (metros)');
+            }
+          }
+        },
+      },
+      comment: 'Perímetro real del rancho (GeofenceConfig). null = no configurado, se usa boundaryRadius como fallback.',
     },
     totalArea: {
       type: DataTypes.DECIMAL(12, 2),
@@ -339,16 +426,6 @@ Ranch.init(
       allowNull: true,
       comment: 'ID del usuario que actualizó'
     },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de actualización'
-    },
     deletedAt: {
       type: DataTypes.DATE,
       allowNull: true,
@@ -369,9 +446,10 @@ Ranch.init(
       { fields: ['climate_zone'] },
       { fields: ['city', 'state', 'country'] },
       { fields: ['is_active', 'is_verified'] },
-      { name: 'ranches_coordinates_gin', fields: ['coordinates'], using: 'gin' }
+      { name: 'ranches_coordinates_gin', fields: ['coordinates'], using: 'gin' },
+      { name: 'ranches_boundary_gin', fields: ['boundary'], using: 'gin' }
     ],
-    
+
     comment: 'Tabla core para el manejo de ranchos'
   }
 );

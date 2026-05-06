@@ -7,6 +7,16 @@ import logger from '../utils/logger';
 export class LocationGeofenceController {
   private readonly context = 'LocationGeofenceController';
 
+  constructor() {
+    this.isPointInsideGeofence = this.isPointInsideGeofence.bind(this);
+    this.isPointInCircle = this.isPointInCircle.bind(this);
+    this.isPointInRectangle = this.isPointInRectangle.bind(this);
+    this.isPointInPolygon = this.isPointInPolygon.bind(this);
+    this.isPointInCorridor = this.isPointInCorridor.bind(this);
+    this.distanceToSegment = this.distanceToSegment.bind(this);
+    this.getGeofenceCenter = this.getGeofenceCenter.bind(this);
+  }
+
   async isPointInsideGeofence(req: Request, res: Response): Promise<void> {
     try {
       const { locationId } = req.params;

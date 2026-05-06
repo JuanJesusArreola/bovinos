@@ -18,6 +18,20 @@ import {
 export class ReproductionController {
   private readonly context = 'ReproductionController';
 
+  constructor() {
+    this.recordHeat = this.recordHeat.bind(this);
+    this.recordInsemination = this.recordInsemination.bind(this);
+    this.confirmPregnancy = this.confirmPregnancy.bind(this);
+    this.recordBirth = this.recordBirth.bind(this);
+    this.getEventById = this.getEventById.bind(this);
+    this.listEvents = this.listEvents.bind(this);
+    this.listEventsByRanch = this.listEventsByRanch.bind(this);
+    this.getConceptionRate = this.getConceptionRate.bind(this);
+    this.getAverageCalvingInterval = this.getAverageCalvingInterval.bind(this);
+    this.updateEvent = this.updateEvent.bind(this);
+    this.deleteEvent = this.deleteEvent.bind(this);
+  }
+
   // ==========================================================================
   // Registro de eventos específicos
   // ==========================================================================

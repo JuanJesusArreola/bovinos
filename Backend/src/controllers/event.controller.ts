@@ -7,6 +7,21 @@ import logger from '../utils/logger';
 export class EventController {
     private readonly context = 'EventController';
 
+    constructor() {
+        this.listEvents = this.listEvents.bind(this);
+        this.getUpcomingEvents = this.getUpcomingEvents.bind(this);
+        this.getOverdueEvents = this.getOverdueEvents.bind(this);
+        this.getEventsByBovine = this.getEventsByBovine.bind(this);
+        this.getEventById = this.getEventById.bind(this);
+        this.createEvent = this.createEvent.bind(this);
+        this.updateEvent = this.updateEvent.bind(this);
+        this.deleteEvent = this.deleteEvent.bind(this);
+        this.startEvent = this.startEvent.bind(this);
+        this.completeEvent = this.completeEvent.bind(this);
+        this.cancelEvent = this.cancelEvent.bind(this);
+        this.postponeEvent = this.postponeEvent.bind(this);
+    }
+
     /**
      * GET /api/events
      * Lista eventos con filtros opcionales.

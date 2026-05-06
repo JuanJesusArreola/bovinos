@@ -138,8 +138,9 @@ export interface LocationAttributes {
 
   createdBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 
 }
@@ -149,7 +150,7 @@ export interface LocationCreationAttributes
   extends Optional<LocationAttributes,
     'id' | 'geofenceConfig' | 'parentLocationId' | 'weatherStationId'
     | 'soilType' | 'elevation' | 'slope' | 'vegetation' |
-    'waterSources' | 'pastureQuality' | 'updatedBy' | 'createdAt' | 'updatedAt' |
+    'waterSources' | 'pastureQuality' | 'updatedBy' | 
     'deletedAt'
   > { }
 
@@ -342,16 +343,6 @@ Location.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó la ubicación'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

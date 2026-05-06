@@ -7,6 +7,16 @@ import logger from '../utils/logger';
 export class BovineHealthController {
     private readonly context = 'BovineHealthController';
 
+    constructor() {
+        this.recordHealthCheck = this.recordHealthCheck.bind(this);
+        this.needsHealthCheck = this.needsHealthCheck.bind(this);
+        this.scheduleNextHealthCheck = this.scheduleNextHealthCheck.bind(this);
+        this.updateHealthStatus = this.updateHealthStatus.bind(this);
+        this.getHealthHistory = this.getHealthHistory.bind(this);
+        this.getHerdHealthStats = this.getHerdHealthStats.bind(this);
+        this.getHealthTimeline = this.getHealthTimeline.bind(this);
+    }
+
     /**
      * POST /api/bovines/health/check
      * Registra un chequeo de salud

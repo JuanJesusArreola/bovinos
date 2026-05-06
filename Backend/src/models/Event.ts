@@ -219,9 +219,10 @@ export interface EventAttributes {
   // Auditoría
   createdBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
   deletedAt?: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 // Atributos opcionales al crear
@@ -232,7 +233,7 @@ export interface EventCreationAttributes
     'currency' | 'expectedData' | 'recurrence' | 'parentEventId' |
     'notifications' | 'attachments' | 'planningNotes' | 'internalNotes' |
     'requiresEquipment' | 'requiresFacility' | 'reminderSent' | 'reminderDate' |
-    'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'metadata'
+    'updatedBy' | 'deletedAt' | 'metadata'
   > {}
 
 // Clase del modelo Event (ANÉMICA - sin métodos de negocio)
@@ -341,7 +342,12 @@ Event.init(
       type: DataTypes.DATE,
       allowNull: false,
       validate: {
-        isFuture(value: Date) {
+        isFuture(this: any, value: Date) {
+          // Para eventos ya completados o cancelados se permite fecha pasada/presente
+          const status = this.status;
+          if (status === EventStatus.COMPLETED || status === EventStatus.CANCELLED) {
+            return;
+          }
           if (value < new Date()) {
             throw new Error('La fecha programada debe ser futura');
           }
@@ -480,18 +486,6 @@ Event.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó el evento'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

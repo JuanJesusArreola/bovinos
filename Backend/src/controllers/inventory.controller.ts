@@ -7,6 +7,16 @@ import logger from '../utils/logger';
 export class InventoryController {
     private readonly context = 'InventoryController';
 
+    constructor() {
+        this.getInventory = this.getInventory.bind(this);
+        this.getInventoryItem = this.getInventoryItem.bind(this);
+        this.updateStock = this.updateStock.bind(this);
+        this.reserveStock = this.reserveStock.bind(this);
+        this.releaseStock = this.releaseStock.bind(this);
+        this.calculateValuation = this.calculateValuation.bind(this);
+        this.getInventoryAlerts = this.getInventoryAlerts.bind(this);
+    }
+
     // ==========================================================================
     // CONSULTAS DE INVENTARIO
     // ==========================================================================

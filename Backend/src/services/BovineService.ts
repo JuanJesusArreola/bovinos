@@ -1,5 +1,5 @@
 // modules/bovine/services/BovineService.ts
-import { Op, WhereOptions, Transaction } from 'sequelize';
+import Sequelize, { Op, WhereOptions, Transaction } from 'sequelize';
 import { randomBytes } from 'crypto';
 import Bovine, {
     CattleType,
@@ -10,11 +10,16 @@ import Bovine, {
     BovineCreationAttributes
 } from '../models/Bovine';
 import Ranch from '../models/Ranch';
+import User, { UserRole } from '../models/User';
+import BovineLocationHistory from '../models/BovineLocationHistory';
+import BovineVaccinationStatus from '../models/BovineVaccinationStatus';
 import sequelize from '../config/database';
 import logger from '../utils/logger';
 import { BovineGeoService } from './BovineGeoService';
 import { EventService } from './EventService';
 import { BovineHealthService } from './BovineHealthService';
+import { bovineVaccinationStatusService } from './BovineVaccinationStatusService';
+import { bovineFullService } from './BovineFullService';
 import { BovineResponse } from '../dtos/bovine-response.dto';
 
 import {
@@ -61,10 +66,22 @@ export interface BovineFilters {
     breed?: string;
     gender?: GenderType;
     healthStatus?: HealthStatus;
+    /**
+     * Estado de vacunación. Se filtra contra `BovineVaccinationStatus` (cache
+     * 1:1) — NO contra la columna deprecada `Bovine.vaccinationStatus`.
+     */
     vaccinationStatus?: VaccinationStatus;
     ageRange?: { min: number; max: number };
     weightRange?: { min: number; max: number };
+    /** Filtro por un rancho. Si se proporciona, ignora `ranchIds`. */
     ranchId?: string;
+    /** Filtro por múltiples ranchos. Se intersecta con permisos del usuario. */
+    ranchIds?: string[];
+    /**
+     * Filtro por ubicación ACTUAL del bovino. JOIN con BovineLocationHistory
+     * con `exitedAt IS NULL` (stay activa).
+     */
+    locationId?: string;
     ownerId?: string;
     isActive?: boolean;
     isPregnant?: boolean;
@@ -140,34 +157,108 @@ export class BovineService {
         userId: string
     ): Promise<BovineListResponse> {
         try {
-            // ✅ TU CÓDIGO - Conservado con mejoras
-            const whereConditions = this.buildWhereConditions(filters);
+            // ──────────────────────────────────────────────────────────────────
+            // PASO 1: Aplicar permisos sobre ranchos (defensa en profundidad)
+            // ──────────────────────────────────────────────────────────────────
+            const allowedRanchIds = await this.getAccessibleRanchIds(userId);
+            const effectiveFilters = await this.applyRanchPermissions(filters, allowedRanchIds);
+
+            // Si la intersección dio vacío → no hay nada que devolver.
+            if (effectiveFilters === null) {
+                return {
+                    bovines: [],
+                    pagination: {
+                        page: pagination.page,
+                        limit: pagination.limit,
+                        total: 0,
+                        totalPages: 0,
+                        hasNext: false,
+                        hasPrev: pagination.page > 1,
+                    },
+                };
+            }
+
+            // ──────────────────────────────────────────────────────────────────
+            // PASO 2: Construir where para la tabla Bovine
+            // ──────────────────────────────────────────────────────────────────
+            const whereConditions = this.buildWhereConditions(effectiveFilters);
             const offset = (pagination.page - 1) * pagination.limit;
             const orderClause = [[
-                pagination.sortBy || 'createdAt',
+                pagination.sortBy || 'created_at',
                 pagination.sortOrder || 'DESC'
             ]];
 
-            const bovines = await Bovine.findAll({
+            // ──────────────────────────────────────────────────────────────────
+            // PASO 3: Includes (joins condicionales)
+            // ──────────────────────────────────────────────────────────────────
+            const includes: any[] = [
+                {
+                    model: Ranch,
+                    as: 'ranch',
+                    attributes: ['id', 'name'],
+                },
+            ];
+
+            // Filtro vaccinationStatus → JOIN con BovineVaccinationStatus.
+            // Caso especial NONE: incluir bovinos sin registro (LEFT JOIN + IS NULL).
+            // Para los demás status, INNER JOIN con WHERE strict.
+            if (effectiveFilters.vaccinationStatus !== undefined) {
+                if (effectiveFilters.vaccinationStatus === VaccinationStatus.NONE) {
+                    includes.push({
+                        model: BovineVaccinationStatus,
+                        as: 'vaccinationStatus',
+                        required: false,
+                        where: {
+                            [Op.or]: [
+                                { status: VaccinationStatus.NONE },
+                                { bovineId: null },
+                            ],
+                        },
+                    });
+                } else {
+                    includes.push({
+                        model: BovineVaccinationStatus,
+                        as: 'vaccinationStatus',
+                        required: true,
+                        where: { status: effectiveFilters.vaccinationStatus },
+                    });
+                }
+            }
+
+            // Filtro locationId → JOIN con BovineLocationHistory (stay activa)
+            if (effectiveFilters.locationId) {
+                includes.push({
+                    model: BovineLocationHistory,
+                    as: 'visits',
+                    required: true,
+                    attributes: [],
+                    where: {
+                        locationId: effectiveFilters.locationId,
+                        exitedAt: { [Op.is]: null as any },
+                    },
+                });
+            }
+
+            // ──────────────────────────────────────────────────────────────────
+            // PASO 4: Query con findAndCountAll + distinct para evitar count
+            // inflado por LEFT JOINs.
+            // ──────────────────────────────────────────────────────────────────
+            const { rows: bovines, count: total } = await Bovine.findAndCountAll({
                 where: whereConditions,
                 limit: pagination.limit,
                 offset,
                 order: orderClause as any,
-                include: [{
-                    model: Ranch,
-                    as: 'ranch',
-                    attributes: ['id', 'name']
-                }]
+                include: includes,
+                distinct: true,
             });
 
-            const total = await Bovine.count({ where: whereConditions });
             const totalPages = Math.ceil(total / pagination.limit);
 
             logger.info(`Obtenidos ${bovines.length} bovinos`, this.context, {
                 total,
-                filters,
+                filters: effectiveFilters,
                 pagination,
-                userId
+                userId,
             });
 
             return {
@@ -186,6 +277,78 @@ export class BovineService {
             logger.error('Error obteniendo bovinos', this.context, { filters, pagination, userId }, error as Error);
             throw error;
         }
+    }
+
+    // ==========================================================================
+    // PERMISOS DE RANCHO
+    // ==========================================================================
+
+    /**
+     * Devuelve los IDs de ranchos a los que el usuario puede acceder.
+     *
+     *   - SUPER_ADMIN / OWNER → `null` (significa "todos los ranchos").
+     *   - Cualquier otro rol → array con los ranchIds activos en `user.ranchAccess`.
+     *
+     * Si el usuario no tiene `ranchAccess` o todos están inactivos → array vacío.
+     */
+    async getAccessibleRanchIds(userId: string): Promise<string[] | null> {
+        const user = await User.findByPk(userId, {
+            attributes: ['id', 'role', 'ranchAccess'] as any,
+        });
+        if (!user) return [];
+
+        const role = (user as any).role as UserRole;
+        if (role === UserRole.SUPER_ADMIN || role === UserRole.OWNER) {
+            return null; // sin restricción
+        }
+
+        const access = ((user as any).ranchAccess || []) as Array<{ ranchId: string; isActive: boolean }>;
+        return access.filter((a) => a.isActive).map((a) => a.ranchId);
+    }
+
+    /**
+     * Intersecta los filtros recibidos con los ranchos permitidos. Devuelve
+     * `null` si la intersección queda vacía (=> el caller debe responder lista
+     * vacía sin ejecutar queries).
+     *
+     * Reglas:
+     *   - allowedRanchIds = null   → todos permitidos (no se modifica el filtro).
+     *   - allowedRanchIds = []     → ninguno permitido → null.
+     *   - filters.ranchId pedido   → debe estar en allowed; si no, null.
+     *   - filters.ranchIds pedido  → intersección; si vacía, null.
+     *   - sin filtro de rancho     → se aplica `ranchIds = allowedRanchIds`.
+     */
+    private async applyRanchPermissions(
+        filters: BovineFilters,
+        allowedRanchIds: string[] | null
+    ): Promise<BovineFilters | null> {
+        // Permisos completos
+        if (allowedRanchIds === null) {
+            return { ...filters };
+        }
+
+        // Sin acceso a ningún rancho
+        if (allowedRanchIds.length === 0) {
+            return null;
+        }
+
+        // Pidió un rancho específico
+        if (filters.ranchId) {
+            if (!allowedRanchIds.includes(filters.ranchId)) {
+                return null;
+            }
+            return { ...filters };
+        }
+
+        // Pidió múltiples ranchos
+        if (filters.ranchIds && filters.ranchIds.length > 0) {
+            const intersected = filters.ranchIds.filter((id) => allowedRanchIds.includes(id));
+            if (intersected.length === 0) return null;
+            return { ...filters, ranchIds: intersected };
+        }
+
+        // Sin filtro explícito → restringir a los ranchos accesibles
+        return { ...filters, ranchIds: allowedRanchIds };
     }
 
     /**
@@ -302,6 +465,14 @@ export class BovineService {
                 await this.geoService.createSnapshot(newBovine, transaction);
             }
 
+            // ✅ Inicializar registro de BovineVaccinationStatus con NONE.
+            // Garantiza que el filtro `vaccinationStatus = NONE` con JOIN sea
+            // trivial y consistente desde el día 1.
+            await bovineVaccinationStatusService.initializeForNewBovine(
+                newBovine.id,
+                transaction
+            );
+
             // ✅ NUEVO - Crear evento de registro
             if (this.eventService) {
                 await this.eventService.createEventFromAction('BOVINE_CREATED', {
@@ -397,6 +568,9 @@ export class BovineService {
 
             await transaction.commit();
 
+            // Invalidar cache compuesto
+            bovineFullService.invalidate(updateData.id);
+
             logger.info(`Bovino actualizado: ${existingBovine.earTag}`, this.context, {
                 bovineId: updateData.id,
                 changes: Object.keys(updateData),
@@ -446,6 +620,9 @@ export class BovineService {
             }
 
             await transaction.commit();
+
+            // Invalidar cache compuesto
+            bovineFullService.invalidate(bovineId);
 
             logger.info(`Bovino eliminado: ${bovine.earTag}`, this.context, { bovineId, userId });
 
@@ -578,12 +755,16 @@ export class BovineService {
             conditions.healthStatus = filters.healthStatus;
         }
 
-        if (filters.vaccinationStatus) {
-            conditions.vaccinationStatus = filters.vaccinationStatus;
-        }
+        // NOTA: `vaccinationStatus` NO se aplica aquí. Se filtra por JOIN con
+        // BovineVaccinationStatus en `getBovines()`. La columna cacheada
+        // `Bovine.vaccinationStatus` está deprecada.
 
         if (filters.ranchId) {
+            // Filtro por un rancho específico
             conditions.ranchId = filters.ranchId;
+        } else if (filters.ranchIds && filters.ranchIds.length > 0) {
+            // Filtro por múltiples ranchos (multi-rancho)
+            conditions.ranchId = { [Op.in]: filters.ranchIds };
         }
 
         if (filters.ownerId) {
@@ -606,7 +787,17 @@ export class BovineService {
         }
 
         if (filters.isPregnant !== undefined) {
-            conditions['reproductiveInfo.isPregnant'] = filters.isPregnant;
+            conditions[Op.and] = [
+                Sequelize.where(
+                    Sequelize.literal(
+                        `COALESCE(
+                    CAST(("Bovine"."reproductive_info"->>'isPregnant') AS BOOLEAN),
+                    false
+                )`
+                    ),
+                    filters.isPregnant
+                )
+            ];
         }
 
         return conditions;
@@ -638,7 +829,16 @@ export class BovineService {
     // NUEVOS MÉTODOS DE VALIDACIÓN (DE MI PROPUESTA)
     // ==========================================================================
 
-    private validateCoordinates(location: LocationData): void {
+    private validateCoordinates(location?: LocationData): void {
+        // Si no se envía ubicación, se permite (es opcional en la creación)
+        if (!location) {
+            return;
+        }
+
+        if (typeof location.latitude !== 'number' || typeof location.longitude !== 'number') {
+            throw new Error('La ubicación debe incluir latitud y longitud numéricas');
+        }
+
         if (location.latitude < -90 || location.latitude > 90 ||
             location.longitude < -180 || location.longitude > 180) {
             throw new Error('Coordenadas de ubicación inválidas');
@@ -713,7 +913,7 @@ export class BovineService {
         const ageInMonths = this.getAgeInMonths(bovine);
         const { years, months } = this.getAgeInYearsAndMonths(bovine);
         const bovineWithRanch = bovine as Bovine & { ranch?: { id: string; name: string; } };
-        
+
         return {
             id: bovine.id,
             earTag: bovine.earTag,
@@ -737,8 +937,8 @@ export class BovineService {
             qrCode: bovine.qrCode || '',
             isAdult: this.isAdult(bovine),
             ranch: bovineWithRanch.ranch ? {   // ← Ahora TypeScript no se queja
-            id: bovineWithRanch.ranch.id,
-            name: bovineWithRanch.ranch.name
+                id: bovineWithRanch.ranch.id,
+                name: bovineWithRanch.ranch.name
             } : undefined,
             lastHealthCheck: bovine.lastHealthCheck,
             isPregnant: bovine.reproductiveInfo?.isPregnant,
@@ -854,8 +1054,8 @@ export class BovineService {
         return { averageWeight, averageAge };
     }
 
-    
-    
+
+
 
     // ==========================================================================
     // TRADUCCIONES (NUEVAS)

@@ -17,7 +17,14 @@ export enum FileCategory {
   FEED_REPORTS = 'feed_reports',          // Reportes de alimentación
   FINANCIAL_DOCS = 'financial_docs',      // Documentos financieros
   GENERAL_DOCS = 'general_docs',          // Documentos generales
-  SYSTEM_BACKUPS = 'system_backups'      // Respaldos del sistema
+  SYSTEM_BACKUPS = 'system_backups',      // Respaldos del sistema
+  LOCATION_IMAGES = 'location_images',    // Fotos de ubicaciones (potreros, corrales, etc.)
+  LOCATION_DOCUMENTS = 'location_documents', // Documentos/contratos de ubicaciones
+  LOCATION_VIDEOS = 'location_videos',    // Videos de ubicaciones
+  LOCATION_MAPS = 'location_maps',         // Mapas/planos específicos
+  BOVINE_IMAGES = 'bovine_images',        // Fotos de bovinos (galería del detalle)
+  BOVINE_DOCUMENTS = 'bovine_documents',  // Documentos del bovino (papeles, registros)
+  BOVINE_VIDEOS = 'bovine_videos'         // Videos del bovino
 }
 
 // Configuración de tipos de archivo por categoría
@@ -142,6 +149,80 @@ const FILE_CONFIGS: Record<FileCategory, {
     allowedRoles: [UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: true
     // Sin thumbnailSizes
+  },
+  [FileCategory.LOCATION_IMAGES]: {
+    allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic'],
+    allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.heic'],
+    maxSize: 15 * 1024 * 1024, // 15MB
+    maxFiles: 10,
+    requiresAuth: true,
+    allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+    virusScanRequired: false,
+    thumbnailSizes: [
+      { name: 'small', width: 200, height: 200 },
+      { name: 'medium', width: 600, height: 600 }
+    ]
+  },
+  [FileCategory.LOCATION_DOCUMENTS]: {
+    allowedTypes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png'],
+    allowedExtensions: ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'],
+    maxSize: 25 * 1024 * 1024, // 25MB
+    maxFiles: 5,
+    requiresAuth: true,
+    allowedRoles: [UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+    virusScanRequired: true
+  },
+  [FileCategory.LOCATION_VIDEOS]: {
+    allowedTypes: ['video/mp4', 'video/webm', 'video/quicktime'],
+    allowedExtensions: ['.mp4', '.webm', '.mov'],
+    maxSize: 100 * 1024 * 1024, // 100MB
+    maxFiles: 3,
+    requiresAuth: true,
+    allowedRoles: [UserRole.WORKER, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+    virusScanRequired: false
+  },
+  [FileCategory.LOCATION_MAPS]: {
+    allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+    allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.pdf'],
+    maxSize: 20 * 1024 * 1024, // 20MB
+    maxFiles: 5,
+    requiresAuth: true,
+    allowedRoles: [UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+    virusScanRequired: false,
+    thumbnailSizes: [
+      { name: 'small', width: 300, height: 300 }
+    ]
+  },
+  [FileCategory.BOVINE_IMAGES]: {
+    allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic'],
+    allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.heic'],
+    maxSize: 15 * 1024 * 1024, // 15MB
+    maxFiles: 10,
+    requiresAuth: true,
+    allowedRoles: [UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+    virusScanRequired: false,
+    thumbnailSizes: [
+      { name: 'small', width: 200, height: 200 },
+      { name: 'medium', width: 600, height: 600 }
+    ]
+  },
+  [FileCategory.BOVINE_DOCUMENTS]: {
+    allowedTypes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png'],
+    allowedExtensions: ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'],
+    maxSize: 25 * 1024 * 1024, // 25MB
+    maxFiles: 5,
+    requiresAuth: true,
+    allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+    virusScanRequired: true
+  },
+  [FileCategory.BOVINE_VIDEOS]: {
+    allowedTypes: ['video/mp4', 'video/webm', 'video/quicktime'],
+    allowedExtensions: ['.mp4', '.webm', '.mov'],
+    maxSize: 100 * 1024 * 1024, // 100MB
+    maxFiles: 3,
+    requiresAuth: true,
+    allowedRoles: [UserRole.WORKER, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+    virusScanRequired: false
   }
 };
 

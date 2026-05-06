@@ -32,8 +32,9 @@ export interface RanchProductionAttributes {
   antibioticUsage?: number;
   organicMatterProduction?: number;
   notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -44,7 +45,7 @@ export interface RanchProductionCreationAttributes
     'calvingInterval' | 'mortalityRate' | 'cullingRate' |
     'feedConversionRatio' | 'reproductiveEfficiency' | 'healthIncidenceRate' |
     'vaccinationCoverage' | 'antibioticUsage' | 'organicMatterProduction' |
-    'notes' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'notes' | 'deletedAt'
   > {}
 
 class RanchProduction extends Model<RanchProductionAttributes, RanchProductionCreationAttributes>
@@ -190,16 +191,6 @@ RanchProduction.init(
       type: DataTypes.TEXT,
       allowNull: true,
       comment: 'Notas adicionales'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

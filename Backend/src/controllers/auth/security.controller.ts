@@ -7,6 +7,15 @@ import logger from '../../utils/logger';
 export class SecurityController {
     private readonly context = 'SecurityController';
 
+    constructor() {
+        this.listEvents = this.listEvents.bind(this);
+        this.getUnresolvedEvents = this.getUnresolvedEvents.bind(this);
+        this.getEventById = this.getEventById.bind(this);
+        this.resolveEvent = this.resolveEvent.bind(this);
+        this.resolveEvents = this.resolveEvents.bind(this);
+        this.getStats = this.getStats.bind(this);
+    }
+
     /**
      * GET /api/security/events
      * Lista eventos de seguridad (solo admin)

@@ -6,7 +6,42 @@ import { RanchNotFoundError, RanchValidationError, RanchCapacityError } from '..
 import { ensureError } from '../../utils/errorUtils';
 
 import Ranch, { RanchAttributes, RanchCreationAttributes, RanchType, RanchStatus } from '../../models/Ranch';
+import type { GeofenceConfig } from '../../models/Location';
+import { isPointInBoundary } from '../../utils/geoUtils';
 import Bovine from '../../models/Bovine';
+import Location from '../../models/Location';
+import LocationCapacity from '../../models/LocationCapacity';
+import BovineLocationHistory from '../../models/BovineLocationHistory';
+
+// ============================================================================
+// HELPERS — Conteo en vivo de cattle por rancho
+// ============================================================================
+// La columna Ranch.currentCattleCount se considera DEPRECADA. La fuente de
+// verdad es BovineLocationHistory (estancias abiertas) joineado por
+// location.ranchId. Esto evita desincronización del caché.
+// ============================================================================
+
+/**
+ * Cuenta animales actualmente dentro de un rancho (estancias abiertas
+ * en cualquier location del rancho).
+ */
+async function countLiveCattleInRanch(ranchId: string): Promise<number> {
+  const result = (await BovineLocationHistory.findAll({
+    attributes: [[sequelize.fn('COUNT', sequelize.col('BovineLocationHistory.id')), 'count']],
+    where: { exitedAt: { [Op.is]: null as any } },
+    include: [
+      {
+        model: Location,
+        as: 'location',
+        attributes: [],
+        required: true,
+        where: { ranchId },
+      },
+    ],
+    raw: true,
+  })) as any[];
+  return parseInt(result[0]?.count ?? '0', 10);
+}
 
 // ============================================================================
 // INTERFACES PÚBLICAS
@@ -31,6 +66,8 @@ export interface CreateRanchDTO {
   grazingArea: number;
   maxCattleCapacity: number;
   currentCattleCount?: number;
+  boundaryRadius?: number;          // legacy fallback (km)
+  boundary?: GeofenceConfig;        // perímetro real (POLYGON / RECTANGULAR / CIRCULAR / CORRIDOR)
   status?: RanchStatus;             // opcional (por si se envía)
   isActive?: boolean;
   isVerified?: boolean;             // ✅ Agregado
@@ -68,6 +105,8 @@ export interface RanchSummary {
   isAtCapacity: boolean;
   availableCapacity: number;
   coordinates: any;
+  boundaryRadius?: number;          // legacy (km), null si no configurado
+  boundary?: GeofenceConfig | null; // perímetro real
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -101,11 +140,9 @@ export class RanchCoreService {
         throw new RanchValidationError('El área de pastoreo no puede exceder el área total');
       }
 
-      // Si no se especifica currentCattleCount, se inicializa en 0
-      const currentCattleCount = data.currentCattleCount ?? 0;
-      if (currentCattleCount > data.maxCattleCapacity) {
-        throw new RanchValidationError('El ganado actual no puede exceder la capacidad máxima');
-      }
+      // currentCattleCount es deprecado: se calcula on-the-fly desde
+      // BovineLocationHistory. Forzamos 0 al crear (la columna sigue NOT NULL en BD).
+      const currentCattleCount = 0;
 
       const ranchData: RanchCreationAttributes = {
         ranchCode: data.ranchCode,
@@ -122,6 +159,8 @@ export class RanchCoreService {
         elevation: data.elevation,
         annualRainfall: data.annualRainfall,
         averageTemperature: data.averageTemperature,
+        boundaryRadius: data.boundaryRadius,
+        boundary: data.boundary,
         totalArea: data.totalArea,
         grazingArea: data.grazingArea,
         maxCattleCapacity: data.maxCattleCapacity,
@@ -165,12 +204,23 @@ export class RanchCoreService {
         throw new RanchValidationError('El área de pastoreo no puede exceder el área total');
       }
 
-      // Validar capacidad
-      if (data.maxCattleCapacity && data.currentCattleCount && data.currentCattleCount > data.maxCattleCapacity) {
-        throw new RanchValidationError('El ganado actual no puede exceder la capacidad máxima');
+      // currentCattleCount es deprecado: se ignora si llega en el body.
+      // El valor real se calcula on-the-fly desde BovineLocationHistory.
+      const { currentCattleCount: _ignored, ...updateData } = data as any;
+
+      // Validación cruzada: si cambia maxCattleCapacity, no puede ser menor
+      // que la suma de maxAnimals de las locations del rancho.
+      if (data.maxCattleCapacity !== undefined) {
+        const sumLocations = await this.getSumLocationCapacities(data.id, t);
+        if (data.maxCattleCapacity < sumLocations) {
+          throw new RanchValidationError(
+            `maxCattleCapacity (${data.maxCattleCapacity}) no puede ser menor que la ` +
+            `suma de capacidades de las locations del rancho (${sumLocations}).`
+          );
+        }
       }
 
-      await ranch.update(data, { transaction: t });
+      await ranch.update(updateData, { transaction: t });
 
       if (isOwnTransaction) await t.commit();
 
@@ -259,26 +309,53 @@ export class RanchCoreService {
     const ranch = await Ranch.findByPk(ranchId);
     if (!ranch) throw new RanchNotFoundError(ranchId);
     if (ranch.maxCattleCapacity === 0) return 0;
-    return (ranch.currentCattleCount / ranch.maxCattleCapacity) * 100;
+    const current = await countLiveCattleInRanch(ranchId);
+    return (current / ranch.maxCattleCapacity) * 100;
   }
 
   async getAvailableCapacity(ranchId: string): Promise<number> {
     const ranch = await Ranch.findByPk(ranchId);
     if (!ranch) throw new RanchNotFoundError(ranchId);
-    return Math.max(0, ranch.maxCattleCapacity - ranch.currentCattleCount);
+    const current = await countLiveCattleInRanch(ranchId);
+    return Math.max(0, ranch.maxCattleCapacity - current);
   }
 
   async isAtCapacity(ranchId: string): Promise<boolean> {
     const ranch = await Ranch.findByPk(ranchId);
     if (!ranch) throw new RanchNotFoundError(ranchId);
-    return ranch.currentCattleCount >= ranch.maxCattleCapacity;
+    const current = await countLiveCattleInRanch(ranchId);
+    return current >= ranch.maxCattleCapacity;
+  }
+
+  /**
+   * Suma `maxAnimals` de todas las LocationCapacity del rancho.
+   * Útil para validar que `Ranch.maxCattleCapacity` ≥ suma de capacidades
+   * de sus locations.
+   */
+  async getSumLocationCapacities(ranchId: string, transaction?: Transaction): Promise<number> {
+    const result = (await LocationCapacity.findAll({
+      attributes: [[sequelize.fn('COALESCE', sequelize.fn('SUM', sequelize.col('max_animals')), 0), 'total']],
+      include: [
+        {
+          model: Location,
+          as: 'location',
+          attributes: [],
+          required: true,
+          where: { ranchId },
+        },
+      ],
+      raw: true,
+      transaction,
+    })) as any[];
+    return parseInt(result[0]?.total ?? '0', 10);
   }
 
   async getCattleDensity(ranchId: string): Promise<number> {
     const ranch = await Ranch.findByPk(ranchId);
     if (!ranch) throw new RanchNotFoundError(ranchId);
     if (ranch.totalArea === 0) return 0;
-    return ranch.currentCattleCount / ranch.totalArea; // animales por hectárea
+    const current = await countLiveCattleInRanch(ranchId);
+    return current / ranch.totalArea; // animales por hectárea
   }
 
   // ==========================================================================
@@ -327,10 +404,13 @@ export class RanchCoreService {
     const ranch = await Ranch.findByPk(ranchId);
     if (!ranch) throw new RanchNotFoundError(ranchId);
 
-    const occupancyRate = ranch.maxCattleCapacity === 0 ? 0 : (ranch.currentCattleCount / ranch.maxCattleCapacity) * 100;
-    const cattleDensity = ranch.totalArea === 0 ? 0 : ranch.currentCattleCount / ranch.totalArea;
-    const availableCapacity = Math.max(0, ranch.maxCattleCapacity - ranch.currentCattleCount);
-    const isAtCapacity = ranch.currentCattleCount >= ranch.maxCattleCapacity;
+    // Conteo en vivo desde BovineLocationHistory (NO desde la columna cacheada)
+    const currentCattleCount = await countLiveCattleInRanch(ranchId);
+
+    const occupancyRate = ranch.maxCattleCapacity === 0 ? 0 : (currentCattleCount / ranch.maxCattleCapacity) * 100;
+    const cattleDensity = ranch.totalArea === 0 ? 0 : currentCattleCount / ranch.totalArea;
+    const availableCapacity = Math.max(0, ranch.maxCattleCapacity - currentCattleCount);
+    const isAtCapacity = currentCattleCount >= ranch.maxCattleCapacity;
 
     return {
       id: ranch.id,
@@ -343,15 +423,124 @@ export class RanchCoreService {
       totalArea: ranch.totalArea,
       grazingArea: ranch.grazingArea,
       maxCattleCapacity: ranch.maxCattleCapacity,
-      currentCattleCount: ranch.currentCattleCount,
+      currentCattleCount,
       occupancyRate,
       cattleDensity,
       isAtCapacity,
       availableCapacity,
       coordinates: ranch.coordinates,
+      boundaryRadius: (ranch as any).boundaryRadius ?? undefined,
+      boundary: (ranch as any).boundary ?? null,
       isActive: ranch.isActive,
       createdAt: ranch.createdAt,
       updatedAt: ranch.updatedAt,
+    };
+  }
+
+  // ==========================================================================
+  // BOUNDARY — endpoint dedicado
+  // ==========================================================================
+
+  /**
+   * Devuelve solo el `boundary` del rancho (más `boundaryRadius` y `coordinates`
+   * como contexto). Útil para el componente de mapa que carga el perímetro
+   * sin tener que traerse el rancho completo.
+   */
+  async getRanchBoundary(ranchId: string): Promise<{
+    ranchId: string;
+    name: string;
+    coordinates: any;
+    boundaryRadius?: number;
+    boundary: GeofenceConfig | null;
+  }> {
+    const ranch = await Ranch.findByPk(ranchId, {
+      attributes: ['id', 'name', 'coordinates', 'boundaryRadius', 'boundary'],
+    });
+    if (!ranch) throw new RanchNotFoundError(ranchId);
+
+    return {
+      ranchId: ranch.id,
+      name: (ranch as any).name,
+      coordinates: (ranch as any).coordinates,
+      boundaryRadius: (ranch as any).boundaryRadius ?? undefined,
+      boundary: (ranch as any).boundary ?? null,
+    };
+  }
+
+  /**
+   * Actualiza únicamente el `boundary` del rancho.
+   *
+   * Validación cruzada: si el nuevo boundary deja FUERA a alguna location
+   * existente del rancho, se rechaza con 409 + lista de locations afectadas.
+   * Esto previene "achicar" el rancho dejando ubicaciones huérfanas.
+   *
+   * Pasar `boundary: null` borra el perímetro y el sistema vuelve al
+   * fallback CIRCULAR derivado de `boundaryRadius`.
+   */
+  async updateRanchBoundary(
+    ranchId: string,
+    boundary: GeofenceConfig | null,
+    userId: string
+  ): Promise<{
+    ranchId: string;
+    boundary: GeofenceConfig | null;
+  }> {
+    const ranch = await Ranch.findByPk(ranchId);
+    if (!ranch) throw new RanchNotFoundError(ranchId);
+
+    // Validación cruzada solo si se está estableciendo un boundary (no si se borra).
+    if (boundary) {
+      // Importación tardía para evitar ciclos
+      const Location = (await import('../../models/Location')).default;
+
+      const locations = await Location.findAll({
+        where: { ranchId },
+        attributes: ['id', 'name', 'coordinates', 'locationCode'],
+      });
+
+      const outside: Array<{ id: string; name: string; locationCode: string; coordinates: any }> = [];
+      for (const loc of locations) {
+        const coords = (loc as any).coordinates;
+        if (!coords || typeof coords.latitude !== 'number') continue;
+        const inside = isPointInBoundary(
+          { latitude: coords.latitude, longitude: coords.longitude },
+          boundary as any
+        );
+        if (!inside) {
+          outside.push({
+            id: (loc as any).id,
+            name: (loc as any).name,
+            locationCode: (loc as any).locationCode,
+            coordinates: coords,
+          });
+        }
+      }
+
+      if (outside.length > 0) {
+        const err = new RanchValidationError(
+          `El nuevo perímetro dejaría ${outside.length} ubicación(es) fuera del rancho. ` +
+          `Reubique las ubicaciones afectadas o ajuste el perímetro.`
+        );
+        (err as any).statusCode = 409;
+        (err as any).code = 'BOUNDARY_LEAVES_LOCATIONS_OUTSIDE';
+        (err as any).details = { outsideLocations: outside, boundaryType: boundary.type };
+        throw err;
+      }
+    }
+
+    (ranch as any).boundary = boundary;
+    (ranch as any).updatedBy = userId;
+    await ranch.save();
+
+    logger.info(`Boundary actualizado para rancho ${ranchId}`, this.context, {
+      ranchId,
+      boundaryType: boundary?.type ?? null,
+      userId,
+    });
+
+    return {
+      ranchId,
+      boundary: (ranch as any).boundary ?? null,
     };
   }
 }

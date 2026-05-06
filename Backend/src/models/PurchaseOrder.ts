@@ -48,8 +48,8 @@ export interface PurchaseOrderAttributes {
   approvedBy?: string;
   receivedBy?: string;
   notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -57,7 +57,7 @@ export interface PurchaseOrderCreationAttributes
   extends Optional<PurchaseOrderAttributes,
     'id' | 'expectedDeliveryDate' | 'actualDeliveryDate' | 'paymentTerms' |
     'deliveryInstructions' | 'approvedBy' | 'receivedBy' | 'notes' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
   > {}
 
 class PurchaseOrder extends Model<PurchaseOrderAttributes, PurchaseOrderCreationAttributes>
@@ -187,16 +187,6 @@ PurchaseOrder.init(
     notes: {
       type: DataTypes.TEXT,
       allowNull: true,
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
     },
     deletedAt: {
       type: DataTypes.DATE,

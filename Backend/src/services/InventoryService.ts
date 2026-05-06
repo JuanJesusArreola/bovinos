@@ -111,7 +111,7 @@ export class InventoryService {
         where: whereConditions,
         limit,
         offset,
-        order: [['updatedAt', 'DESC']]
+        order: [['updated_at', 'DESC']]
       });
 
       let total = items.length;

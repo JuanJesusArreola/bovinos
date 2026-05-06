@@ -7,6 +7,28 @@ import logger from '../../utils/logger';
 export class RanchLegalController {
   private readonly context = 'RanchLegalController';
 
+  constructor() {
+    this.getOwnership = this.getOwnership.bind(this);
+    this.createOrUpdateOwnership = this.createOrUpdateOwnership.bind(this);
+    this.getLegalRepresentative = this.getLegalRepresentative.bind(this);
+    this.isCorporateOwner = this.isCorporateOwner.bind(this);
+    this.createCertification = this.createCertification.bind(this);
+    this.updateCertification = this.updateCertification.bind(this);
+    this.deleteCertification = this.deleteCertification.bind(this);
+    this.getValidCertifications = this.getValidCertifications.bind(this);
+    this.getExpiringCertifications = this.getExpiringCertifications.bind(this);
+    this.renewCertification = this.renewCertification.bind(this);
+    this.createLicense = this.createLicense.bind(this);
+    this.updateLicense = this.updateLicense.bind(this);
+    this.deleteLicense = this.deleteLicense.bind(this);
+    this.getValidLicenses = this.getValidLicenses.bind(this);
+    this.createInsurance = this.createInsurance.bind(this);
+    this.updateInsurance = this.updateInsurance.bind(this);
+    this.recordClaim = this.recordClaim.bind(this);
+    this.renewInsurance = this.renewInsurance.bind(this);
+    this.getCoverageSummary = this.getCoverageSummary.bind(this);
+  }
+
   // ==========================================================================
   // PROPIEDAD
   // ==========================================================================

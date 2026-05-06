@@ -8,6 +8,16 @@ import { ProductionType } from '../models/Production';
 export class ProductionController {
   private readonly context = 'ProductionController';
 
+  constructor() {
+    this.createProduction = this.createProduction.bind(this);
+    this.getProductionById = this.getProductionById.bind(this);
+    this.listProductions = this.listProductions.bind(this);
+    this.getProductionMetrics = this.getProductionMetrics.bind(this);
+    this.getProductionTrends = this.getProductionTrends.bind(this);
+    this.updateProduction = this.updateProduction.bind(this);
+    this.deleteProduction = this.deleteProduction.bind(this);
+  }
+
   /**
    * Crear un nuevo registro de producción (leche, peso, etc.)
    */

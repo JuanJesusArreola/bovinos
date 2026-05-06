@@ -7,6 +7,19 @@ import logger from '../../utils/logger';
 export class AuthController {
     private readonly context = 'AuthController';
 
+    constructor() {
+        this.register = this.register.bind(this);
+        this.login = this.login.bind(this);
+        this.logout = this.logout.bind(this);
+        this.refreshToken = this.refreshToken.bind(this);
+        this.forgotPassword = this.forgotPassword.bind(this);
+        this.resetPassword = this.resetPassword.bind(this);
+        this.changePassword = this.changePassword.bind(this);
+        this.verifyEmail = this.verifyEmail.bind(this);
+        this.resendVerification = this.resendVerification.bind(this);
+        this.redirectResetPassword = this.redirectResetPassword.bind(this);
+    }
+
     /**
      * POST /api/auth/register
      * Registra un nuevo usuario

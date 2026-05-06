@@ -845,7 +845,7 @@ export class BovineHealthService {
                     createdAt: { [Op.gte]: startDate },
                     [Op.and]: literal("metadata->>'event' = 'HEALTH_STATUS_CHANGED'")
                 },
-                order: [['createdAt', 'ASC']]
+                order: [['created_at', 'ASC']]
             });
 
             // Combinar y ordenar

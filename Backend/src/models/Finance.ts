@@ -197,8 +197,9 @@ export interface FinanceAttributes {
   project?: string;                        // Proyecto relacionado
   createdBy: string;                       // ID del usuario que creó
   updatedBy?: string;                      // ID del usuario que actualizó
-  createdAt: Date;
-  updatedAt: Date;
+ 
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -211,8 +212,7 @@ export interface FinanceCreationAttributes
     'financialAnalysis' | 'recurrence' | 'parentTransactionId' | 
     'relatedTransactions' | 'tags' | 'attachments' | 'photos' | 'notes' | 
     'internalNotes' | 'approvedBy' | 'approvedDate' | 'fiscalYear' | 
-    'fiscalPeriod' | 'costCenter' | 'project' | 'updatedBy' | 'createdAt' | 
-    'updatedAt' | 'deletedAt'
+    'fiscalPeriod' | 'costCenter' | 'project' | 'updatedBy' | 'deletedAt'
   > {}
 
 // Clase del modelo Finance
@@ -802,16 +802,6 @@ Finance.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó la transacción'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

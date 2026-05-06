@@ -7,6 +7,16 @@ import logger from '../utils/logger';
 export class LocationAccessController {
   private readonly context = 'LocationAccessController';
 
+  constructor() {
+    this.canAccess = this.canAccess.bind(this);
+    this.grantAccess = this.grantAccess.bind(this);
+    this.revokeAccess = this.revokeAccess.bind(this);
+    this.extendAccess = this.extendAccess.bind(this);
+    this.recordAccess = this.recordAccess.bind(this);
+    this.getUserActiveAccesses = this.getUserActiveAccesses.bind(this);
+    this.cleanupExpiredAccesses = this.cleanupExpiredAccesses.bind(this);
+  }
+
   async canAccess(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user?.id;

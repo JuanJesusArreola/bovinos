@@ -326,8 +326,8 @@ export interface ProductionAttributes {
   seasonId?: string;                           // ID de la temporada
   createdBy: string;                           // ID del usuario que creó
   updatedBy?: string;                          // ID del usuario que actualizó
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -341,7 +341,7 @@ export interface ProductionCreationAttributes
     'storageInfo' | 'processingInfo' | 'packaging' | 'distributionInfo' | 
     'rejectionInfo' | 'compliance' | 'sustainabilityMetrics' | 'images' | 
     'documents' | 'videos' | 'notes' | 'approvedBy' | 'approvedDate' | 
-    'farmId' | 'seasonId' | 'updatedBy' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'farmId' | 'seasonId' | 'updatedBy' | 'deletedAt'
   > {}
 
 // Clase del modelo Production
@@ -1017,16 +1017,6 @@ Production.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó el registro'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

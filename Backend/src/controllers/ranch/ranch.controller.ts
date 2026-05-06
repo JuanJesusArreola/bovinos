@@ -7,6 +7,74 @@ import logger from '../../utils/logger';
 export class RanchCoreController {
   private readonly context = 'RanchCoreController';
 
+  constructor() {
+    // Bind de todos los métodos para que "this" funcione correctamente
+    // cuando Express los invoca como callbacks (router.post('/', controller.method))
+    this.createRanch = this.createRanch.bind(this);
+    this.updateRanch = this.updateRanch.bind(this);
+    this.deleteRanch = this.deleteRanch.bind(this);
+    this.getRanchById = this.getRanchById.bind(this);
+    this.listRanches = this.listRanches.bind(this);
+    this.getOccupancyRate = this.getOccupancyRate.bind(this);
+    this.getAvailableCapacity = this.getAvailableCapacity.bind(this);
+    this.isAtCapacity = this.isAtCapacity.bind(this);
+    this.getCattleDensity = this.getCattleDensity.bind(this);
+    this.getRanchTypeLabel = this.getRanchTypeLabel.bind(this);
+    this.getStatusLabel = this.getStatusLabel.bind(this);
+    this.getRanchSummary = this.getRanchSummary.bind(this);
+    this.getRanchBoundary = this.getRanchBoundary.bind(this);
+    this.updateRanchBoundary = this.updateRanchBoundary.bind(this);
+  }
+
+  /**
+   * GET /api/ranches/:id/boundary
+   * Devuelve únicamente el perímetro del rancho + contexto mínimo (centro + radius legacy).
+   * Pensado para componentes de mapa que solo necesitan dibujar el perímetro.
+   */
+  async getRanchBoundary(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const data = await ranchCoreService.getRanchBoundary(id);
+      res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Error en getRanchBoundary', this.context, { params: req.params }, error as Error);
+      if (error instanceof RanchError) {
+        res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+      } else {
+        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+      }
+    }
+  }
+
+  /**
+   * PUT /api/ranches/:id/boundary
+   * Actualiza únicamente el perímetro. Body: `{ boundary: GeofenceConfig | null }`.
+   * - Si el nuevo boundary deja locations existentes fuera, responde 409 con la lista.
+   * - Pasar `boundary: null` borra el perímetro (vuelve a fallback CIRCULAR via boundaryRadius).
+   */
+  async updateRanchBoundary(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Usuario no autenticado' });
+        return;
+      }
+      const { id } = req.params;
+      const boundary = req.body?.boundary ?? null;
+      const data = await ranchCoreService.updateRanchBoundary(id, boundary, userId);
+      res.json({ success: true, data, message: 'Perímetro del rancho actualizado' });
+    } catch (error) {
+      logger.error('Error en updateRanchBoundary', this.context, { params: req.params, body: req.body }, error as Error);
+      if (error instanceof RanchError) {
+        const body: any = { success: false, error: error.message, code: error.code };
+        if ((error as any).details) body.details = (error as any).details;
+        res.status((error as any).statusCode || error.statusCode || 400).json(body);
+      } else {
+        res.status(500).json({ success: false, error: 'Error interno del servidor' });
+      }
+    }
+  }
+
   async createRanch(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user?.id;

@@ -47,16 +47,16 @@ export interface RanchOwnershipAttributes {
   businessLicense?: string;
   taxRegistration?: string;
   registrationNumber?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
 export interface RanchOwnershipCreationAttributes
   extends Optional<RanchOwnershipAttributes,
     'shareholders' | 'legalRepresentative' | 'businessLicense' |
-    'taxRegistration' | 'registrationNumber' | 'createdAt' |
-    'updatedAt' | 'deletedAt'
+    'taxRegistration' | 'registrationNumber' | 'deletedAt'
   > {}
 
 class RanchOwnership extends Model<RanchOwnershipAttributes, RanchOwnershipCreationAttributes>
@@ -157,16 +157,6 @@ RanchOwnership.init(
       type: DataTypes.STRING(100),
       allowNull: true,
       comment: 'Número de registro'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

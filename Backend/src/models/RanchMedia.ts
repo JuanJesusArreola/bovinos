@@ -49,6 +49,7 @@ export interface RanchMediaAttributes {
 
   // Archivo
   url: string;
+  storagePath?: string;         // Key en R2 (para eliminar/referenciar)
   filename: string;
   filesize: number;           // en bytes
   mimeType: string;
@@ -83,17 +84,18 @@ export interface RanchMediaAttributes {
   // Auditoría
   uploadedBy: string;
   updatedBy?: string;
-  createdAt: Date;
-  updatedAt: Date;
+
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
 export interface RanchMediaCreationAttributes
   extends Optional<RanchMediaAttributes,
-    'id' | 'description' | 'width' | 'height' | 'duration' |
+    'id' | 'description' | 'storagePath' | 'width' | 'height' | 'duration' |
     'thumbnailUrl' | 'takenDate' | 'latitude' | 'longitude' | 'tags' |
     'locationId' | 'bovineId' | 'metadata' | 'updatedBy' |
-    'createdAt' | 'updatedAt' | 'deletedAt'
+    'deletedAt'
   > { }
 
 class RanchMedia extends Model<RanchMediaAttributes, RanchMediaCreationAttributes>
@@ -108,6 +110,7 @@ class RanchMedia extends Model<RanchMediaAttributes, RanchMediaCreationAttribute
   public description?: string;
 
   public url!: string;
+  public storagePath?: string;
   public filename!: string;
   public filesize!: number;
   public mimeType!: string;
@@ -178,6 +181,11 @@ RanchMedia.init(
       allowNull: false,
       validate: { isUrl: true },
       comment: 'URL del archivo'
+    },
+    storagePath: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+      comment: 'Key en Cloudflare R2 (para operaciones de storage)'
     },
     filename: {
       type: DataTypes.STRING(255),
@@ -279,16 +287,6 @@ RanchMedia.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del usuario que actualizó'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

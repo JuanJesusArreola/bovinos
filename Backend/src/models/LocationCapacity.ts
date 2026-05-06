@@ -39,8 +39,8 @@ export interface LocationCapacityAttributes {
   lastUpdated: Date;             // Fecha última actualización
   updatedBy: string;             // Usuario que actualizó
   
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;              // Soft delete
 }
 
@@ -49,7 +49,7 @@ export interface LocationCapacityCreationAttributes
   extends Optional<LocationCapacityAttributes,
     'currentAnimals' | 'waterSources' | 'feedingStations' | 'shelters' |
     'hasElectricity' | 'hasWater' | 'hasInternet' | 'hasRoadAccess' |
-    'securityLevel' | 'createdAt' | 'updatedAt' | 'deletedAt'
+    'securityLevel' | 'deletedAt'
   > {}
 
 // Clase del modelo LocationCapacity
@@ -214,16 +214,6 @@ LocationCapacity.init(
       type: DataTypes.UUID,
       allowNull: false,
       comment: 'ID del usuario que actualizó'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de creación del registro'
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      comment: 'Fecha de última actualización'
     },
     deletedAt: {
       type: DataTypes.DATE,

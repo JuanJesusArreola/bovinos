@@ -101,8 +101,8 @@ export interface RanchSustainabilityAttributes {
   // Metadatos
   notes?: string;
   
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt?: Date;
+  updatedAt?: Date;
   deletedAt?: Date;
 }
 
@@ -112,8 +112,7 @@ export interface RanchSustainabilityCreationAttributes
     'carbonFootprint' | 'waterUsageEfficiency' | 'energyConsumption' |
     'renewableEnergyPercentage' | 'biodiversityIndex' | 'soilHealthScore' |
     'nativeVegetationArea' | 'wildlifeCorridors' | 'lastAssessmentDate' |
-    'nextAssessmentDate' | 'assessedBy' | 'notes' | 'createdAt' |
-    'updatedAt' | 'deletedAt'
+    'nextAssessmentDate' | 'assessedBy' | 'notes' | 'deletedAt'
   > {}
 
 // Clase del modelo
@@ -297,16 +296,6 @@ RanchSustainability.init(
       type: DataTypes.TEXT,
       allowNull: true,
       comment: 'Notas adicionales'
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW
     },
     deletedAt: {
       type: DataTypes.DATE,

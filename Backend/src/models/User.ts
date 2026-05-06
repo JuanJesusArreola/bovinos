@@ -443,9 +443,9 @@ export interface UserAttributes {
   lastActiveAt?: Date;                         // Última actividad
   createdBy?: string;                          // ID del usuario que lo creó
   updatedBy?: string;                          // ID del usuario que lo actualizó
-  /*createdAt: Date;
-  updatedAt: Date;
-  deletedAt?: Date;*/
+  createdAt?: Date;
+  updatedAt?: Date;
+  deletedAt?: Date;
   pushTokens?: PushToken[];
 }
 
@@ -458,8 +458,8 @@ export interface UserCreationAttributes
     'performanceMetrics' | 'ranchAccess' | 'subscriptionInfo' | 'apiAccess' |
     'securityInfo' | 'complianceInfo' | 'integrations' | 'tags' | 'notes' |
     'termsAcceptedDate' | 'privacyPolicyAcceptedDate' | 'lastLoginAt' |
-    'lastActiveAt' | 'createdBy' | 'updatedBy' /*| 'createdAt' | 'updatedAt' | 
-    'deletedAt'*/
+    'lastActiveAt' | 'createdBy' | 'updatedBy' /*| 'createdAt' | 'updatedAt'*/ | 
+    'deletedAt'
   > { }
 
 // Clase del modelo User
@@ -1262,12 +1262,12 @@ User.init(
       type: DataTypes.DATE,
       allowNull: false,
       comment: 'Fecha de última actualización'
-    },
+    },*/
     deletedAt: {
       type: DataTypes.DATE,
       allowNull: true,
       comment: 'Fecha de eliminación (soft delete)'
-    }*/
+    }
   },
   {
     sequelize,
