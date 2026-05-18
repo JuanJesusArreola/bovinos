@@ -25,6 +25,7 @@ import { StatCard } from '@/components/ui/StatCard';
 import { Alert } from '@/components/ui/Alert';
 import { PageLoader } from '@/components/ui/Spinner';
 import { FileUpload } from '@/components/ui/FileUpload';
+import { RanchFilterBanner, RanchFilterBannerEmpty } from '@/components/shared/RanchFilterBanner';
 import {
   HeartPulse, Plus, Activity, Stethoscope, AlertTriangle,
   Thermometer, ChevronDown, ChevronUp, Pill, FlaskConical,
@@ -211,10 +212,30 @@ export function HealthListPage() {
     enabled: !!activeRanchId,
   });
 
+  // Scope the bovines list to the active ranch. Previously this query ran
+  // ALWAYS (no `enabled` gate, no `ranchId` filter) — without an active ranch
+  // the backend could 500 or return an unexpected shape, and the page used
+  // `bovinesData?.items` (legacy alias) which crashes the grid render when
+  // the canonical `bovines` field is populated but `items` is not.
   const { data: bovinesData } = useQuery({
-    queryKey: ['bovines-list'],
-    queryFn: () => bovinesApi.list({ page: 1, limit: 200 }).then((r) => r.data.data),
+    queryKey: ['bovines-list', activeRanchId],
+    queryFn: () =>
+      bovinesApi
+        // The backend validator caps `limit` at 100 (returns 400 with
+        // "El límite debe estar entre 1 y 100" if exceeded). 100 is enough
+        // for the "select a bovine" picker — the rest are paginated.
+        .list({ page: 1, limit: 100, ranchId: activeRanchId! })
+        .then((r) => r.data.data),
+    enabled: !!activeRanchId,
   });
+
+  /**
+   * Canonical bovines array. The backend returns `bovines`; the optional
+   * `items` alias is kept for backward compatibility. Always prefer the
+   * canonical field — using only `items` (as the previous code did) yielded
+   * an empty grid when the alias wasn't populated.
+   */
+  const bovineList = bovinesData?.bovines ?? bovinesData?.items ?? [];
 
   // ── Form ───────────────────────────────────────────────────────────────
 
@@ -310,10 +331,15 @@ export function HealthListPage() {
     },
   });
 
-  const bovineOptions = (bovinesData?.items || []).map((b) => ({
+  const bovineOptions = bovineList.map((b) => ({
     value: b.id,
     label: `${b.earTag} — ${b.name || 'Sin nombre'}`,
   }));
+
+  // If we're still loading the herd stats AND a ranch is selected, show
+  // the page loader. Without a ranch we fall through to the banner-only
+  // render below — never block the UI on a query that's disabled.
+  if (activeRanchId && statsLoading) return <PageLoader />;
 
   const stats = herdStats as HealthStats | undefined;
 
@@ -342,8 +368,6 @@ export function HealthListPage() {
     setModalOpen(true);
   }
 
-  if (statsLoading) return <PageLoader />;
-
   const errorMessage = checkMutation.error
     ? ((checkMutation.error as any)?.response?.data?.error?.message || 'Error al registrar el chequeo')
     : null;
@@ -361,13 +385,31 @@ export function HealthListPage() {
             <p className="text-sm text-gray-500 dark:text-gray-400">Monitoreo, diagnóstico y tratamiento</p>
           </div>
         </div>
-        <Button icon={<Plus className="w-4 h-4" />} onClick={() => openNewCheck()}>
-          Nuevo Registro
-        </Button>
+        {/* Action button: only useful when a ranch is selected. */}
+        {activeRanchId && (
+          <Button icon={<Plus className="w-4 h-4" />} onClick={() => openNewCheck()}>
+            Nuevo Registro
+          </Button>
+        )}
       </div>
 
+      {/* Global ranch filter — same convention as Bovinos / Locations. */}
+      <RanchFilterBanner
+        activeHint="Mostrando información de salud de este rancho."
+        emptyHint="Selecciona un rancho para ver la información de salud."
+      />
+
+      {/* Empty state when no ranch is selected — prevents downstream
+          renders that depend on `activeRanchId` from crashing. */}
+      {!activeRanchId && (
+        <RanchFilterBannerEmpty
+          title="Selecciona un rancho"
+          description="Los registros de salud, estadísticas del hato y nuevos chequeos se cargan por rancho. Elige uno arriba para continuar."
+        />
+      )}
+
       {/* Stats */}
-      {stats && (
+      {activeRanchId && stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {statCards.map((s) => (
             <StatCard key={s.title} title={s.title} value={s.value} icon={s.icon} color={s.color} />
@@ -376,7 +418,7 @@ export function HealthListPage() {
       )}
 
       {/* Health Distribution Bar */}
-      {stats && stats.total > 0 && (
+      {activeRanchId && stats && stats.total > 0 && (
         <Card>
           <CardTitle>Distribución de Salud del Hato</CardTitle>
           <div className="mt-4">
@@ -418,14 +460,17 @@ export function HealthListPage() {
         </Card>
       )}
 
-      {/* Bovines Grid */}
+      {/* Bovines Grid — only when a ranch is selected, otherwise the
+          grid would be empty and the empty-state banner above already
+          tells the user what to do. */}
+      {activeRanchId && (
       <Card>
         <CardTitle>Bovinos del Hato</CardTitle>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           Selecciona un bovino para registrar un nuevo chequeo de salud.
         </p>
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {(bovinesData?.items || []).slice(0, 15).map((bovine) => (
+          {bovineList.slice(0, 15).map((bovine) => (
             <button
               key={bovine.id}
               onClick={() => openNewCheck(bovine.id)}
@@ -448,12 +493,13 @@ export function HealthListPage() {
             </button>
           ))}
         </div>
-        {(bovinesData?.items || []).length > 15 && (
+        {bovineList.length > 15 && (
           <p className="text-sm text-gray-400 mt-3 text-center">
-            +{(bovinesData?.items || []).length - 15} bovinos más
+            +{bovineList.length - 15} bovinos más
           </p>
         )}
       </Card>
+      )}
 
       {/* ── New Health Record Modal ──────────────────────────────────────── */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Nuevo Registro de Salud" size="xl">

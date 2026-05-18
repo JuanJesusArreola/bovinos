@@ -9,7 +9,9 @@ export enum MovementReason {
   QUARANTINE = 'QUARANTINE',
   BREEDING = 'BREEDING',
   TRANSFER = 'TRANSFER',
-  SALE = 'SALE'
+  SALE = 'SALE',
+  CREATION = 'CREATION',  // Para el ingreso inicial al sistema
+  OTHER = 'OTHER'
 }
 
 export enum MovementType {

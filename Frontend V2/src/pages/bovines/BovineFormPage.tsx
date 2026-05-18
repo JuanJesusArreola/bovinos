@@ -1,12 +1,16 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { bovinesApi } from '@/api/bovines.api';
+import { locationsApi } from '@/api/locations.api';
+import { invalidateOccupancyCaches } from '@/hooks/useBovines';
 import { useAuth } from '@/store/AuthContext';
 import { useToast } from '@/store/ToastContext';
+import { isPointInBoundary, type BoundaryShape } from '@/utils/geoValidation';
+import { MovementReason, MovementType } from '@/types/bovine.dtos';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
@@ -19,8 +23,9 @@ import { MapPicker } from '@/components/maps/MapPicker';
 import type { Coordinates } from '@/components/maps/MapPicker';
 import { FileUpload } from '@/components/ui/FileUpload';
 import { cn } from '@/utils/cn';
-import { getErrorCode, getFriendlyMessage, ErrorCodes } from '@/utils/errorHandler';
+import { getErrorCode, getFriendlyMessage, ErrorCodes, getBovineErrorMessage } from '@/utils/errorHandler';
 import type { BovineFormData } from '@/types';
+import type { BovineMediaItemResponse } from '@/types/bovine.dtos';
 import {
   ArrowLeft, ArrowRight, Check, Tag, HeartPulse, MapPin,
   Save, Camera, X, ChevronDown, ChevronUp, Users,
@@ -29,10 +34,33 @@ import {
 
 // ─── Schema ────────────────────────────────────────────────────────────────────
 
+/**
+ * Allowed chars for the bovine name: Unicode letters (so it accepts accents,
+ * ñ, etc.) plus spaces. No digits, no symbols, no underscores.
+ *   Lola         → ok
+ *   Vaca Blanca  → ok
+ *   Lola123      → reject
+ *   Vaca_01      → reject
+ */
+const NAME_REGEX = /^[\p{L}\s]+$/u;
+
+/**
+ * Strip every char that is NOT a Unicode letter or whitespace. Used to
+ * sanitize the input live as the user types, so invalid chars never make
+ * it into the form state (and therefore never into the submit payload).
+ */
+function sanitizeName(input: string): string {
+  return input.replace(/[^\p{L}\s]/gu, '');
+}
+
 const bovineSchema = z.object({
   // Step 1 — Identificación
   earTag: z.string().min(1, 'El arete es requerido').max(50, 'Máximo 50 caracteres'),
-  name: z.string().max(200).optional().or(z.literal('')),
+  name: z.string()
+    .max(200, 'Máximo 200 caracteres')
+    .regex(NAME_REGEX, 'Solo se permiten letras y espacios (sin números ni símbolos)')
+    .optional()
+    .or(z.literal('')),
   breed: z.string().min(1, 'La raza es requerida').max(100),
   cattleType: z.enum(['CATTLE', 'BULL', 'COW', 'CALF'], { error: 'Selecciona el tipo' }),
   // Step 2 — Biológicos
@@ -57,6 +85,14 @@ const bovineSchema = z.object({
     latitude: z.number().min(-90).max(90),
     longitude: z.number().min(-180).max(180),
   }).optional(),
+  // Step 3 — Datos del PRIMER registro de entrada al potrero (opcionales;
+  // solo se envían si el usuario seleccionó un `locationId`).
+  entryReason: z.enum([
+    'CREATION', 'GRAZING', 'MEDICAL', 'QUARANTINE',
+    'BREEDING', 'TRANSFER', 'SALE', 'OTHER',
+  ]).optional(),
+  entryMovementType: z.enum(['MANUAL', 'AUTOMATED', 'SCHEDULED']).optional(),
+  entryNotes: z.string().max(1000, 'Máximo 1000 caracteres').optional().or(z.literal('')),
 });
 
 type FormValues = z.infer<typeof bovineSchema>;
@@ -79,10 +115,10 @@ const genderOptions = [
 
 /** All cattle type options — will be filtered at runtime based on gender + age */
 const ALL_CATTLE_TYPE_OPTIONS = [
-  { value: 'CATTLE', label: 'Ganado General',   minMonths: 0,   maxMonths: null, genders: ['MALE', 'FEMALE'] },
-  { value: 'BULL',   label: 'Toro',             minMonths: 18,  maxMonths: null, genders: ['MALE'] },
-  { value: 'COW',    label: 'Vaca',             minMonths: 24,  maxMonths: null, genders: ['FEMALE'] },
-  { value: 'CALF',   label: 'Becerro/a',        minMonths: 0,   maxMonths: 12,   genders: ['MALE', 'FEMALE'] },
+  { value: 'CATTLE', label: 'Ganado General', minMonths: 0, maxMonths: null, genders: ['MALE', 'FEMALE'] },
+  { value: 'BULL', label: 'Toro', minMonths: 18, maxMonths: null, genders: ['MALE'] },
+  { value: 'COW', label: 'Vaca', minMonths: 24, maxMonths: null, genders: ['FEMALE'] },
+  { value: 'CALF', label: 'Becerro/a', minMonths: 0, maxMonths: 12, genders: ['MALE', 'FEMALE'] },
 ] as const;
 
 /** Compute age in months from a date string (YYYY-MM-DD). Returns null when invalid. */
@@ -101,10 +137,10 @@ function ageInMonths(birthDate: string): number | null {
 function getCattleTypeOptions(gender: string, birthDate: string) {
   const months = ageInMonths(birthDate);
   return ALL_CATTLE_TYPE_OPTIONS.map((opt) => {
-    const genderOk  = !gender || (opt.genders as readonly string[]).includes(gender);
-    const minOk     = months == null || months >= opt.minMonths;
-    const maxOk     = months == null || opt.maxMonths == null || months <= opt.maxMonths;
-    const valid     = genderOk && minOk && maxOk;
+    const genderOk = !gender || (opt.genders as readonly string[]).includes(gender);
+    const minOk = months == null || months >= opt.minMonths;
+    const maxOk = months == null || opt.maxMonths == null || months <= opt.maxMonths;
+    const valid = genderOk && minOk && maxOk;
 
     let hint = '';
     if (!genderOk) hint = `Solo para ${opt.genders.map((g) => g === 'MALE' ? 'machos' : 'hembras').join('/')}`;
@@ -130,6 +166,32 @@ const vaccinationStatusOptions = [
   { value: 'PENDING', label: 'Pendiente' },
   { value: 'OVERDUE', label: 'Atrasado' },
   { value: 'NONE', label: 'Sin Vacunas' },
+];
+
+/**
+ * Motivos disponibles para el PRIMER registro de entrada a un potrero al crear
+ * un bovino. `CREATION` es el default y describe la asignación inicial.
+ * Mapea 1:1 al enum `MovementReason` del backend.
+ */
+const entryReasonOptions = [
+  { value: MovementReason.CREATION,   label: 'Asignación inicial (creación)' },
+  { value: MovementReason.GRAZING,    label: 'Pastoreo' },
+  { value: MovementReason.MEDICAL,    label: 'Tratamiento médico' },
+  { value: MovementReason.QUARANTINE, label: 'Cuarentena' },
+  { value: MovementReason.BREEDING,   label: 'Reproducción' },
+  { value: MovementReason.TRANSFER,   label: 'Transferencia' },
+  { value: MovementReason.SALE,       label: 'Venta' },
+  { value: MovementReason.OTHER,      label: 'Otro' },
+];
+
+/**
+ * Cómo se originó el movimiento. `MANUAL` es el default cuando el usuario lo
+ * captura desde el formulario. Mapea 1:1 al enum `MovementType` del backend.
+ */
+const entryMovementTypeOptions = [
+  { value: MovementType.MANUAL,    label: 'Manual (capturado por el usuario)' },
+  { value: MovementType.AUTOMATED, label: 'Automatizado' },
+  { value: MovementType.SCHEDULED, label: 'Programado' },
 ];
 
 const breedOptions = [
@@ -192,7 +254,29 @@ export function BovineFormPage() {
   const needsRanchPicker = !activeRanchId || user?.role === 'SUPER_ADMIN';
 
   // Extra state not in the Zod schema
+  /**
+   * LEGACY — `photos` previously held URLs uploaded to the generic /uploads
+   * endpoint, but they were NEVER attached to the bovine (the payload didn't
+   * include them). Kept as `unknown[]` placeholder to avoid breaking any
+   * reference outside this file, but no longer used in the submit flow.
+   * The new media flow lives in `pendingFiles` / `existingMedia` / `mediaToDelete`.
+   */
   const [photos, setPhotos] = useState<string[]>([]);
+
+  // ── New media-upload flow (Phase: fix update flow) ─────────────────────
+  /** Files chosen by the user that have NOT been uploaded yet. Sent after create/update. */
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  /** Blob URLs (URL.createObjectURL) for previews. Same index as pendingFiles. Revoked on cleanup. */
+  const [pendingPreviews, setPendingPreviews] = useState<string[]>([]);
+  /** Existing media of the bovine (only populated in edit mode). */
+  const [existingMedia, setExistingMedia] = useState<BovineMediaItemResponse[]>([]);
+  /** IDs/storagePaths of existing media the user wants to delete on submit. */
+  const [mediaToDelete, setMediaToDelete] = useState<Set<string>>(new Set());
+  /** Surfaced errors of the per-file upload (after create/update). */
+  const [mediaUploadErrors, setMediaUploadErrors] = useState<string[]>([]);
+  /** Hidden input ref so the "Subir foto" button can trigger the picker. */
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [locationId, setLocationId] = useState<string | null>(null);
   const [showGenealogy, setShowGenealogy] = useState(false);
   const [showAcquisition, setShowAcquisition] = useState(false);
@@ -204,6 +288,42 @@ export function BovineFormPage() {
     queryFn: () => bovinesApi.getById(id!).then((r) => r.data.data),
     enabled: isEditing,
   });
+
+  // ── Load existing media when editing (so the user can see / remove them) ──
+  const { data: mediaRes } = useQuery({
+    queryKey: ['bovine-media', id],
+    queryFn: () => bovinesApi.getMedia(id!).then((r) => r.data.data),
+    enabled: isEditing,
+    staleTime: 60_000,
+  });
+
+  // Hydrate `existingMedia` from the API once the response arrives.
+  // Only images are shown in this picker (the form is for photos, not docs).
+  useEffect(() => {
+    if (mediaRes?.images) {
+      setExistingMedia(mediaRes.images);
+    }
+  }, [mediaRes]);
+
+  // ── Load the selected destination location (for geofence validation) ──────
+  // We need the location's `geofenceConfig` to check that, if the user picked
+  // GPS coordinates AND a potrero, the coordinates fall inside the real area
+  // of that potrero. Without this check the user could mark a bovine "in"
+  // a potrero while pinning it on the map kilometers away.
+  const { data: selectedLocation } = useQuery({
+    queryKey: ['location', locationId],
+    queryFn: () => locationsApi.getById(locationId!).then((r) => r.data.data),
+    enabled: !!locationId,
+    staleTime: 60_000,
+  });
+
+  // Revoke blob URLs on unmount to avoid memory leaks.
+  useEffect(() => {
+    return () => {
+      pendingPreviews.forEach((url) => URL.revokeObjectURL(url));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Form ──────────────────────────────────────────────────────────────────────
   const form = useForm<FormValues>({
@@ -224,10 +344,96 @@ export function BovineFormPage() {
       acquisitionPrice: undefined,
       notes: '',
       location: undefined,
+      entryReason: MovementReason.CREATION,
+      entryMovementType: MovementType.MANUAL,
+      entryNotes: '',
     },
   });
 
-  const { register, control, formState: { errors }, trigger, watch, reset } = form;
+  const { register, control, formState: { errors }, trigger, watch, reset, setValue } = form;
+
+  // ── Image-picker helpers ──────────────────────────────────────────────────
+  // Constraints aligned with backend cattle_photos config (see FileUpload.tsx).
+  const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
+  const MAX_IMAGE_SIZE = 10 * 1024 * 1024;   // 10 MB per file
+  const MAX_IMAGES = 10;                      // Max files for cattle_photos category
+
+  /**
+   * Append files to the pending list. Validates per-file (size + MIME),
+   * deduplicates by name+size and respects the max-files cap.
+   */
+  function handleFilesSelected(files: FileList | File[] | null) {
+    if (!files) return;
+    const incoming = Array.from(files);
+    const errors: string[] = [];
+    const accepted: File[] = [];
+
+    // Count of images already chosen (pending) + already-on-server not deleted.
+    const currentImageCount =
+      pendingFiles.length +
+      existingMedia.filter((m) => !mediaToDelete.has(m.id)).length;
+
+    for (const file of incoming) {
+      // Skip if we'd exceed the cap.
+      if (currentImageCount + accepted.length >= MAX_IMAGES) {
+        errors.push(`Máximo ${MAX_IMAGES} imágenes por bovino.`);
+        break;
+      }
+      // Dedupe by name+size against current pending files.
+      if (pendingFiles.some((f) => f.name === file.name && f.size === file.size)) {
+        errors.push(`"${file.name}" ya está en la lista.`);
+        continue;
+      }
+      // MIME validation.
+      if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+        errors.push(`"${file.name}": tipo no permitido (solo JPG, PNG, WEBP, HEIC).`);
+        continue;
+      }
+      // Size validation.
+      if (file.size > MAX_IMAGE_SIZE) {
+        const mb = (MAX_IMAGE_SIZE / 1_048_576).toFixed(0);
+        errors.push(`"${file.name}": excede ${mb} MB.`);
+        continue;
+      }
+      accepted.push(file);
+    }
+
+    if (accepted.length > 0) {
+      const newPreviews = accepted.map((f) => URL.createObjectURL(f));
+      setPendingFiles((prev) => [...prev, ...accepted]);
+      setPendingPreviews((prev) => [...prev, ...newPreviews]);
+    }
+    if (errors.length > 0) {
+      toast.error('Algunos archivos no se agregaron', errors.join(' '));
+    }
+  }
+
+  /** Remove a pending (not-yet-uploaded) file by index. */
+  function removePendingFile(index: number) {
+    const url = pendingPreviews[index];
+    if (url) URL.revokeObjectURL(url);
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+    setPendingPreviews((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  /** Toggle "mark for deletion" on an existing media item. */
+  function toggleExistingMediaForDeletion(id: string) {
+    setMediaToDelete((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  /**
+   * Real-time sanitization for the "Nombre" input.
+   * Blocks digits/symbols as the user types so the form state can NEVER hold
+   * an invalid value. Setting via RHF marks it dirty + triggers re-validation.
+   */
+  function handleNameChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const cleaned = sanitizeName(e.target.value);
+    setValue('name', cleaned, { shouldDirty: true, shouldValidate: true });
+  }
 
   // Populate form when loading an existing bovine
   useEffect(() => {
@@ -282,17 +488,82 @@ export function BovineFormPage() {
         acquisitionPrice: data.acquisitionPrice,
       };
 
+      // Cast: legacy BovineFormData uses string fields for enums; the strict
+      // CreateBovineInput uses enum types. The runtime values come from the
+      // same enum strings, so the cast is safe. Will be removed in F8 when
+      // the form is rewritten with strict typing.
       const res = isEditing
-        ? await bovinesApi.update(id!, payload)
-        : await bovinesApi.create(payload);
+        ? await bovinesApi.update(id!, payload as unknown as Partial<import('@/types/bovine.dtos').CreateBovineInput>)
+        : await bovinesApi.create(payload as unknown as import('@/types/bovine.dtos').CreateBovineInput);
 
-      // If a potrero was selected, assign it
+      // If a potrero was selected, assign it. This is the "first registry"
+      // of the bovine at that location — we forward the entry metadata
+      // (reason / movementType / notes) so it is persisted in
+      // BovineLocationHistory by the backend (`locationService.recordEntry`).
+      // `enteredAt` is set client-side to "now" so the value is deterministic
+      // regardless of clock drift between client and server.
       const bovineId: string = (res.data as any).data?.id || (isEditing ? id! : '');
       if (locationId && bovineId) {
         await bovinesApi.moveToLocation(bovineId, {
           locationId,
-          reason: isEditing ? 'Actualización de potrero' : 'Asignación inicial',
+          // Fall back to safe defaults that match the backend's behavior
+          // when these fields are omitted (CREATION + MANUAL).
+          reason: data.entryReason
+            || (isEditing ? MovementReason.TRANSFER : MovementReason.CREATION),
+          movementType: data.entryMovementType || MovementType.MANUAL,
+          enteredAt: new Date().toISOString(),
+          notes: data.entryNotes || undefined,
         });
+      }
+
+      // ── Media persistence (Phase: fix update flow) ────────────────────
+      // The previous implementation uploaded photos to the GENERIC /uploads
+      // endpoint and stored the resulting URL in local state, but those URLs
+      // were never linked to the bovine — the payload above does not carry
+      // them. The correct path is to call the dedicated bovine media endpoint
+      // AFTER the bovine record exists (so the route /bovines/:id/media works).
+      //
+      // We collect per-file errors but do NOT abort the whole save: the bovine
+      // itself was saved successfully, the user can retry media later.
+      if (bovineId) {
+        const mediaErrors: string[] = [];
+
+        // 1) Delete existing media flagged for removal (edit mode only).
+        if (isEditing && mediaToDelete.size > 0) {
+          for (const mediaId of mediaToDelete) {
+            const item = existingMedia.find((m) => m.id === mediaId);
+            if (!item || !item.storagePath) continue;
+            try {
+              await bovinesApi.deleteMedia(bovineId, item.storagePath, 'images');
+            } catch (e: unknown) {
+              mediaErrors.push(
+                `Error al eliminar "${item.filename}": ${getBovineErrorMessage(e)}`,
+              );
+            }
+          }
+        }
+
+        // 2) Upload pending files using the DEDICATED endpoint.
+        //    Each file is sent as multipart/form-data with `file` + `mediaType=images`.
+        //    Backend validates MIME and size; we already validated client-side too.
+        for (const file of pendingFiles) {
+          try {
+            await bovinesApi.uploadMedia(bovineId, file, 'images');
+          } catch (e: unknown) {
+            mediaErrors.push(
+              `Error al subir "${file.name}": ${getBovineErrorMessage(e)}`,
+            );
+          }
+        }
+
+        // Surface partial failures (the bovine itself is already saved).
+        if (mediaErrors.length > 0) {
+          setMediaUploadErrors(mediaErrors);
+        }
+
+        // Invalidate media + full cache so the detail page reflects the new state.
+        queryClient.invalidateQueries({ queryKey: ['bovine-media', bovineId] });
+        queryClient.invalidateQueries({ queryKey: ['bovines', 'full', bovineId] });
       }
 
       return res;
@@ -300,13 +571,17 @@ export function BovineFormPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bovines'] });
       if (isEditing) queryClient.invalidateQueries({ queryKey: ['bovine', id] });
+      // Refresh ranch + location occupancy widgets (current head count,
+      // capacity bars, occupancy dots, KPI stat cards). This mutation runs
+      // outside the centralized hooks so we call the helper directly.
+      invalidateOccupancyCaches(queryClient);
       toast.success(
         isEditing ? 'Bovino actualizado' : 'Bovino registrado',
         isEditing ? 'Los cambios fueron guardados correctamente.' : 'El bovino fue registrado exitosamente.',
       );
       navigate(isEditing ? `/bovines/${id}` : '/bovines');
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       const code = getErrorCode(err);
       switch (code) {
         case ErrorCodes.BOVINE_DUPLICATE_EAR_TAG:
@@ -334,7 +609,9 @@ export function BovineFormPage() {
           toast.error('Datos inválidos', getFriendlyMessage(err));
           break;
         default:
-          toast.error('Error al guardar', getFriendlyMessage(err));
+          // Centralized handler: covers BOVINE_LOCATION_FULL, INVALID_PARENT,
+          // SELF_PARENT, RANCH_MISMATCH with composed messages.
+          toast.error('Error al guardar', getBovineErrorMessage(err));
       }
     },
   });
@@ -364,9 +641,64 @@ export function BovineFormPage() {
     }
   };
 
+  const handleFinalSubmit = form.handleSubmit((data) => {
+    if (mutation.isPending) return;
+
+    // Hard-block: if the user picked GPS coordinates AND a potrero, the
+    // coordinates MUST fall inside the potrero's geofence boundary. Allowing
+    // the save would create an inconsistency where a bovine is "in" a potrero
+    // but its GPS position is far outside it.
+    if (coordsOutsideBoundary) {
+      setStep(3);
+      const name = selectedLocation?.name ?? 'el potrero seleccionado';
+      toast.error(
+        'Ubicación GPS fuera del potrero',
+        `Las coordenadas seleccionadas no están dentro del área de "${name}". `
+        + 'Ajusta el pin en el mapa o cambia el potrero.',
+      );
+      return;
+    }
+
+    mutation.mutate(data);
+  });
+
   // ── Helpers ───────────────────────────────────────────────────────────────────
   const watchedValues = watch(['earTag', 'name', 'breed', 'cattleType', 'gender', 'birthDate', 'weight', 'healthStatus']);
   const [wEarTag, wName, wBreed, wCattleType, wGender, wBirthDate, wWeight, wHealth] = watchedValues;
+
+  // Watch GPS coords to validate them against the selected location's boundary
+  // every time either changes. We do this in a memo so the validation badge
+  // (and the submit button) react instantly without a re-render storm.
+  const wLocationCoords = watch('location');
+
+  /**
+   * Reactive geofence containment check.
+   *
+   * Returns:
+   *  - `null`              → no validation applies (no location chosen, no coords,
+   *                          or the location has no geofence configured).
+   *  - `{ inside: true }`  → GPS is inside the potrero's area → OK.
+   *  - `{ inside: false }` → GPS is OUTSIDE → submit will be blocked.
+   *
+   * Uses the shared `isPointInBoundary` helper which already mirrors the
+   * backend `isPointInBoundary` algorithm (CIRCULAR / RECTANGULAR / POLYGON).
+   */
+  const boundaryCheck = useMemo<{ inside: boolean } | null>(() => {
+    if (!locationId) return null;
+    if (!wLocationCoords?.latitude || !wLocationCoords?.longitude) return null;
+    const gf = selectedLocation?.geofenceConfig as BoundaryShape | undefined;
+    // No geofence configured → permissive (can't validate what isn't defined).
+    if (!gf || !gf.type) return null;
+
+    const inside = isPointInBoundary(
+      { latitude: wLocationCoords.latitude, longitude: wLocationCoords.longitude },
+      gf,
+    );
+    return { inside };
+  }, [locationId, selectedLocation, wLocationCoords]);
+
+  /** True if the user picked coords AND they fall outside the selected potrero. */
+  const coordsOutsideBoundary = boundaryCheck?.inside === false;
 
   // Reactive filtered cattle type options — updated whenever gender or birthDate changes
   const filteredCattleTypeOptions = getCattleTypeOptions(wGender ?? '', wBirthDate ?? '');
@@ -453,7 +785,10 @@ export function BovineFormPage() {
       </div>
 
       {/* ── Form ───────────────────────────────────────────────────────────── */}
-      <form onSubmit={form.handleSubmit((data) => mutation.mutate(data))} className="space-y-4">
+      <form
+        onSubmit={(e) => e.preventDefault()}
+        className="space-y-4"
+      >
 
         {/* ════════════════════════════════════════════════════════════════════
             PASO 1 — IDENTIFICACIÓN
@@ -476,11 +811,16 @@ export function BovineFormPage() {
                   error={errors.earTag?.message}
                   {...register('earTag')}
                 />
+                {/* Nombre — only letters and spaces allowed.
+                    `handleNameChange` strips invalid chars (digits, symbols)
+                    in real time. `register('name')` still wires `name`,
+                    `onBlur`, `ref`; we just override `onChange`. */}
                 <Input
                   label="Nombre (opcional)"
                   placeholder="Ej: La Bonita"
                   error={errors.name?.message}
                   {...register('name')}
+                  onChange={handleNameChange}
                 />
                 <Select
                   label="Raza *"
@@ -506,7 +846,13 @@ export function BovineFormPage() {
                     label="Rancho *"
                     placeholder="Selecciona el rancho..."
                     value={selectedRanchId}
-                    onChange={(id) => { setSelectedRanchId(id); setRanchError(''); }}
+                    onChange={(id) => {
+                      // Cross-ranch defense: switching ranch invalidates any
+                      // previously selected location (it belongs to another ranch).
+                      if (id !== selectedRanchId) setLocationId(null);
+                      setSelectedRanchId(id);
+                      setRanchError('');
+                    }}
                     error={ranchError}
                     clearable={false}
                   />
@@ -538,32 +884,139 @@ export function BovineFormPage() {
                 <span className="text-xs text-gray-400 ml-1">(opcional)</span>
               </div>
 
-              <FileUpload
-                category="cattle_photos"
-                onUploadComplete={(result) => setPhotos((prev) => [...prev, result.url])}
-                label="Subir foto del bovino"
-              />
+              {/* ──────────────────────────────────────────────────────
+                  Picker LOCAL (replaces the previous <FileUpload>).
+                  The previous component uploaded to the GENERIC /uploads
+                  endpoint immediately, but the resulting URL was never
+                  associated with the bovine in the backend (see mutation
+                  comments). The new flow keeps files in memory and uploads
+                  them via the DEDICATED endpoint after the bovine is saved.
+                  ────────────────────────────────────────────────────── */}
 
-              {photos.length > 0 && (
-                <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-2">
-                  {photos.map((url, i) => (
-                    <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 group">
-                      <img
-                        src={url}
-                        alt={`Foto ${i + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setPhotos(photos.filter((_, j) => j !== i))}
-                        className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
+              {/* Hidden multi-file input + visible picker button */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/heic"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  handleFilesSelected(e.target.files);
+                  // Reset the input so the same file can be reselected after removal.
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full flex flex-col items-center justify-center gap-2 px-4 py-6 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-amber-400 dark:hover:border-amber-500 bg-gray-50 dark:bg-gray-800/40 hover:bg-amber-50 dark:hover:bg-amber-900/10 transition-colors"
+              >
+                <Camera className="w-6 h-6 text-amber-500" />
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {isEditing ? 'Agregar fotos del bovino' : 'Subir fotos del bovino'}
+                </span>
+                <span className="text-xs text-gray-500">
+                  JPG, PNG, WEBP, HEIC · máx. 10 MB por imagen · hasta 10 imágenes
+                </span>
+              </button>
+
+              {/* Existing media (edit mode) — marked for deletion ones are dimmed */}
+              {existingMedia.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                    Imágenes actuales del bovino
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {existingMedia.map((m) => {
+                      const markedForDelete = mediaToDelete.has(m.id);
+                      return (
+                        <div
+                          key={m.id}
+                          className={cn(
+                            'relative aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 group',
+                            markedForDelete && 'opacity-40 ring-2 ring-red-400',
+                          )}
+                        >
+                          <img
+                            src={m.thumbnailUrl ?? m.url}
+                            alt={m.filename}
+                            className="w-full h-full object-cover"
+                          />
+                          {markedForDelete && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-red-500/20">
+                              <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-semibold uppercase">
+                                Se eliminará
+                              </span>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => toggleExistingMediaForDeletion(m.id)}
+                            className={cn(
+                              'absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm',
+                              markedForDelete
+                                ? 'bg-gray-700 hover:bg-gray-600 text-white'
+                                : 'bg-red-500 hover:bg-red-600 text-white',
+                            )}
+                            title={markedForDelete ? 'Cancelar eliminación' : 'Marcar para eliminar'}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
+
+              {/* Pending files — to be uploaded after save */}
+              {pendingFiles.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                    Pendientes de subir ({pendingFiles.length})
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {pendingFiles.map((file, i) => (
+                      <div
+                        key={`${file.name}-${file.size}-${i}`}
+                        className="relative aspect-square rounded-lg overflow-hidden border border-amber-200 dark:border-amber-800 ring-1 ring-amber-300/50 group"
+                      >
+                        <img
+                          src={pendingPreviews[i]}
+                          alt={file.name}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute bottom-0 inset-x-0 px-1.5 py-0.5 bg-black/60 text-white text-[10px] truncate">
+                          {file.name}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removePendingFile(i)}
+                          className="absolute top-1 right-1 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                          title="Quitar de la lista"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Upload errors surfaced from the mutation (post-save) */}
+              {mediaUploadErrors.length > 0 && (
+                <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                  <p className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">
+                    El bovino se guardó, pero hubo errores al subir algunas imágenes:
+                  </p>
+                  <ul className="text-xs text-red-600 dark:text-red-300 space-y-0.5 list-disc pl-4">
+                    {mediaUploadErrors.map((err, i) => <li key={i}>{err}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {/* legacy state — kept silent to avoid unused-var warnings */}
+              {photos.length > 0 && null}
             </Card>
           </>
         )}
@@ -761,12 +1214,15 @@ export function BovineFormPage() {
                 </div>
               </div>
 
+              {/* Cross-ranch defense: filter potreros by the ranch picked in
+                  Step 1, NOT the global activeRanchId. This prevents the user
+                  from selecting a location belonging to a different ranch. */}
               <LocationSelector
                 label="Potrero / Ubicación (opcional)"
                 placeholder="Buscar potrero..."
                 value={locationId}
                 onChange={(id) => setLocationId(id)}
-                ranchId={activeRanchId}
+                ranchId={selectedRanchId || activeRanchId}
                 clearable
               />
 
@@ -775,6 +1231,49 @@ export function BovineFormPage() {
                   <Check className="w-3 h-3" />
                   El animal será asignado a este potrero al guardar
                 </p>
+              )}
+
+              {/* ── Entry metadata (only shown when a potrero is selected) ──
+                  These three fields populate the BovineLocationHistory record
+                  the backend creates via `locationService.recordEntry()` when
+                  the bovine is first attached to a location:
+                    reason       → MovementReason  (defaults to CREATION)
+                    movementType → MovementType    (defaults to MANUAL)
+                    notes        → free-form text  (optional)
+                  Wrapped in an emerald-tinted panel so it visually belongs to
+                  the "Asignar Potrero" card. */}
+              {locationId && (
+                <div className="mt-5 pt-5 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Datos del primer registro de entrada
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Select
+                      label="Motivo de la entrada"
+                      options={entryReasonOptions}
+                      {...register('entryReason')}
+                    />
+                    <Select
+                      label="Tipo de movimiento"
+                      options={entryMovementTypeOptions}
+                      {...register('entryMovementType')}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                      Notas del movimiento (opcional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="Ej: Llegada del proveedor, condiciones del animal al ingresar..."
+                      className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2.5 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none resize-none"
+                      {...register('entryNotes')}
+                    />
+                    {errors.entryNotes?.message && (
+                      <p className="mt-1 text-xs text-red-500">{errors.entryNotes.message}</p>
+                    )}
+                  </div>
+                </div>
               )}
             </Card>
 
@@ -798,7 +1297,7 @@ export function BovineFormPage() {
               </button>
 
               {showGps && (
-                <div className="mt-4">
+                <div className="mt-4 space-y-3">
                   <Controller
                     name="location"
                     control={control}
@@ -813,9 +1312,65 @@ export function BovineFormPage() {
                         onChange={(coords: Coordinates) => field.onChange(coords)}
                         error={fieldState.error?.message}
                         className="h-[280px]"
+                        // Render the selected potrero area on top of the map so
+                        // the user can drop the pin INSIDE it visually.
+                        locationBoundary={
+                          (selectedLocation?.geofenceConfig as BoundaryShape | undefined) ?? null
+                        }
+                        locationName={selectedLocation?.name}
                       />
                     )}
                   />
+
+                  {/* ── Geofence validation banner ───────────────────────
+                      Reactive feedback: as soon as the user moves the pin
+                      OR changes the selected potrero, we re-check whether
+                      the GPS coordinates fall inside the potrero's real
+                      area. Outcomes:
+                        • no location chosen → no banner
+                        • location has no geofenceConfig → info banner
+                        • coords inside  → green badge
+                        • coords outside → red badge + block submit */}
+                  {locationId && wLocationCoords?.latitude != null && (
+                    <>
+                      {boundaryCheck === null && selectedLocation && (
+                        <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                          <MapPin className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                          <p className="text-xs text-blue-700 dark:text-blue-300">
+                            El potrero <strong>{selectedLocation.name}</strong> no tiene
+                            geocerca configurada — no es posible validar el punto contra
+                            su área. Se guardará tal cual.
+                          </p>
+                        </div>
+                      )}
+
+                      {boundaryCheck?.inside === true && (
+                        <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+                          <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                          <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                            Las coordenadas están <strong>dentro</strong> del área de{' '}
+                            <strong>{selectedLocation?.name}</strong>.
+                          </p>
+                        </div>
+                      )}
+
+                      {coordsOutsideBoundary && (
+                        <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                          <X className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                          <div className="text-xs text-red-700 dark:text-red-300">
+                            <p className="font-semibold">
+                              Las coordenadas están FUERA del área de "{selectedLocation?.name}".
+                            </p>
+                            <p className="mt-0.5">
+                              No se puede registrar al bovino en un potrero y a la vez
+                              ubicarlo geográficamente fuera de él. Mueve el pin dentro
+                              del área o cambia el potrero seleccionado.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </Card>
@@ -863,9 +1418,14 @@ export function BovineFormPage() {
               </Button>
             ) : (
               <Button
-                type="submit"
+                type="button"
                 loading={mutation.isPending}
+                disabled={coordsOutsideBoundary}
+                onClick={handleFinalSubmit}
                 icon={<Save className="w-4 h-4" />}
+                title={coordsOutsideBoundary
+                  ? 'Las coordenadas GPS están fuera del potrero seleccionado'
+                  : undefined}
               >
                 {isEditing ? 'Guardar Cambios' : 'Crear Bovino'}
               </Button>

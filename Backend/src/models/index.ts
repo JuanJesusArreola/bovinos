@@ -866,7 +866,7 @@ class Database {
     // Un bovino tiene UN snapshot de estado de vacunación (1:1)
     Bovine.hasOne(BovineVaccinationStatus, {
       foreignKey: 'bovineId',
-      as: 'vaccinationStatus',
+      as: 'vaccinationStatusRecord',
       onDelete: 'CASCADE',
       onUpdate: 'CASCADE'
     });
@@ -1063,8 +1063,8 @@ class Database {
   public async syncDatabase(config: Partial<DatabaseConfig> = {}): Promise<void> {
     const defaultConfig: DatabaseConfig = {
       sync: true,
-      force: true,      // ⚠️ CUIDADO: true elimina todas las tablas - se cambio a true para que se elimine todas las tablas y se cree nuevamente
-      alter: false,      // true modifica tablas existentes
+      force: false,      // ⚠️ CUIDADO: true elimina todas las tablas - se cambio a true para que se elimine todas las tablas y se cree nuevamente
+      alter: true,      // true modifica tablas existentes
       logging: true
     };
 

@@ -28,6 +28,9 @@ export type Action =
   | 'MANAGE_BOVINE'
   | 'DELETE_BOVINE'
   | 'MOVE_BOVINE'
+  /** Visualizar el QR de un bovino (modal, impresión). Disponible a todos los roles autenticados. */
+  | 'VIEW_QR'
+  /** Regenerar (rotar) el código QR de un bovino. Acción destructiva del valor anterior. */
   | 'REGENERATE_QR'
   // Health / Veterinary
   | 'RECORD_HEALTH'
@@ -70,6 +73,11 @@ const PERMISSIONS: Record<Action, UserRole[]> = {
   MANAGE_BOVINE: [UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
   DELETE_BOVINE: [UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
   MOVE_BOVINE:   [UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+  // VIEW_QR — cualquier usuario autenticado puede ver/imprimir el QR (lectura
+  // en campo, escaneo de identificación). NO permite regenerarlo.
+  VIEW_QR:       [UserRole.VIEWER, UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+  // REGENERATE_QR — solo gestores. Rotar el código invalida QRs físicos ya
+  // impresos y se considera una acción de "control" del rancho.
   REGENERATE_QR: [UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
 
   // Health / Veterinary

@@ -183,11 +183,21 @@ export class BovineGeoService {
 
       // Crear el snapshot
       // 📝 NOTA: Usamos upsert por si ya existía (caso borde)
+      //
+      // ⚠️ IMPORTANTE: BovineHealthSnapshot.upsert() ejecuta SQL directo y
+      // NO dispara el hook beforeSave que calcula geom. Por eso calculamos
+      // geom aquí explícitamente para que el bovino aparezca en el mapa
+      // desde el momento de su creación.
+      const geom = bovine.location?.latitude != null && bovine.location?.longitude != null
+        ? { type: 'Point' as const, coordinates: [bovine.location.longitude, bovine.location.latitude] }
+        : undefined;
+
       await BovineHealthSnapshot.upsert({
         bovineId: bovine.id,
         ranchId: bovine.ranchId,
         healthStatus: bovine.healthStatus,
         location: bovine.location,
+        geom,
         lastUpdate: new Date(),
         healthColor: this.getHealthColor(bovine.healthStatus),
         clusterSize: 1, // Inicialmente 1, se recalculará después
@@ -431,12 +441,18 @@ export class BovineGeoService {
    */
   private async refreshSingleSnapshot(bovine: Bovine): Promise<void> {
     const ageInMonths = this.calculateAgeInMonths(bovine.birthDate);
-    
+
+    // ⚠️ upsert no dispara beforeSave → calculamos geom explícitamente
+    const geom = bovine.location?.latitude != null && bovine.location?.longitude != null
+      ? { type: 'Point' as const, coordinates: [bovine.location.longitude, bovine.location.latitude] }
+      : undefined;
+
     await BovineHealthSnapshot.upsert({
       bovineId: bovine.id,
       ranchId: bovine.ranchId!,
       healthStatus: bovine.healthStatus,
       location: bovine.location,
+      geom,
       lastUpdate: new Date(),
       healthColor: this.getHealthColor(bovine.healthStatus),
       clusterSize: 1, // Se recalculará después
@@ -1108,6 +1124,17 @@ export class BovineGeoService {
 export interface MapMarker {
   bovineId: string;
   earTag?: string;
+  /** Nombre amistoso del bovino (ej: "Mancha"). Usado por el tooltip de hover en
+   *  el mapa para identificación rápida visual. */
+  name?: string;
+  /** Location actual del bovino (stay activa). Permite al frontend agrupar los
+   *  bovinos por potrero en el mapa (cluster con count) y desplegar puntos
+   *  individuales al hacer zoom o click. Se toma directamente del campo
+   *  `currentLocationId` de la tabla Bovine (asignación administrativa) — más
+   *  confiable que calcular por GPS contra el boundary, ya que el GPS puede
+   *  ser impreciso o estar ausente. Si es `null` el bovino se muestra como
+   *  marker huérfano "Sin potrero asignado". */
+  locationId?: string | null;
   lat: number;
   lng: number;
   color: string;
@@ -1223,7 +1250,10 @@ BovineGeoService.prototype.getMapMarkers = async function (
       includes.push({
         model: Bovine,
         as: 'bovine',
-        attributes: ['id', 'earTag'],
+        // `name` para tooltip de hover, `currentLocationId` para agrupar
+        // bovinos por potrero en el mapa (cluster por location). Coste
+        // extra: ~negligible (2 columnas en el SELECT).
+        attributes: ['id', 'earTag', 'name', 'currentLocationId'],
         required: true,
         where: bovineWhere,
       });
@@ -1232,7 +1262,10 @@ BovineGeoService.prototype.getMapMarkers = async function (
       includes.push({
         model: Bovine,
         as: 'bovine',
-        attributes: ['id', 'earTag'],
+        // `name` para tooltip de hover, `currentLocationId` para agrupar
+        // bovinos por potrero en el mapa (cluster por location). Coste
+        // extra: ~negligible (2 columnas en el SELECT).
+        attributes: ['id', 'earTag', 'name', 'currentLocationId'],
         required: false,
       });
     }
@@ -1242,7 +1275,7 @@ BovineGeoService.prototype.getMapMarkers = async function (
       if (filters.vaccinationStatus === VaccinationStatus.NONE) {
         includes.push({
           model: BovineVaccinationStatus,
-          as: 'vaccinationStatus',
+          as: 'vaccinationStatusRecord',
           attributes: [],
           required: false,
           where: {
@@ -1255,7 +1288,7 @@ BovineGeoService.prototype.getMapMarkers = async function (
       } else {
         includes.push({
           model: BovineVaccinationStatus,
-          as: 'vaccinationStatus',
+          as: 'vaccinationStatusRecord',
           attributes: [],
           required: true,
           where: { status: filters.vaccinationStatus },
@@ -1264,10 +1297,15 @@ BovineGeoService.prototype.getMapMarkers = async function (
     }
 
     // locationId → JOIN con BovineLocationHistory (stay activa)
+    // El alias correcto desde Bovine→BovineLocationHistory es `locationHistory`
+    // (declarado en `Bovine.hasMany(BovineLocationHistory, { as: 'locationHistory' })`
+    // en models/index.ts). El alias `'visits'` es la otra punta de la relación
+    // (Location.hasMany → BovineLocationHistory), no se usa en este contexto.
+    // Sequelize lanza SequelizeEagerLoadingError si se usa el alias equivocado.
     if (filters.locationId) {
       includes.push({
         model: BovineLocationHistory,
-        as: 'visits',
+        as: 'locationHistory',
         attributes: [],
         required: true,
         where: {
@@ -1290,15 +1328,16 @@ BovineGeoService.prototype.getMapMarkers = async function (
     if (nestedBovineInclude) {
       const childIncludes: any[] = [];
       // Mover vaccinationStatus include si existe
-      const vsIdx = includes.findIndex((i: any) => i.as === 'vaccinationStatus');
+      const vsIdx = includes.findIndex((i: any) => i.as === 'vaccinationStatusRecord');
       if (vsIdx >= 0) {
         childIncludes.push(includes[vsIdx]);
         includes.splice(vsIdx, 1);
       }
-      const visitsIdx = includes.findIndex((i: any) => i.as === 'visits');
-      if (visitsIdx >= 0) {
-        childIncludes.push(includes[visitsIdx]);
-        includes.splice(visitsIdx, 1);
+      // Mismo alias correcto: `locationHistory` (no `visits`).
+      const locHistIdx = includes.findIndex((i: any) => i.as === 'locationHistory');
+      if (locHistIdx >= 0) {
+        childIncludes.push(includes[locHistIdx]);
+        includes.splice(locHistIdx, 1);
       }
       if (childIncludes.length > 0) {
         // Si hay joins anidados, el include de bovine debe ser required:true
@@ -1358,6 +1397,10 @@ BovineGeoService.prototype.getMapMarkers = async function (
     const items: MapMarker[] = rows.map((s: any) => ({
       bovineId: s.bovineId,
       earTag: s.bovine?.earTag,
+      name: s.bovine?.name,
+      // `currentLocationId` puede ser null si el bovino aún no tiene
+      // potrero asignado — el frontend lo mostrará como marker huérfano.
+      locationId: s.bovine?.currentLocationId ?? null,
       lat: s.location.latitude,
       lng: s.location.longitude,
       color: s.healthColor,

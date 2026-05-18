@@ -196,9 +196,10 @@ export class BovineLocationService {
      *   5. Actualizar currentLocationId en Bovine
      *   6. Registrar evento (opcional)
      */
-    async recordEntry(data: EntryRecordData): Promise<BovineLocationHistory> {
-        const transaction = await sequelize.transaction();
+    async recordEntry(data: EntryRecordData, externalTransaction?: Transaction): Promise<BovineLocationHistory> {
+        const transaction = externalTransaction || await sequelize.transaction();
         const startTime = Date.now();
+        const isOwnTransaction = !externalTransaction;
 
         try {
             // 1. Validar que el bovino existe (solo para verificar)
@@ -265,7 +266,9 @@ export class BovineLocationService {
 
             // ✅ NO actualizamos bovine (no tiene currentLocationId)
 
-            await transaction.commit();
+            if (isOwnTransaction) await transaction.commit();
+            // No hacer commit si la transacción es externa
+
 
             // Invalidar cache compuesto del bovino
             bovineFullService.invalidate(data.bovineId);
@@ -279,7 +282,9 @@ export class BovineLocationService {
             return entry;
 
         } catch (error) {
-            await transaction.rollback();
+            // Solo hacer rollback si esta función abrió la transacción.
+            // Si es externa (externalTransaction), el dueño la maneja.
+            if (isOwnTransaction) await transaction.rollback();
 
             // ✅ 1. Log con contexto y error convertido
             logger.error(`Error registrando entrada`, this.context, { data },
@@ -1013,6 +1018,51 @@ export class BovineLocationService {
         }
 
         return Math.round(restDays * 100) / 100;
+    }
+
+    /**
+     * Asigna o cambia la ubicación de un bovino.
+     * Actualiza coordenadas GPS (JSONB) si se proveen Y crea un registro
+     * en bovine_location_history para mantener el historial de movimientos.
+     * Si el bovino ya tenía una entrada activa, la cierra automáticamente.
+     */
+    async updateLocation(bovineId: string, data: any, userId?: string): Promise<Bovine> {
+        const t = await sequelize.transaction();
+        try {
+            const bovine = await Bovine.findByPk(bovineId, { transaction: t });
+            if (!bovine) {
+                throw new BovineNotFoundError(bovineId);
+            }
+
+            // Actualizar coordenadas GPS (campo JSONB) si vienen en el body
+            if (data.location) {
+                await bovine.update({ location: data.location }, { transaction: t });
+            }
+
+            // Crear entrada en historial si se indica una ubicación estructural
+            if (data.locationId && userId) {
+                await this.recordEntry({
+                    bovineId,
+                    locationId: data.locationId,
+                    reason:       data.reason       || MovementReason.TRANSFER,
+                    recordedBy:   userId,
+                    // AUTOMATED cierra automáticamente cualquier entrada activa previa
+                    movementType: MovementType.AUTOMATED,
+                    notes:        data.notes,
+                }, t);
+            }
+
+            await t.commit();
+            bovineFullService.invalidate(bovineId);
+
+            return bovine.reload();
+        } catch (error) {
+            await t.rollback();
+            logger.error(`Error en updateLocation para bovino ${bovineId}`, this.context,
+                { bovineId, data }, ensureError(error));
+            if (error instanceof BovineError) throw error;
+            throw new BovineError('Error al actualizar ubicación', 'LOCATION_UPDATE_ERROR', 500, ensureError(error));
+        }
     }
 }
 

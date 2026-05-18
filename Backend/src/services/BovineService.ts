@@ -11,7 +11,7 @@ import Bovine, {
 } from '../models/Bovine';
 import Ranch from '../models/Ranch';
 import User, { UserRole } from '../models/User';
-import BovineLocationHistory from '../models/BovineLocationHistory';
+import BovineLocationHistory, { MovementReason, MovementType } from '../models/BovineLocationHistory';
 import BovineVaccinationStatus from '../models/BovineVaccinationStatus';
 import sequelize from '../config/database';
 import logger from '../utils/logger';
@@ -21,6 +21,7 @@ import { BovineHealthService } from './BovineHealthService';
 import { bovineVaccinationStatusService } from './BovineVaccinationStatusService';
 import { bovineFullService } from './BovineFullService';
 import { BovineResponse } from '../dtos/bovine-response.dto';
+import { BovineLocationService } from './BovineLocationService';
 
 import {
     BovineError,
@@ -54,6 +55,11 @@ export interface CreateBovineData {
     fatherId?: string;
     acquisitionDate?: Date;
     acquisitionPrice?: number;
+
+    locationId?: string;           // ID del potrero/corral donde se colocará
+    entryReason?: MovementReason;  // ej.: 'PURCHASE', 'BIRTH', 'INITIAL'
+    entryNotes?: string;
+    entryMovementType?: MovementType; // normalmente 'MANUAL'
 }
 
 export interface UpdateBovineData extends Partial<CreateBovineData> {
@@ -130,6 +136,7 @@ export class BovineService {
     private geoService!: BovineGeoService;
     private eventService!: EventService;
     private healthService!: BovineHealthService;
+    private locationService!: BovineLocationService;
 
     constructor() {
         // Inicialización diferida para evitar dependencias circulares
@@ -137,6 +144,7 @@ export class BovineService {
             this.geoService = new BovineGeoService();
             this.eventService = new EventService();
             this.healthService = new BovineHealthService();
+            this.locationService = new BovineLocationService();
         }, 0);
     }
 
@@ -206,7 +214,7 @@ export class BovineService {
                 if (effectiveFilters.vaccinationStatus === VaccinationStatus.NONE) {
                     includes.push({
                         model: BovineVaccinationStatus,
-                        as: 'vaccinationStatus',
+                        as: 'vaccinationStatusRecord',
                         required: false,
                         where: {
                             [Op.or]: [
@@ -218,7 +226,7 @@ export class BovineService {
                 } else {
                     includes.push({
                         model: BovineVaccinationStatus,
-                        as: 'vaccinationStatus',
+                        as: 'vaccinationStatusRecord',
                         required: true,
                         where: { status: effectiveFilters.vaccinationStatus },
                     });
@@ -229,7 +237,7 @@ export class BovineService {
             if (effectiveFilters.locationId) {
                 includes.push({
                     model: BovineLocationHistory,
-                    as: 'visits',
+                    as: 'locationHistory',
                     required: true,
                     attributes: [],
                     where: {
@@ -473,15 +481,26 @@ export class BovineService {
                 transaction
             );
 
-            // ✅ NUEVO - Crear evento de registro
-            if (this.eventService) {
-                await this.eventService.createEventFromAction('BOVINE_CREATED', {
-                    bovineId: newBovine.id,
-                    userId,
-                    metadata: { earTag: newBovine.earTag }
-                }, transaction);
-            }
+            /* // ✅ NUEVO - Crear evento de registro
+             if (this.eventService) {
+                 await this.eventService.createEventFromAction('BOVINE_CREATED', {
+                     bovineId: newBovine.id,
+                     userId,
+                     metadata: { earTag: newBovine.earTag }
+                 }, transaction);
+             }*/
 
+            if (data.locationId) {
+                await this.locationService.recordEntry({
+                    bovineId: newBovine.id,
+                    locationId: data.locationId,
+                    enteredAt: new Date(),
+                    reason: data.entryReason || MovementReason.CREATION,
+                    recordedBy: userId,
+                    movementType: data.entryMovementType || MovementType.MANUAL,
+                    notes: data.entryNotes,
+                }, transaction);   // ← pasas la transacción actual
+            }
             await transaction.commit();
 
             logger.info(`Bovino creado: ${newBovine.earTag}`, this.context, {
@@ -610,14 +629,14 @@ export class BovineService {
                 await this.geoService.deleteSnapshot(bovineId, transaction);
             }
 
-            // ✅ NUEVO - Crear evento de eliminación
+            /*// ✅ NUEVO - Crear evento de eliminación
             if (this.eventService) {
                 await this.eventService.createEventFromAction('BOVINE_DELETED', {
                     bovineId,
                     userId,
                     metadata: { earTag: bovine.earTag }
                 }, transaction);
-            }
+            }*/
 
             await transaction.commit();
 

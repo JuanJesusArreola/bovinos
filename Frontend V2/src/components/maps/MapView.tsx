@@ -61,10 +61,21 @@ function FitBounds({ markers }: { markers: MapMarker[] }) {
   const fitted = useRef(false);
 
   useEffect(() => {
-    if (markers.length > 0 && !fitted.current) {
-      const bounds = L.latLngBounds(markers.map((m) => [m.lat, m.lng]));
+    if (fitted.current) return;
+    // Filter invalid coords BEFORE handing them to Leaflet — `latLngBounds`
+    // throws synchronously on NaN/undefined, which blanks the whole page.
+    const valid = markers.filter(
+      (m) => Number.isFinite(m.lat) && Number.isFinite(m.lng),
+    );
+    if (valid.length === 0) return;
+    try {
+      const bounds = L.latLngBounds(valid.map((m) => [m.lat, m.lng]));
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
       fitted.current = true;
+    } catch (e) {
+      // Defensive: never let a Leaflet error escape and crash the page.
+      // eslint-disable-next-line no-console
+      console.warn('[MapView] FitBounds failed:', e);
     }
   }, [markers, map]);
 
@@ -127,7 +138,12 @@ export function MapView({
         <MapEvents onMapClick={onMapClick} />
         {markers.length > 0 && <FitBounds markers={markers} />}
 
-        {markers.map((marker) => (
+        {markers
+          // Defensive: never render a marker with invalid coords — Leaflet
+          // throws "Invalid LatLng" on NaN/undefined and the entire page
+          // unmounts (blank-screen bug seen on the clusters layer).
+          .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
+          .map((marker) => (
           <Marker
             key={marker.id}
             position={[marker.lat, marker.lng]}

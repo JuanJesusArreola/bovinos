@@ -1,20 +1,23 @@
 /**
- * Reusable media gallery for both Ranch and Location entities.
+ * Reusable media gallery for Ranch, Location, and Bovine entities.
  *
- * The two backend APIs are structurally different:
+ * Each backend exposes media slightly differently:
  *
- * - Ranch (RICH):   GET /ranch/:id/media → array of `RanchMedia` items with
- *                   id, title, category, description, tags, mimeType, filesize,
- *                   thumbnailUrl, etc. Upload + delete by id.
+ * - Ranch (RICH):    GET /ranch/:id/media → `RanchMedia[]` with full metadata
+ *                    (title, category, description, tags, etc.).
  *
- * - Location (FLAT): GET /locations/:id/media → { images: string[], documents,
- *                   videos, maps } — each item is just a URL grouped by kind.
- *                   Upload by mediaType, delete by storagePath.
+ * - Location (FLAT): GET /locations/:id/media → grouped URLs by kind.
+ *                    Upload by `mediaType: 'images'|'documents'|'videos'|'maps'`,
+ *                    delete by storagePath.
+ *
+ * - Bovine (TYPED):  GET /bovines/:id/media → `BovineMediaListResponse` with
+ *                    structured items per kind (`'images'|'documents'|'videos'`)
+ *                    including filename, mimeType, size, thumbnailUrl, caption.
  *
  * `MediaGallery` exposes a single API (`entityType`, `entityId`) and adapts
  * each backend internally to a normalized `MediaItem` shape. UI features that
- * only make sense for Ranch (category filter, tags, description) are hidden
- * for Location automatically.
+ * only make sense for one entity (Ranch's category filter / tags) are hidden
+ * for the others automatically.
  */
 
 import { useMemo, useRef, useState } from 'react';
@@ -25,18 +28,21 @@ import { Alert } from '@/components/ui/Alert';
 import { Spinner } from '@/components/ui/Spinner';
 import { ranchApi } from '@/api/ranch.api';
 import { locationsApi, storagePathFromUrl } from '@/api/locations.api';
+import { bovinesApi } from '@/api/bovines.api';
 import type { LocationMediaKind } from '@/api/locations.api';
 import type { RanchMedia } from '@/types';
 import { MediaType, MediaCategory } from '@/types/ranch.types';
+import type { BovineMediaType } from '@/types/bovine.dtos';
 import {
   Image as ImageIcon, FileText, Upload, X, Download, Trash2, Tag,
   Video, Map as MapIcon,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 // ─── Public props ────────────────────────────────────────────────────────────
 
 export interface MediaGalleryProps {
-  entityType: 'ranch' | 'location';
+  entityType: 'ranch' | 'location' | 'bovine';
   entityId: string;
   className?: string;
 }
@@ -63,6 +69,8 @@ interface MediaItem {
   height?: number;
   /** Backend-specific kind for Location (images/documents/videos/maps). */
   locationKind?: LocationMediaKind;
+  /** Backend-specific kind for Bovine (images/documents/videos). */
+  bovineKind?: BovineMediaType;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -126,11 +134,17 @@ const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
   MEDIA_CATEGORY_OPTIONS.map((o) => [o.value, o.label]),
 );
 
-const LOCATION_KIND_OPTIONS: { value: LocationMediaKind; label: string; accept: string; Icon: any }[] = [
+const LOCATION_KIND_OPTIONS: { value: LocationMediaKind; label: string; accept: string; Icon: LucideIcon }[] = [
   { value: 'images',    label: 'Fotos',      accept: 'image/*', Icon: ImageIcon },
   { value: 'documents', label: 'Documentos', accept: '.pdf,.doc,.docx,.xls,.xlsx,.txt', Icon: FileText },
   { value: 'videos',    label: 'Videos',     accept: 'video/*', Icon: Video },
   { value: 'maps',      label: 'Mapas',      accept: 'image/*,application/pdf', Icon: MapIcon },
+];
+
+const BOVINE_KIND_OPTIONS: { value: BovineMediaType; label: string; accept: string; Icon: LucideIcon }[] = [
+  { value: 'images',    label: 'Fotos',      accept: 'image/*', Icon: ImageIcon },
+  { value: 'documents', label: 'Documentos', accept: '.pdf,.doc,.docx,.xls,.xlsx,.txt', Icon: FileText },
+  { value: 'videos',    label: 'Videos',     accept: 'video/*', Icon: Video },
 ];
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -140,7 +154,9 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Mode flags — feature toggles based on entityType
-  const isRanch = entityType === 'ranch';
+  const isRanch    = entityType === 'ranch';
+  const isLocation = entityType === 'location';
+  const isBovine   = entityType === 'bovine';
 
   // ── State ──────────────────────────────────────────────────────────────
   const [previewItem, setPreviewItem] = useState<MediaItem | null>(null);
@@ -153,9 +169,12 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
   const [uploadDescription, setUploadDescription] = useState('');
   // Location-only upload kind
   const [uploadKind, setUploadKind] = useState<LocationMediaKind>('images');
-  // Filter (Ranch: category; Location: kind)
+  // Bovine-only upload kind (3 values, no 'maps')
+  const [uploadBovineKind, setUploadBovineKind] = useState<BovineMediaType>('images');
+  // Filter (Ranch: category; Location/Bovine: kind)
   const [filterCategory, setFilterCategory] = useState('');
   const [filterKind, setFilterKind] = useState<LocationMediaKind | ''>('');
+  const [filterBovineKind, setFilterBovineKind] = useState<BovineMediaType | ''>('');
 
   // ── Queries ────────────────────────────────────────────────────────────
 
@@ -171,7 +190,13 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
   const locationQuery = useQuery({
     queryKey: ['location-media', entityId],
     queryFn: () => locationsApi.getMedia(entityId).then((r) => r.data.data),
-    enabled: !isRanch && !!entityId,
+    enabled: isLocation && !!entityId,
+  });
+
+  const bovineQuery = useQuery({
+    queryKey: ['bovine-media', entityId],
+    queryFn: () => bovinesApi.getMedia(entityId).then((r) => r.data.data),
+    enabled: isBovine && !!entityId,
   });
 
   // ── Adapt to MediaItem[] ───────────────────────────────────────────────
@@ -194,26 +219,56 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
         height:       m.height,
       }));
     }
-    // Location
-    const data = locationQuery.data;
+    if (isLocation) {
+      const data = locationQuery.data;
+      if (!data) return [];
+      const all: MediaItem[] = [];
+      (['images', 'documents', 'videos', 'maps'] as LocationMediaKind[]).forEach((kind) => {
+        if (filterKind && filterKind !== kind) return;
+        (data[kind] ?? []).forEach((url) => {
+          all.push({
+            id: `${kind}:${url}`,
+            url,
+            title: fileNameFromUrl(url),
+            mimeType: inferMimeFromKind(kind, url),
+            locationKind: kind,
+          });
+        });
+      });
+      return all;
+    }
+    // Bovine — backend returns BovineMediaListResponse with structured items.
+    const data = bovineQuery.data;
     if (!data) return [];
     const all: MediaItem[] = [];
-    (['images', 'documents', 'videos', 'maps'] as LocationMediaKind[]).forEach((kind) => {
-      if (filterKind && filterKind !== kind) return;
-      (data[kind] ?? []).forEach((url) => {
+    (['images', 'documents', 'videos'] as BovineMediaType[]).forEach((kind) => {
+      if (filterBovineKind && filterBovineKind !== kind) return;
+      (data[kind] ?? []).forEach((m) => {
         all.push({
-          id: `${kind}:${url}`,
-          url,
-          title: fileNameFromUrl(url),
-          mimeType: inferMimeFromKind(kind, url),
-          locationKind: kind,
+          id:           m.id,
+          url:          m.url,
+          thumbnailUrl: m.thumbnailUrl ?? undefined,
+          title:        m.filename || fileNameFromUrl(m.url),
+          mimeType:     m.mimeType,
+          filesize:     m.size,
+          uploadDate:   m.uploadedAt,
+          description:  m.caption ?? undefined,
+          bovineKind:   kind,
         });
       });
     });
     return all;
-  }, [isRanch, ranchQuery.data, locationQuery.data, filterKind]);
+  }, [
+    isRanch, isLocation,
+    ranchQuery.data, locationQuery.data, bovineQuery.data,
+    filterKind, filterBovineKind,
+  ]);
 
-  const isLoading = isRanch ? ranchQuery.isLoading : locationQuery.isLoading;
+  const isLoading = isRanch
+    ? ranchQuery.isLoading
+    : isLocation
+      ? locationQuery.isLoading
+      : bovineQuery.isLoading;
 
   const images    = useMemo(() => items.filter((m) => isImageMime(m.mimeType)), [items]);
   const documents = useMemo(() => items.filter((m) => !isImageMime(m.mimeType)), [items]);
@@ -233,11 +288,28 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
           description: uploadDescription || undefined,
         });
       }
-      return locationsApi.uploadMedia(entityId, uploadFile, uploadKind);
+      if (isLocation) {
+        return locationsApi.uploadMedia(entityId, uploadFile, uploadKind);
+      }
+      // Bovine — caption is optional (free-text alongside the file).
+      return bovinesApi.uploadMedia(
+        entityId,
+        uploadFile,
+        uploadBovineKind,
+        uploadDescription || undefined,
+      );
     },
     onSuccess: () => {
-      const key = isRanch ? ['ranch-media', entityId] : ['location-media', entityId];
+      const key = isRanch
+        ? ['ranch-media', entityId]
+        : isLocation
+          ? ['location-media', entityId]
+          : ['bovine-media', entityId];
       queryClient.invalidateQueries({ queryKey: key });
+      // Bovine: also refresh the /full bundle (its `media` field changed).
+      if (isBovine) {
+        queryClient.invalidateQueries({ queryKey: ['bovines', 'full', entityId] });
+      }
       resetUploadForm();
     },
   });
@@ -248,12 +320,24 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
       if (isRanch) {
         return ranchApi.deleteMedia(item.id);
       }
+      if (isLocation) {
+        const path = storagePathFromUrl(item.url);
+        return locationsApi.deleteMedia(entityId, path, item.locationKind);
+      }
+      // Bovine — backend uses storagePath wildcard, same convention as Location.
       const path = storagePathFromUrl(item.url);
-      return locationsApi.deleteMedia(entityId, path, item.locationKind);
+      return bovinesApi.deleteMedia(entityId, path, item.bovineKind);
     },
     onSuccess: () => {
-      const key = isRanch ? ['ranch-media', entityId] : ['location-media', entityId];
+      const key = isRanch
+        ? ['ranch-media', entityId]
+        : isLocation
+          ? ['location-media', entityId]
+          : ['bovine-media', entityId];
       queryClient.invalidateQueries({ queryKey: key });
+      if (isBovine) {
+        queryClient.invalidateQueries({ queryKey: ['bovines', 'full', entityId] });
+      }
       if (previewItem && deleteConfirm && previewItem.id === deleteConfirm.id) {
         setPreviewItem(null);
       }
@@ -269,6 +353,7 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
     setUploadCategory(MediaCategory.FACILITY_PHOTO);
     setUploadDescription('');
     setUploadKind('images');
+    setUploadBovineKind('images');
     uploadMutation.reset();
   }
 
@@ -297,7 +382,7 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
               <option value="">Todas las categorías</option>
               {MEDIA_CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-          ) : (
+          ) : isLocation ? (
             <select
               value={filterKind}
               onChange={(e) => setFilterKind(e.target.value as LocationMediaKind | '')}
@@ -305,6 +390,15 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
             >
               <option value="">Todos los tipos</option>
               {LOCATION_KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          ) : (
+            <select
+              value={filterBovineKind}
+              onChange={(e) => setFilterBovineKind(e.target.value as BovineMediaType | '')}
+              className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
+            >
+              <option value="">Todos los tipos</option>
+              {BOVINE_KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           )}
           <span className="text-sm text-gray-500">
@@ -345,7 +439,9 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
                 type="file"
                 accept={isRanch
                   ? 'image/*,.pdf,.doc,.docx,.csv,.xlsx'
-                  : LOCATION_KIND_OPTIONS.find((o) => o.value === uploadKind)?.accept ?? 'image/*'}
+                  : isLocation
+                    ? LOCATION_KIND_OPTIONS.find((o) => o.value === uploadKind)?.accept ?? 'image/*'
+                    : BOVINE_KIND_OPTIONS.find((o) => o.value === uploadBovineKind)?.accept ?? 'image/*'}
                 onChange={handleFileSelect}
                 className="hidden"
               />
@@ -384,7 +480,7 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
                   />
                 </div>
               </>
-            ) : (
+            ) : isLocation ? (
               <div>
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Tipo de archivo *</label>
                 <select
@@ -394,6 +490,28 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
                 >
                   {LOCATION_KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Tipo de archivo *</label>
+                  <select
+                    value={uploadBovineKind}
+                    onChange={(e) => setUploadBovineKind(e.target.value as BovineMediaType)}
+                    className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
+                  >
+                    {BOVINE_KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Descripción <span className="text-gray-400 font-normal">(opcional)</span></label>
+                  <input
+                    value={uploadDescription}
+                    onChange={(e) => setUploadDescription(e.target.value)}
+                    placeholder="Ej: Foto frontal, certificado de vacunación…"
+                    className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
+                  />
+                </div>
               </div>
             )}
 
@@ -430,7 +548,7 @@ export function MediaGallery({ entityType, entityId, className }: MediaGalleryPr
           <ImageIcon className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
           <p className="text-gray-500 dark:text-gray-400">No hay archivos multimedia</p>
           <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            Sube fotos, documentos y más para {isRanch ? 'este rancho' : 'esta ubicación'}
+            Sube fotos, documentos y más para {isRanch ? 'este rancho' : isLocation ? 'esta ubicación' : 'este bovino'}
           </p>
         </div>
       )}

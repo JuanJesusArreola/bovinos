@@ -311,7 +311,7 @@ export interface HealthCreationAttributes
     'nutritionalAssessment' | 'reproductiveAssessment' | 'recommendations' |
     'attachments' | 'photos' | 'xrays' | 'videos' | 'notes' | 'privateNotes' |
     'cost' | 'currency' | 'followUpDate' | 'followUpNotes' | 'weatherConditions' |
-    'environmentalFactors' | 'updatedBy' |  'deletedAt'
+    'environmentalFactors' | 'updatedBy' | 'deletedAt'
   > { }
 
 // Clase del modelo Health
@@ -404,6 +404,14 @@ Health.init(
       type: DataTypes.UUID,
       allowNull: true,
       comment: 'ID del veterinario responsable'
+    },
+    veterinarianName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    veterinarianLicense: {
+      type: DataTypes.STRING,
+      allowNull: true,
     },
     technicianId: {
       type: DataTypes.UUID,
@@ -588,7 +596,7 @@ Health.init(
       type: DataTypes.DATE,
       allowNull: true,
       comment: 'Fecha de eliminación (soft delete)'
-    }
+    },
   },
   {
     sequelize,

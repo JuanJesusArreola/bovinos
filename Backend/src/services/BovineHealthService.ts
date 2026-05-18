@@ -719,29 +719,33 @@ export class BovineHealthService {
                 }),
 
                 // Query 2: chequeos realizados en los últimos 7 días
+                // `Health.belongsTo(Bovine, { as: 'bovine' })` exige el alias
+                // explícito en el include — sin él Sequelize lanza
+                // `SequelizeEagerLoadingError`.
                 Health.count({
                     where: { recordDate: { [Op.gte]: sevenDaysAgo } },
-                    include: [{ model: Bovine, where: { ranchId }, attributes: [] }]
+                    include: [{ model: Bovine, as: 'bovine', where: { ranchId }, attributes: [] }]
                 }),
 
-                // Query 3: chequeos programados en los próximos 7 días
+                // Query 3: chequeos programados en los próximos 7 días.
+                // `Event.belongsTo(Bovine, { as: 'bovine' })` — mismo alias.
                 Event.count({
                     where: {
                         eventType: EventType.HEALTH_CHECK,
                         scheduledDate: { [Op.between]: [now, sevenDaysAhead] },
                         status: EventStatus.SCHEDULED
                     },
-                    include: [{ model: Bovine, where: { ranchId }, attributes: [] }]
+                    include: [{ model: Bovine, as: 'bovine', where: { ranchId }, attributes: [] }]
                 }),
 
-                // Query 4: top 5 diagnósticos de los últimos 30 días
+                // Query 4: top 5 diagnósticos de los últimos 30 días.
                 Health.findAll({
                     where: { recordDate: { [Op.gte]: thirtyDaysAgo } },
                     attributes: [
                         [sequelize.literal("diagnosis->>'primaryDiagnosis'"), 'diagnosis'],
                         [sequelize.fn('COUNT', sequelize.col('id')), 'count']
                     ],
-                    include: [{ model: Bovine, where: { ranchId }, attributes: [] }],
+                    include: [{ model: Bovine, as: 'bovine', where: { ranchId }, attributes: [] }],
                     group: [sequelize.literal("diagnosis->>'primaryDiagnosis'") as any],
                     order: [[sequelize.literal('count'), 'DESC']],
                     limit: 5

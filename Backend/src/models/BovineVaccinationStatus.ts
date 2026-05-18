@@ -84,7 +84,7 @@ BovineVaccinationStatus.init(
       type: DataTypes.ENUM(...Object.values(VaccinationStatus)),
       allowNull: false,
       defaultValue: VaccinationStatus.NONE,
-      comment: 'Estado actual derivado: UP_TO_DATE | PENDING | OVERDUE | NONE',
+      //comment: 'Estado actual derivado: UP_TO_DATE | PENDING | OVERDUE | NONE'//,
     },
     lastVaccinationAt: {
       type: DataTypes.DATE,

@@ -135,7 +135,7 @@ Vaccination.init(
     vaccineType: {
       type: DataTypes.ENUM(...Object.values(VaccineType)),
       allowNull: false,
-      comment: 'Tipo de vacuna (catálogo)',
+      //comment: 'Tipo de vacuna (catálogo)',
     },
     vaccineName: {
       type: DataTypes.STRING(150),
@@ -168,7 +168,7 @@ Vaccination.init(
     applicationRoute: {
       type: DataTypes.ENUM(...Object.values(ApplicationRoute)),
       allowNull: true,
-      comment: 'Vía de aplicación',
+      //comment: 'Vía de aplicación',
     },
     applicationDate: {
       type: DataTypes.DATE,

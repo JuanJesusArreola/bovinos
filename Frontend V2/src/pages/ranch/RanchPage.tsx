@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -296,6 +296,47 @@ export function RanchPage() {
     enabled: !!activeRanchId,
   });
 
+  // ── Live per-ranch occupancy ────────────────────────────────────────────
+  // The `/ranch` list endpoint returns `currentCattleCount` from the Ranch
+  // table — a DENORMALIZED field that isn't recomputed on every bovine
+  // mutation. The `/ranch/:id/summary` endpoint, in contrast, calculates it
+  // live by querying the bovines table. We fan-out a parallel `getSummary`
+  // for each row so the listing always matches what the detail page shows.
+  //
+  // Cache strategy:
+  //   - Shares the SAME query key `['ranch-summary', id]` as RanchDetailPage,
+  //     so navigating between list and detail reuses the cached value.
+  //   - `invalidateOccupancyCaches` (called by every bovine create / move /
+  //     delete mutation) already invalidates the `['ranch-summary']` prefix,
+  //     so these queries automatically refetch when the population changes.
+  //   - 20 rows × ~1 small request = trivial cost; React Query dedupes.
+  const ranchIds = useMemo(
+    () => (data?.items ?? []).map((r) => r.id),
+    [data?.items],
+  );
+  const summaryQueries = useQueries({
+    queries: ranchIds.map((rid) => ({
+      queryKey: ['ranch-summary', rid],
+      queryFn: () => ranchApi.getSummary(rid).then((r) => r.data.data),
+      staleTime: 1000 * 30,
+    })),
+  });
+  /** Map<ranchId, { currentCattleCount, maxCattleCapacity }> from live summaries. */
+  const liveOccupancyById = useMemo(() => {
+    const map = new Map<string, { current?: number; max?: number; rate?: number }>();
+    summaryQueries.forEach((q, i) => {
+      const rid = ranchIds[i];
+      if (rid && q.data) {
+        map.set(rid, {
+          current: q.data.currentCattleCount,
+          max:     q.data.maxCattleCapacity,
+          rate:    q.data.occupancyRate,
+        });
+      }
+    });
+    return map;
+  }, [summaryQueries, ranchIds]);
+
   // ── Form ───────────────────────────────────────────────────────────────
 
   const form = useForm<FormValues>({
@@ -410,6 +451,9 @@ export function RanchPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ranches'] });
       queryClient.invalidateQueries({ queryKey: ['ranch-summary'] });
+      // Detail page reads from ['ranch', id]; without this, the max capacity /
+      // total area / name fields on RanchDetailPage stay stale after editing.
+      queryClient.invalidateQueries({ queryKey: ['ranch'] });
       // Boundary cache may be served by getBoundary() — invalidate it too.
       if (editingRanch) {
         queryClient.invalidateQueries({ queryKey: ['ranch-boundary', editingRanch.id] });
@@ -512,7 +556,23 @@ export function RanchPage() {
     },
     {
       key: 'capacity', header: 'Ganado',
-      render: (r) => <span className="text-sm">{r.currentCattleCount ?? 0} / {r.maxCattleCapacity ?? '—'}</span>,
+      // Prefer the live value computed by the backend's summary endpoint;
+      // fall back to the denormalized field only while the summary loads.
+      render: (r) => {
+        const live = liveOccupancyById.get(r.id);
+        const current = live?.current ?? r.currentCattleCount ?? 0;
+        const max     = live?.max     ?? r.maxCattleCapacity;
+        return (
+          <span className="text-sm">
+            {current} / {max ?? '—'}
+            {max && max > 0 && (
+              <span className="ml-1 text-xs text-gray-400">
+                ({Math.round((current / max) * 100)}%)
+              </span>
+            )}
+          </span>
+        );
+      },
     },
     { key: 'totalArea', header: 'Superficie', render: (r) => <span className="text-sm">{r.totalArea ? `${r.totalArea} ha` : '—'}</span> },
     {

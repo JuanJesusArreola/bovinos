@@ -62,8 +62,8 @@ export class BovineController {
                 isPregnant: req.query.isPregnant === 'true'
                     ? true
                     : req.query.isPregnant === 'false'
-                    ? false
-                    : undefined,
+                        ? false
+                        : undefined,
             };
 
             // Whitelist de campos permitidos para ordenar (nombres de columnas reales)
@@ -88,13 +88,15 @@ export class BovineController {
 
             res.json({
                 success: true,
-                data: result.bovines,
-                pagination: result.pagination
+                data: {
+                    bovines: result.bovines,
+                    pagination: result.pagination 
+                }
             });
 
         } catch (error) {
             logger.error('Error en listBovines', this.context, { query: req.query }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -143,7 +145,7 @@ export class BovineController {
 
         } catch (error) {
             logger.error('Error en getBovineById', this.context, { id: req.params.id }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -185,7 +187,7 @@ export class BovineController {
 
         } catch (error) {
             logger.error('Error en createBovine', this.context, { body: req.body }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -231,7 +233,7 @@ export class BovineController {
 
         } catch (error) {
             logger.error('Error en updateBovine', this.context, { id: req.params.id, body: req.body }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -273,7 +275,7 @@ export class BovineController {
 
         } catch (error) {
             logger.error('Error en deleteBovine', this.context, { id: req.params.id }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -318,7 +320,7 @@ export class BovineController {
 
         } catch (error) {
             logger.error('Error en getBovineByEarTag', this.context, { earTag: req.params.earTag }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -355,7 +357,7 @@ export class BovineController {
 
         } catch (error) {
             logger.error('Error en getStatistics', this.context, { query: req.query }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -398,7 +400,7 @@ export class BovineController {
 
         } catch (error) {
             logger.error('Error en regenerateQR', this.context, { id: req.params.id }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,

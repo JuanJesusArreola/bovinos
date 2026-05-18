@@ -6,6 +6,7 @@ import type { HeatmapPoint, ClusterPoint, BovinePoint, GeoStats } from '@/api/bo
 import { locationsApi } from '@/api/locations.api';
 import { MapView, type MapMarker } from '@/components/maps/MapView';
 import { MapFiltersPanel, type MapFilters } from '@/components/maps/MapFiltersPanel';
+import { RanchFilterBanner, RanchFilterBannerEmpty } from '@/components/shared/RanchFilterBanner';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -74,20 +75,35 @@ export function MapsPage() {
   });
 
   // ── Fetch clusters ─────────────────────────────────────────────────────
-  const { data: clusterData, isLoading: clusterLoading } = useQuery({
+  // The clusters endpoint is `@deprecated`: it may respond with a non-array
+  // shape (null, {}, error wrapper) which used to crash the page render
+  // (`(clusterData as ClusterPoint[]).map is not a function`). We normalize
+  // the response to an array here and let downstream code filter invalid
+  // points safely.
+  const { data: clusterData, isLoading: clusterLoading, isError: clusterError } = useQuery({
     queryKey: ['clusters', activeRanchId, filters],
-    queryFn: () =>
-      bovinesApi
-        .getClusters(activeRanchId!, {
-          bounds: { north: 90, south: -90, east: 180, west: -180 },
-          zoom: 10,
-          filters: {
-            healthStatus: filters.healthStatus.length ? filters.healthStatus : undefined,
-            breeds: filters.breeds.length ? filters.breeds : undefined,
-          },
-        })
-        .then((r) => r.data.data),
+    queryFn: async () => {
+      const res = await bovinesApi.getClusters(activeRanchId!, {
+        bounds: { north: 90, south: -90, east: 180, west: -180 },
+        zoom: 10,
+        filters: {
+          healthStatus: filters.healthStatus.length ? filters.healthStatus : undefined,
+          breeds: filters.breeds.length ? filters.breeds : undefined,
+        },
+      });
+      const payload = res.data?.data;
+      // Backend may return:
+      //   • array directly
+      //   • { items: [...] }   (older shape)
+      //   • null / {}          (no clusters)
+      if (Array.isArray(payload)) return payload;
+      if (payload && typeof payload === 'object' && Array.isArray((payload as any).items)) {
+        return (payload as any).items as ClusterPoint[];
+      }
+      return [] as ClusterPoint[];
+    },
     enabled: !!activeRanchId && activeLayer === 'clusters',
+    retry: false,
   });
 
   // ── Fetch locations ────────────────────────────────────────────────────
@@ -108,10 +124,13 @@ export function MapsPage() {
 
   const bovineMarkers: MapMarker[] = useMemo(() => {
     if (!heatmapData || activeLayer !== 'bovines') return [];
-    return (heatmapData as (HeatmapPoint & { healthStatus?: string; bovineId?: string })[])
-      .filter((p) => p.lat && p.lng)
-      .map((p) => ({
-        id: p.bovineId || `hp-${p.lat}-${p.lng}`,
+    const arr = Array.isArray(heatmapData) ? heatmapData : [];
+    return (arr as (HeatmapPoint & { healthStatus?: string; bovineId?: string })[])
+      // Use Number.isFinite — `p.lat && p.lng` rejects valid 0 coords and
+      // accepts NaN (which crashes Leaflet downstream).
+      .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+      .map((p, i) => ({
+        id: p.bovineId || `hp-${p.lat}-${p.lng}-${i}`,
         lat: p.lat,
         lng: p.lng,
         label: p.healthStatus ? (HEALTH_LABELS[p.healthStatus] || p.healthStatus) : 'Bovino',
@@ -126,7 +145,10 @@ export function MapsPage() {
     const locations: Location[] = locationsData?.items || [];
     if (activeLayer !== 'locations') return [];
     return locations
-      .filter((loc) => loc.coordinates)
+      .filter((loc) =>
+        loc.coordinates &&
+        Number.isFinite(loc.coordinates.latitude) &&
+        Number.isFinite(loc.coordinates.longitude))
       .map((loc) => ({
         id: loc.id,
         lat: loc.coordinates!.latitude,
@@ -138,18 +160,28 @@ export function MapsPage() {
 
   const clusterMarkers: MapMarker[] = useMemo(() => {
     if (!clusterData || activeLayer !== 'clusters') return [];
-    return (clusterData as ClusterPoint[]).map((c) => ({
-      id: c.id,
-      lat: c.lat,
-      lng: c.lng,
-      label: `Cluster (${c.count})`,
-      count: c.count,
-      popup: c.healthBreakdown
-        ? Object.entries(c.healthBreakdown)
-            .map(([k, v]) => `${HEALTH_LABELS[k] || k}: ${v}`)
-            .join(', ')
-        : `${c.count} bovinos`,
-    }));
+    // Defensive: clusterData IS an array (the queryFn guarantees it now),
+    // but each item still needs lat/lng validation — Leaflet's LatLng will
+    // throw "Invalid LatLng" if any coord is undefined/NaN, blanking the
+    // whole page. We also fabricate a stable id when the backend omits it.
+    const arr = Array.isArray(clusterData) ? clusterData : [];
+    return arr
+      .filter((c): c is ClusterPoint =>
+        c != null &&
+        Number.isFinite(c.lat) &&
+        Number.isFinite(c.lng))
+      .map((c, i) => ({
+        id: c.id ?? `cluster-${c.lat}-${c.lng}-${i}`,
+        lat: c.lat,
+        lng: c.lng,
+        label: `Cluster (${c.count ?? 0})`,
+        count: c.count ?? 0,
+        popup: c.healthBreakdown
+          ? Object.entries(c.healthBreakdown)
+              .map(([k, v]) => `${HEALTH_LABELS[k] || k}: ${v}`)
+              .join(', ')
+          : `${c.count ?? 0} bovinos`,
+      }));
   }, [clusterData, activeLayer]);
 
   const activeMarkers = useMemo(() => {
@@ -192,8 +224,26 @@ export function MapsPage() {
         </div>
       </div>
 
+      {/* Global ranch filter — same convention as Bovinos / Salud /
+          Ubicaciones. Multi-ranch users (or SUPER_ADMIN) can switch
+          context here; single-ranch users see the auto-selected one
+          and the banner stays hidden. */}
+      <RanchFilterBanner
+        activeHint="Mostrando bovinos y ubicaciones de este rancho."
+        emptyHint="Selecciona un rancho para ver el mapa."
+      />
+
+      {/* If no ranch is selected, render the empty state and stop here —
+          every layer below queries by ranchId and would yield nothing. */}
+      {!activeRanchId && (
+        <RanchFilterBannerEmpty
+          title="Selecciona un rancho"
+          description="El mapa interactivo, los mapas de calor, los clusters y las ubicaciones se cargan por rancho. Elige uno arriba para visualizar la información."
+        />
+      )}
+
       {/* Stats */}
-      {stats && (
+      {activeRanchId && stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Bovinos Rastreados" value={stats.trackedBovines || 0} icon={Navigation} color="primary" />
           <StatCard title="Ubicaciones Activas" value={stats.activeLocations || 0} icon={MapPin} color="blue" />
@@ -202,6 +252,10 @@ export function MapsPage() {
         </div>
       )}
 
+      {/* Everything below requires a ranch — wrap once so we don't have
+          to gate every section individually. */}
+      {activeRanchId && (
+      <>
       {/* Layer Selector */}
       <div className="flex flex-wrap gap-2">
         {layers.map((layer) => (
@@ -230,6 +284,17 @@ export function MapsPage() {
           {isLoading ? (
             <Card className="flex items-center justify-center h-[600px]">
               <Spinner />
+            </Card>
+          ) : activeLayer === 'clusters' && clusterError ? (
+            <Card className="flex flex-col items-center justify-center h-[600px] gap-2 text-center px-6">
+              <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">
+                No se pudo cargar la capa de clusters
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 max-w-md">
+                El endpoint de clusters está en proceso de migración. Mientras tanto,
+                puedes usar la capa <strong>"Bovinos"</strong> que muestra los puntos
+                individuales con su estado de salud.
+              </p>
             </Card>
           ) : (
             <MapView
@@ -349,6 +414,8 @@ export function MapsPage() {
           </Card>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

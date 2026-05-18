@@ -132,6 +132,176 @@ export function getBoundaryConflictDetails(err: unknown): BoundaryConflictDetail
   return details as BoundaryConflictDetails;
 }
 
+// ─── Bovine-module errors (Phase F9) ───────────────────────────────────────
+
+/**
+ * BOVINE_HAS_ACTIVE_RECORDS — DELETE blocked because related records exist.
+ * Backend returns `details.records[]` (or `details.activeRecords[]`) with
+ * the entries that need to be closed first.
+ */
+export interface BovineHasActiveRecordsDetails {
+  records?: Array<{
+    type?: string;
+    recordType?: string;
+    id?: string;
+  }>;
+  activeRecords?: Array<{ type?: string; recordType?: string; id?: string }>;
+}
+
+export function getBovineActiveRecords(err: unknown): string[] {
+  if (getErrorCode(err) !== ErrorCodes.BOVINE_HAS_ACTIVE_RECORDS) return [];
+  const d = (err as any)?.response?.data?.details as BovineHasActiveRecordsDetails | undefined;
+  const list = (d?.records ?? d?.activeRecords ?? []) as Array<{
+    type?: string;
+    recordType?: string;
+    id?: string;
+  }>;
+  return list
+    .map((r) => r.type ?? r.recordType ?? r.id ?? '')
+    .filter(Boolean);
+}
+
+/**
+ * BOVINE_DUPLICATE_EAR_TAG — backend rejected an ear tag already used.
+ * `details.earTag` carries the conflicting value.
+ */
+export function getBovineDuplicateEarTag(err: unknown): string | null {
+  if (getErrorCode(err) !== ErrorCodes.BOVINE_DUPLICATE_EAR_TAG) return null;
+  return ((err as any)?.response?.data?.details?.earTag as string) ?? null;
+}
+
+/**
+ * BOVINE_LOCATION_FULL — destination location has no capacity.
+ * `details.location` may carry `{ id, name, maxAnimals, currentAnimals }`.
+ */
+export interface BovineLocationFullDetails {
+  location?: {
+    id?: string;
+    name?: string;
+    maxAnimals?: number;
+    currentAnimals?: number;
+  };
+}
+
+export function getBovineLocationFullDetails(err: unknown): BovineLocationFullDetails | null {
+  if (getErrorCode(err) !== ErrorCodes.BOVINE_LOCATION_FULL) return null;
+  return ((err as any)?.response?.data?.details as BovineLocationFullDetails) ?? null;
+}
+
+/**
+ * RANCH_MISMATCH — operation tried to mix entities from different ranches.
+ * `details.expectedRanchId` and `details.actualRanchId` (or similar names).
+ */
+export interface RanchMismatchDetails {
+  expectedRanchId?: string;
+  actualRanchId?: string;
+  expectedRanchName?: string;
+  actualRanchName?: string;
+}
+
+export function getRanchMismatchDetails(err: unknown): RanchMismatchDetails | null {
+  if (getErrorCode(err) !== ErrorCodes.RANCH_MISMATCH) return null;
+  return ((err as any)?.response?.data?.details as RanchMismatchDetails) ?? null;
+}
+
+/**
+ * FILE_TOO_LARGE — backend rejected the upload.
+ * `details.maxSize` (bytes) and `details.actualSize` (bytes) may be present.
+ */
+export interface FileTooLargeDetails {
+  maxSize?: number;
+  actualSize?: number;
+  mediaType?: string;
+}
+
+export function getFileTooLargeDetails(err: unknown): FileTooLargeDetails | null {
+  if (getErrorCode(err) !== ErrorCodes.FILE_TOO_LARGE) return null;
+  return ((err as any)?.response?.data?.details as FileTooLargeDetails) ?? null;
+}
+
+/**
+ * FILE_INVALID_TYPE — backend rejected the MIME type.
+ * `details.allowedTypes` (string[]) and `details.actualType` (string) may be present.
+ */
+export interface FileInvalidTypeDetails {
+  allowedTypes?: string[];
+  actualType?: string;
+  mediaType?: string;
+}
+
+export function getFileInvalidTypeDetails(err: unknown): FileInvalidTypeDetails | null {
+  if (getErrorCode(err) !== ErrorCodes.FILE_INVALID_TYPE) return null;
+  return ((err as any)?.response?.data?.details as FileInvalidTypeDetails) ?? null;
+}
+
+/**
+ * Unified helper that returns a user-facing message for the most common
+ * bovine-module errors. Falls back to `getFriendlyMessage` for everything else.
+ * Use this in mutation `onError` handlers to keep them small.
+ */
+export function getBovineErrorMessage(err: unknown): string {
+  const code = getErrorCode(err);
+
+  if (code === ErrorCodes.BOVINE_NOT_FOUND) {
+    return 'No se encontró el bovino. Es posible que haya sido eliminado.';
+  }
+  if (code === ErrorCodes.BOVINE_DUPLICATE_EAR_TAG) {
+    const tag = getBovineDuplicateEarTag(err);
+    return tag
+      ? `El arete "${tag}" ya está asignado a otro bovino.`
+      : 'El arete ya está asignado a otro bovino.';
+  }
+  if (code === ErrorCodes.BOVINE_INVALID_AGE_FOR_TYPE) {
+    return 'La edad del bovino no es compatible con el tipo de ganado seleccionado.';
+  }
+  if (code === ErrorCodes.BOVINE_INVALID_GENDER_FOR_TYPE) {
+    return 'El sexo del bovino no es compatible con el tipo de ganado seleccionado.';
+  }
+  if (code === ErrorCodes.BOVINE_INVALID_PARENT) {
+    return 'El padre o madre indicado no es válido (debe ser un bovino existente y compatible).';
+  }
+  if (code === ErrorCodes.BOVINE_SELF_PARENT) {
+    return 'Un bovino no puede ser su propio padre o madre.';
+  }
+  if (code === ErrorCodes.BOVINE_LOCATION_FULL) {
+    const d = getBovineLocationFullDetails(err);
+    if (d?.location?.name && d.location.maxAnimals != null) {
+      return `El potrero "${d.location.name}" alcanzó su capacidad máxima (${d.location.currentAnimals ?? '?'}/${d.location.maxAnimals}).`;
+    }
+    return 'El potrero seleccionado alcanzó su capacidad máxima.';
+  }
+  if (code === ErrorCodes.BOVINE_HAS_ACTIVE_RECORDS) {
+    const records = getBovineActiveRecords(err);
+    return records.length
+      ? `No se puede eliminar porque tiene ${records.length} registro${records.length !== 1 ? 's' : ''} activo${records.length !== 1 ? 's' : ''}: ${records.join(', ')}.`
+      : 'No se puede eliminar porque tiene registros activos. Ciérralos primero.';
+  }
+  if (code === ErrorCodes.RANCH_MISMATCH) {
+    const d = getRanchMismatchDetails(err);
+    if (d?.expectedRanchName && d.actualRanchName) {
+      return `Solo puedes mover el bovino dentro del mismo rancho ("${d.expectedRanchName}"). El destino pertenece a "${d.actualRanchName}".`;
+    }
+    return 'El destino pertenece a un rancho diferente. Solo puedes mover dentro del mismo rancho.';
+  }
+  if (code === ErrorCodes.FILE_TOO_LARGE) {
+    const d = getFileTooLargeDetails(err);
+    if (d?.maxSize) {
+      const mb = (d.maxSize / 1_048_576).toFixed(1);
+      return `El archivo excede el tamaño máximo permitido (${mb} MB).`;
+    }
+    return 'El archivo excede el tamaño máximo permitido.';
+  }
+  if (code === ErrorCodes.FILE_INVALID_TYPE) {
+    const d = getFileInvalidTypeDetails(err);
+    if (d?.allowedTypes && d.allowedTypes.length > 0) {
+      return `Tipo de archivo no permitido. Acepta: ${d.allowedTypes.join(', ')}.`;
+    }
+    return 'Tipo de archivo no permitido para esta categoría.';
+  }
+
+  return getFriendlyMessage(err);
+}
+
 /**
  * Determines the toast variant to use based on HTTP status.
  */

@@ -30,6 +30,19 @@
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
 }
 
+/* ── Leaflet stacking-context fix ───────────────────────────────────────── */
+/* Leaflet's internal panes use z-index up to 1000 (controls, popups), which
+   "escapes" the stacking context of any Modal (z-50) shown above the map.
+   Result: the map renders on top of dialogs.
+   `isolation: isolate` creates a self-contained stacking context per map, so
+   none of the internal z-indexes can ascend above the map container's own
+   stacking level in the document. This is the canonical fix and applies to
+   every <MapContainer> in the app (bovine detail, ranch detail, location
+   detail, map picker, geofence drawer, global maps page, etc.). */
+.leaflet-container {
+  isolation: isolate;
+}
+
 /* ── Toast progress bar animation ───────────────────────────────────────── */
 @keyframes shrink-bar {
   from { width: 100%; }

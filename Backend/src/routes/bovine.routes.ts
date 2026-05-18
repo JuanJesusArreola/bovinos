@@ -120,7 +120,7 @@ router.put(
  * Elimina (soft delete) un bovino (requiere rol ADMIN)
  */
 router.delete(
-    '/:id', 
+    '/:id',
     authenticateToken,
     authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER), // CORREGIDO: solo un rol
     validateId('id'),
@@ -532,6 +532,13 @@ router.get(
     authenticateToken,
     validateId('ranchId'),
     bovineTrackingController.getGeoStatistics
+);
+
+router.patch(
+    '/:id/location',
+    authenticateToken,
+    validateId('id'),
+    bovineLocationController.updateLocation
 );
 
 export default router;

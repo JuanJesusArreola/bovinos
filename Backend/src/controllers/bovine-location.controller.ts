@@ -46,7 +46,7 @@ export class BovineLocationController {
 
         } catch (error) {
             logger.error('Error en recordEntry', this.context, { body: req.body }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -91,7 +91,7 @@ export class BovineLocationController {
 
         } catch (error) {
             logger.error('Error en recordExit', this.context, { body: req.body }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -132,7 +132,7 @@ export class BovineLocationController {
 
         } catch (error) {
             logger.error('Error en getCurrentLocation', this.context, { params: req.params }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -191,7 +191,7 @@ export class BovineLocationController {
 
         } catch (error) {
             logger.error('Error en getCurrentBovinesAtLocation', this.context, { params: req.params }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -231,7 +231,7 @@ export class BovineLocationController {
 
         } catch (error) {
             logger.error('Error en getLocationHistory', this.context, { params: req.params, query: req.query }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -277,7 +277,7 @@ export class BovineLocationController {
 
         } catch (error) {
             logger.error('Error en getTimeSpentPerLocation', this.context, { params: req.params, query: req.query }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -323,7 +323,7 @@ export class BovineLocationController {
 
         } catch (error) {
             logger.error('Error en generateMovementReport', this.context, { params: req.params, query: req.query }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -369,7 +369,7 @@ export class BovineLocationController {
 
         } catch (error) {
             logger.error('Error en getPastureUtilization', this.context, { params: req.params, query: req.query }, error as Error);
-            
+
             if (error instanceof BovineError) {
                 res.status(error.statusCode).json({
                     success: false,
@@ -382,6 +382,36 @@ export class BovineLocationController {
                     error: 'Error interno del servidor'
                 });
             }
+        }
+    }
+
+    async updateLocation(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+            const data = req.body;
+            const userId = req.user?.id;
+
+            const result = await bovineLocationService.updateLocation(id, data, userId);
+
+            return res.status(200).json({
+                success: true,
+                data: result
+            });
+        } catch (error) {
+            logger.error('Error en updateLocation', this.context, { params: req.params, query: req.query }, error as Error);
+
+            if (error instanceof BovineError) {
+                res.status(error.statusCode).json({
+                    success: false,
+                    error: error.message,
+                    code: error.code
+                });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    error: 'Error interno del servidor'
+                });
+        }
         }
     }
 }

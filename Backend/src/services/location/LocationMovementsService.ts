@@ -153,12 +153,19 @@ export class LocationMovementsService {
       if (recordedByIds.length > 0) {
         const users = await User.findAll({
           where: { id: recordedByIds },
-          attributes: ['id', 'firstName', 'lastName', 'username'],
+          attributes: ['id', 'username', 'personalInfo'],
         });
         for (const u of users) {
-          const u_any: any = u;
-          const fullName = [u_any.firstName, u_any.lastName].filter(Boolean).join(' ').trim();
-          userNameMap.set(u_any.id, fullName || u_any.username || null);
+          const uAny: any = u;
+          const firstName = uAny.personalInfo?.firstName;
+          const middleName = uAny.personalInfo?.middleName;
+          const lastName = uAny.personalInfo?.lastName;
+
+          const fullName = [firstName, middleName, lastName]
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+          userNameMap.set(uAny.id, fullName || uAny.username || null);
         }
       }
 

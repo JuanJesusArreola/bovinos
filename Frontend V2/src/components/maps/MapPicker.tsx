@@ -88,6 +88,16 @@ interface MapPickerProps {
    * actual shape and is the authoritative ranch-level constraint.
    */
   ranchBoundary?: BoundaryShape | null;
+  /**
+   * Destination LOCATION boundary (e.g. the potrero where the bovine will be
+   * assigned). Rendered on top of the ranch boundary in a distinct color
+   * (emerald) so the user can see the real area of the potrero while picking
+   * GPS coordinates. The point should fall inside this shape — the caller is
+   * responsible for the hard validation, MapPicker only renders + auto-centers.
+   */
+  locationBoundary?: BoundaryShape | null;
+  /** Name of the destination location (used in the info chip). */
+  locationName?: string;
 }
 
 // ─── Map sub-components ───────────────────────────────────────────────────────
@@ -167,6 +177,8 @@ export function MapPicker({
   ranchName,
   parentZone,
   ranchBoundary,
+  locationBoundary,
+  locationName,
 }: MapPickerProps) {
   const [manualLat, setManualLat] = useState(value?.latitude?.toString() || '');
   const [manualLng, setManualLng] = useState(value?.longitude?.toString() || '');
@@ -219,22 +231,56 @@ export function MapPicker({
     return isPointInBoundary(value, ranchBoundary);
   }, [value, ranchBoundary]);
 
-  // Map initial center: placed point → parent center → ranch center → default
+  // Destination-location boundary check (the potrero where the animal goes).
+  // True if point is inside the location's geofence, false otherwise.
+  const insideLocationBoundary: boolean | null = useMemo(() => {
+    if (!value || !locationBoundary) return null;
+    return isPointInBoundary(value, locationBoundary);
+  }, [value, locationBoundary]);
+
+  // Pick a representative center for the destination location (used as a
+  // fallback for the map's initial center when nothing else is available).
+  const locationCenter: { latitude: number; longitude: number } | null = useMemo(() => {
+    if (!locationBoundary || !locationBoundary.type) return null;
+    if (locationBoundary.type === 'CIRCULAR' && locationBoundary.center) {
+      return locationBoundary.center;
+    }
+    if (locationBoundary.type === 'RECTANGULAR' && locationBoundary.boundingBox) {
+      const bb = locationBoundary.boundingBox;
+      return {
+        latitude:  (bb.north + bb.south) / 2,
+        longitude: (bb.east  + bb.west ) / 2,
+      };
+    }
+    if (locationBoundary.type === 'POLYGON' && locationBoundary.coordinates?.length) {
+      const cs = locationBoundary.coordinates;
+      const lat = cs.reduce((s, c) => s + c.latitude,  0) / cs.length;
+      const lng = cs.reduce((s, c) => s + c.longitude, 0) / cs.length;
+      return { latitude: lat, longitude: lng };
+    }
+    return null;
+  }, [locationBoundary]);
+
+  // Map initial center: placed point → location center → parent → ranch → default
   const initialCenter: [number, number] = value
     ? [value.latitude, value.longitude]
-    : parentZone
-      ? [parentZone.center.latitude, parentZone.center.longitude]
-      : ranchCenter
-        ? [ranchCenter.latitude, ranchCenter.longitude]
-        : [MAP_DEFAULT_CENTER.lat, MAP_DEFAULT_CENTER.lng];
+    : locationCenter
+      ? [locationCenter.latitude, locationCenter.longitude]
+      : parentZone
+        ? [parentZone.center.latitude, parentZone.center.longitude]
+        : ranchCenter
+          ? [ranchCenter.latitude, ranchCenter.longitude]
+          : [MAP_DEFAULT_CENTER.lat, MAP_DEFAULT_CENTER.lng];
 
   const initialZoom = value
     ? 16
-    : parentZone
-      ? 15
-      : ranchCenter
-        ? 13
-        : MAP_DEFAULT_ZOOM;
+    : locationCenter
+      ? 17       // closest zoom — we know exactly where the potrero is
+      : parentZone
+        ? 15
+        : ranchCenter
+          ? 13
+          : MAP_DEFAULT_ZOOM;
 
   // Warn ring radius in meters
   const warnRingMeters = warnDistanceKm * 1000;
@@ -246,6 +292,21 @@ export function MapPicker({
           <MapPin className="w-4 h-4" />
           {label}
         </label>
+      )}
+
+      {/* Destination location info chip — shown whenever a location boundary
+          is configured. Distinct teal palette so it doesn't collide with the
+          ranch / parent chips. */}
+      {locationBoundary && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-900/40 text-xs text-teal-700 dark:text-teal-300">
+          <span>🌾</span>
+          <span>
+            {locationName
+              ? <>Área del potrero <strong>"{locationName}"</strong> resaltada en el mapa.</>
+              : <>Área del potrero destino resaltada en el mapa.</>}
+            {' '}<strong>El pin debe caer dentro de la zona color verde-azulado.</strong>
+          </span>
+        </div>
       )}
 
       {/* Parent zone info chip (Phase A — takes precedence when present) */}
@@ -431,6 +492,48 @@ export function MapPicker({
             </>
           )}
 
+          {/* Destination LOCATION boundary — emerald shape rendered on top of
+              the ranch boundary so the user sees exactly where the potrero is
+              and where they can safely drop the pin. */}
+          {locationBoundary && (() => {
+            const style = {
+              color: '#0d9488',          // teal-600
+              fillColor: '#14b8a6',      // teal-500
+              fillOpacity: 0.18,
+              weight: 2,
+            };
+            if (locationBoundary.type === 'POLYGON'
+                && locationBoundary.coordinates
+                && locationBoundary.coordinates.length >= 3) {
+              return (
+                <Polygon
+                  positions={locationBoundary.coordinates.map((c) => [c.latitude, c.longitude]) as [number, number][]}
+                  pathOptions={style}
+                />
+              );
+            }
+            if (locationBoundary.type === 'RECTANGULAR' && locationBoundary.boundingBox) {
+              const bb = locationBoundary.boundingBox;
+              return (
+                <Rectangle
+                  bounds={[[bb.south, bb.west], [bb.north, bb.east]] as [[number, number], [number, number]]}
+                  pathOptions={style}
+                />
+              );
+            }
+            if (locationBoundary.type === 'CIRCULAR'
+                && locationBoundary.center && locationBoundary.radius) {
+              return (
+                <Circle
+                  center={[locationBoundary.center.latitude, locationBoundary.center.longitude]}
+                  radius={locationBoundary.radius}
+                  pathOptions={style}
+                />
+              );
+            }
+            return null;
+          })()}
+
           {/* Location pin */}
           {value && (
             <Marker position={[value.latitude, value.longitude]} icon={defaultIcon} />
@@ -467,6 +570,28 @@ export function MapPicker({
       {/* Phase A — Parent zone badge (primary when parent is configured) */}
       {parentResult && parentZone && (
         <ParentBadge result={parentResult} parent={parentZone} />
+      )}
+
+      {/* Destination-location badge — green when inside, red when outside.
+          This drives the caller's hard validation (button disabled / submit blocked). */}
+      {insideLocationBoundary === true && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/40">
+          <span>✅</span>
+          <span>
+            El pin está dentro del área de
+            {locationName ? <> <strong>"{locationName}"</strong>.</> : <> el potrero destino.</>}
+          </span>
+        </div>
+      )}
+      {insideLocationBoundary === false && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/40">
+          <span>⛔</span>
+          <span>
+            El pin está fuera del área de
+            {locationName ? <> <strong>"{locationName}"</strong>.</> : <> el potrero destino.</>}
+            <span className="ml-1 opacity-90">Muévelo dentro de la zona verde-azulada para continuar.</span>
+          </span>
+        </div>
       )}
 
       {/* Phase B — Ranch boundary badge (only shown when point is outside the real boundary) */}

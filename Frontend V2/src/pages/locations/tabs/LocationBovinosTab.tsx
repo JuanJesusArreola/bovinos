@@ -105,14 +105,20 @@ export function LocationBovinosTab({ locationId, locationName }: Props) {
   const { data, isLoading } = useQuery({
     queryKey: ['bovines-at-location', locationId, page],
     queryFn: () =>
-      bovinesApi.list({ currentLocationId: locationId as any, page, limit: LIMIT } as any)
+      // Backend filter name is `locationId` (NOT `currentLocationId`) —
+      // it JOINs against BovineLocationHistory to find bovines with an
+      // active stay at that potrero. The previous param was silently
+      // ignored by the validator, returning ALL bovines of the ranch.
+      bovinesApi.list({ locationId, page, limit: LIMIT })
         .then((r) => r.data.data),
     enabled: !!locationId,
     staleTime: 1000 * 60,
   });
 
-  const items: Bovine[] = (data as any)?.items ?? [];
-  const total: number   = (data as any)?.total ?? 0;
+  // Canonical field is `bovines`; `items` is a legacy alias that isn't
+  // always populated. Prefer the canonical first.
+  const items: Bovine[] = (data?.bovines ?? data?.items ?? []) as Bovine[];
+  const total: number   = (data?.pagination?.total ?? data?.total ?? items.length) as number;
   const totalPages      = Math.ceil(total / LIMIT);
 
   const filtered = search.trim()
