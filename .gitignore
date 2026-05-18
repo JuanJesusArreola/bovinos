@@ -2,3 +2,4 @@ node_modules
 service-account.json
 *.json
 Backend/service-account.json
+.claude/
