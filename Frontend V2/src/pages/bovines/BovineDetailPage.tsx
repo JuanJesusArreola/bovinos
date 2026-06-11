@@ -26,8 +26,14 @@ import { bovinesApi } from '@/api/bovines.api';
 import { locationsApi } from '@/api/locations.api';
 import {
   useBovineFull, useDeleteBovine, useMoveBovine,
-  useRegenerateBovineQr, bovineKeys,
+  useMarkBovineSick, useRegenerateBovineQr, bovineKeys,
+  useBovineRiskScore,
 } from '@/hooks/useBovines';
+import { ClinicalDataForm, isClinicalDataValid } from '@/components/bovines/ClinicalDataForm';
+import { DeathRegistrationModal } from '@/components/bovines/DeathRegistrationModal';
+import type { InitialCaseInput } from '@/types/bovine.dtos';
+import { useBovineWithdrawalStatus } from '@/hooks/useBovineHealth';
+import { WithdrawalStatusBanner } from '@/components/health/WithdrawalStatusBanner';
 import { BovineQR } from '@/components/bovines/BovineQR';
 import { MovementReason, MovementType } from '@/types/bovine.dtos';
 import { MapPicker, type Coordinates } from '@/components/maps/MapPicker';
@@ -58,11 +64,15 @@ import { BovineLocationHistoryTab } from './tabs/BovineLocationHistoryTab';
 import { MediaGallery } from '@/components/media/MediaGallery';
 
 import type { BovineFullResponse, VaccinationStatus, HealthStatus } from '@/types/bovine.dtos';
+import {
+  getCattleTypeGradient, getCattleTypeEmoji,
+  getVaccinationStatusLabel, getVaccinationStatusVariant,
+} from '@/design-system/tokens';
 
 import {
   ArrowLeft, Edit, QrCode, HeartPulse, MapPin, Beef,
   Mars, Venus, Calendar, Weight, Hash, Pill, Image as ImageIcon,
-  Syringe, Info, Trash2, MoveRight, RefreshCw, AlertTriangle,
+  Syringe, Info, Trash2, MoveRight, RefreshCw, AlertTriangle, Skull,
   ShieldCheck, Activity, Clock, Copy, ExternalLink, Users,
   Dna, CheckCircle2, XCircle, Wifi, WifiOff,
   Printer, Download,
@@ -81,33 +91,13 @@ const TABS = [
 type TabId = typeof TABS[number]['id'];
 
 // ─── Helper: vaccination status color ───────────────────────────────────────
-
-const VAC_STATUS_VARIANT: Record<VaccinationStatus, 'success' | 'warning' | 'danger' | 'default'> = {
-  UP_TO_DATE: 'success',
-  PENDING:    'warning',
-  OVERDUE:    'danger',
-  NONE:       'default',
-};
-
-const VAC_STATUS_LABEL: Record<VaccinationStatus, string> = {
-  UP_TO_DATE: 'Al día',
-  PENDING:    'Pendiente',
-  OVERDUE:    'Atrasada',
-  NONE:       'Sin vacunas',
-};
+// F-35 / Hallazgo H-1: VAC_STATUS_VARIANT + VAC_STATUS_LABEL movidos a
+// `design-system/tokens/vaccination.labels.ts`. Import via
+// `getVaccinationStatusVariant()` / `getVaccinationStatusLabel()`.
 
 // ─── Avatar gradient by cattle type ─────────────────────────────────────────
-
-const TYPE_GRADIENT: Record<string, string> = {
-  CATTLE: 'from-amber-400 to-orange-500',
-  BULL:   'from-rose-500 to-red-700',
-  COW:    'from-pink-400 to-rose-600',
-  CALF:   'from-emerald-300 to-teal-500',
-};
-
-const TYPE_EMOJI: Record<string, string> = {
-  CATTLE: '🐄', BULL: '🐂', COW: '🐄', CALF: '🐮',
-};
+// Gradientes + emojis vienen del design-system (cattle-type.colors.ts).
+// Aquí solo importamos los helpers para mantener legibilidad en el render.
 
 // ─── InfoRow ────────────────────────────────────────────────────────────────
 
@@ -131,15 +121,16 @@ function CurrentLocationMap({ full }: { full: BovineFullResponse }) {
     if (cl.gpsPoint) {
       return { lat: cl.gpsPoint.latitude, lng: cl.gpsPoint.longitude, source: 'GPS' as const };
     }
-    if (full.bovine.location?.latitude && full.bovine.location?.longitude) {
+    // Backend D-01: leer del bloque `profile` (fuente canonica).
+    if (full.profile.location?.latitude && full.profile.location?.longitude) {
       return {
-        lat: full.bovine.location.latitude,
-        lng: full.bovine.location.longitude,
+        lat: full.profile.location.latitude,
+        lng: full.profile.location.longitude,
         source: 'STATIC' as const,
       };
     }
     return null;
-  }, [cl.gpsPoint, full.bovine.location]);
+  }, [cl.gpsPoint, full.profile.location]);
 
   if (!point) {
     return (
@@ -173,7 +164,7 @@ function CurrentLocationMap({ full }: { full: BovineFullResponse }) {
       >
         <Popup>
           <div className="text-xs">
-            <p className="font-semibold mb-0.5">{full.bovine.earTag}</p>
+            <p className="font-semibold mb-0.5">{full.profile.earTag}</p>
             <p className="text-gray-600">
               {cl.location?.name ?? (point.source === 'GPS' ? 'Posición GPS' : 'Ubicación registrada')}
             </p>
@@ -211,7 +202,35 @@ export function BovineDetailPage() {
   // New GPS coords picked in the Move modal. `null` means "don't update GPS".
   const [moveCoords, setMoveCoords] = useState<Coordinates | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
+  // Escape hatch para el bloqueo de período de retiro — solo SE muestra y se
+  // habilita cuando hay withdrawal activo + reason ∈ {SALE, TRANSFER}. Al
+  // marcarlo, el operador asume formalmente la responsabilidad legal del
+  // movimiento (necropsia, decomiso oficial, donación a rendering, etc.).
+  // Se REINICIA cada vez que se abre el modal o cambia el reason.
+  const [requireSaleAck, setRequireSaleAck] = useState(false);
   const [deleteBlockMsg, setDeleteBlockMsg] = useState<string | null>(null);
+  // F-20 / Backend L-01: prompt para confirmar forceOverride cuando el
+  // backend respondio 409 BOVINE_LOCATION_FULL. El estado se llena con los
+  // numeros que el backend reporto y un closure que reenvia con
+  // `forceOverride: true`. Null = no hay prompt activo.
+  const [forceOverridePrompt, setForceOverridePrompt] = useState<{
+    currentOccupancy: number;
+    maxAnimals:       number;
+  } | null>(null);
+
+  // F-25 / Backend X-03: modal "Registrar muerte". Solo se ofrece cuando
+  // el bovino NO esta ya fallecido (la accion es irreversible y el backend
+  // devuelve 409 ALREADY_DECEASED si se intenta de nuevo).
+  const [showDeathModal, setShowDeathModal] = useState(false);
+
+  // F-24 / Backend C-04: modal "Marcar enfermo". Solo se ofrece cuando el
+  // bovino esta sano/desconocido; para bovinos ya enfermos se redirige al
+  // modulo Salud (donde se gestionan los casos clinicos activos).
+  const [showMarkSickModal, setShowMarkSickModal] = useState(false);
+  const [markSickData, setMarkSickData] = useState<InitialCaseInput | null>(null);
+  const [markSickErrors, setMarkSickErrors] = useState<
+    Partial<Record<keyof InitialCaseInput, string>>
+  >({});
 
   // Load the selected destination location so we can overlay its boundary
   // on the map and validate the new GPS pin against it.
@@ -235,6 +254,19 @@ export function BovineDetailPage() {
   // ── Data ─────────────────────────────────────────────────────────────────
   const { data: full, isLoading, error } = useBovineFull(id);
 
+  // Estado de período de retiro — banner legal que aparece en el header
+  // del detalle si el bovino tiene medicamentos cuyo withdrawal aún corre.
+  // Cargamos solo cuando hay id válido. Si el bovino no tiene tratamientos
+  // recientes, el hook devuelve `hasActiveWithdrawal: false` sin penalizar
+  // mucho (es una query barata: 1 historial + N retiros donde N≈0 en sanos).
+  const { data: withdrawalStatus, isLoading: isLoadingWithdrawal } =
+    useBovineWithdrawalStatus(id);
+
+  const bovineHealthStatus = full?.profile?.healthStatus;
+  const { data: riskScore } = useBovineRiskScore(id, {
+    enabled: bovineHealthStatus !== 'DECEASED',
+  });
+
   // ── Permissions ──────────────────────────────────────────────────────────
   const canEdit    = canUser(user?.role, 'MANAGE_BOVINE');
   const canMove    = canUser(user?.role, 'MOVE_BOVINE');
@@ -247,6 +279,10 @@ export function BovineDetailPage() {
   // ── Mutations ────────────────────────────────────────────────────────────
   const deleteMutation = useDeleteBovine();
   const moveMutation = useMoveBovine();
+  // F-24: mutation se instancia con id ya disponible (ruta protegida — id
+  // garantizado para este componente). El hook invalida los caches que
+  // dependen de salud + casos clinicos (ver useMarkBovineSick).
+  const markSickMutation = useMarkBovineSick(id!);
   // Centralized hook — invalidates full/detail/lists automatically. We keep
   // the toast wrappers locally so the user sees feedback at this entry point.
   const regenerateQrHook = useRegenerateBovineQr();
@@ -295,11 +331,79 @@ export function BovineDetailPage() {
     );
   }
 
-  const bovine = full.bovine;
+  // Backend D-01: la fuente canonica de los datos visibles del bovino es
+  // `full.profile` (mismo shape que GET /bovines/:id, con labels resueltos,
+  // clasificacion etaria y flags derivados). Mantenemos el alias local
+  // `bovine` para no tocar las ~60 referencias del JSX; las llamadas a
+  // `bovine.X` ahora leen del bloque profile.
+  //
+  // Si en el futuro necesitas datos crudos del modelo Sequelize que el
+  // profile no expone (p.ej. `healthSnapshot.activeCaseId`), accede a
+  // `full.bovine.X` directamente.
+  const bovine = full.profile;
   const currentLoc = full.currentLocation;
+  // Estado de vacunacion: leer del bloque dedicado (derivado, con statusLabel),
+  // NO de `profile.vaccinationStatus` que refleja la columna legacy de la
+  // tabla bovines y puede estar desactualizada (F-12).
   const vacStatus  = full.vaccinationStatus;
 
   // ── Handlers ─────────────────────────────────────────────────────────────
+  /**
+   * F-24 / Backend C-04: submit del modal "Marcar enfermo". Reusa
+   * `useMarkBovineSick` que pega contra POST /api/bovines/:id/sick. Si el
+   * backend rechaza por coherencia (poco probable porque guardamos local
+   * tambien con isClinicalDataValid), mapea MISSING_CLINICAL_DATA a errores
+   * por campo y deja el modal abierto.
+   */
+  function handleMarkSick() {
+    if (!markSickData) return;
+
+    // Guard local — espejo de C-03 del backend.
+    if (!isClinicalDataValid(markSickData)) {
+      const errs: Partial<Record<keyof InitialCaseInput, string>> = {};
+      if (!markSickData.diseaseId)   errs.diseaseId   = 'Selecciona la enfermedad.';
+      if (!markSickData.severity)    errs.severity    = 'Selecciona la severidad.';
+      if (!markSickData.diagnosedAt) errs.diagnosedAt = 'Captura la fecha de diagnóstico.';
+      setMarkSickErrors(errs);
+      return;
+    }
+
+    markSickMutation.mutate(
+      {
+        ...markSickData,
+        diagnosedBy: markSickData.diagnosedBy?.trim() || undefined,
+        notes:       markSickData.notes?.trim()       || undefined,
+      },
+      {
+        onSuccess: () => {
+          toast.success(
+            'Bovino marcado como enfermo',
+            'Se abrió un caso clínico y el estado de salud fue actualizado.',
+          );
+          setShowMarkSickModal(false);
+          setMarkSickData(null);
+          setMarkSickErrors({});
+        },
+        onError: (err: unknown) => {
+          const code = getErrorCode(err);
+          if (code === 'MISSING_CLINICAL_DATA') {
+            setMarkSickErrors({
+              diseaseId:   'Captura la enfermedad.',
+              severity:    'Captura la severidad.',
+              diagnosedAt: 'Captura la fecha de diagnóstico.',
+            });
+            toast.error(
+              'Faltan datos clínicos',
+              'Faltan datos clínicos: enfermedad, severidad y fecha de diagnóstico.',
+            );
+          } else {
+            toast.error('No se pudo marcar enfermo', getFriendlyMessage(err) || 'Error desconocido');
+          }
+        },
+      },
+    );
+  }
+
   function handleDelete() {
     deleteMutation.mutate(id!, {
       onSuccess: () => {
@@ -327,6 +431,31 @@ export function BovineDetailPage() {
     if (!moveLocationId) return;
     setMoveError(null);
 
+    // ── Bloqueo legal: período de retiro vigente ────────────────────────
+    // Si el bovino tiene medicamentos en withdrawal activo Y el motivo
+    // del movimiento implica salida hacia consumo humano (SALE) o salida
+    // del rancho (TRANSFER), bloqueamos el submit con un mensaje claro
+    // que explica las consecuencias legales.
+    //
+    // Excepción: si requireSaleAck === true, el operador ya marcó que
+    // asume responsabilidad explícita y deshabilitamos el bloqueo
+    // (escape hatch para casos especiales: necropsia, decomiso oficial,
+    // donación a planta de rendering, etc.). El registro queda en el log
+    // con el `notes` del movimiento para auditoría posterior.
+    if (
+      withdrawalStatus?.hasActiveWithdrawal &&
+      (moveReason === MovementReason.SALE || moveReason === MovementReason.TRANSFER) &&
+      !requireSaleAck
+    ) {
+      const isSale = moveReason === MovementReason.SALE;
+      setMoveError(
+        isSale
+          ? `BLOQUEADO: el bovino está en PERÍODO DE RETIRO con ${withdrawalStatus.activeCount} medicamento(s) activo(s). NO puede venderse para consumo humano hasta el ${new Date(withdrawalStatus.finalClearedAt!).toLocaleDateString('es-MX')}. Sus residuos farmacológicos pueden causar decomiso del lote y sanciones SENASICA/COFEPRIS. Marca la confirmación de responsabilidad abajo si aún así necesitas registrar este movimiento (necropsia, decomiso oficial, etc.).`
+          : `ADVERTENCIA: el bovino está en período de retiro. Si este TRANSFER es hacia un comprador o subasta, asegúrate de informar al destinatario. Apto para consumo a partir del ${new Date(withdrawalStatus.finalClearedAt!).toLocaleDateString('es-MX')}. Marca la confirmación abajo para continuar.`,
+      );
+      return;
+    }
+
     // Block submit when the picked GPS is outside the destination's boundary.
     if (moveCoordsOutside) {
       setMoveError(
@@ -335,6 +464,19 @@ export function BovineDetailPage() {
       );
       return;
     }
+
+    // Delego en la helper reutilizable para soportar el reintento con
+    // `forceOverride: true` desde el modal de confirmacion (F-20).
+    performMove(false);
+  }
+
+  /**
+   * F-20 / F-21: helper unico que dispara el mutate. `force=true` envia
+   * `forceOverride: true` para saltar la validacion de capacidad del backend
+   * (L-01) — solo se invoca desde el confirm modal tras un 409.
+   */
+  function performMove(force: boolean) {
+    if (!moveLocationId) return;
 
     moveMutation.mutate(
       {
@@ -345,10 +487,11 @@ export function BovineDetailPage() {
           movementType: moveMovementType,
           enteredAt: new Date().toISOString(),
           notes: moveNotes || undefined,
+          forceOverride: force || undefined,
         },
       },
       {
-        onSuccess: async () => {
+        onSuccess: async (result) => {
           // If the user picked new GPS coordinates, persist them on the bovine
           // record itself so the visual position (mini-map, map view, marker)
           // actually moves. The previous version only updated locationId,
@@ -368,7 +511,28 @@ export function BovineDetailPage() {
             }
           }
 
-          toast.success('Bovino movido', 'La ubicación fue actualizada correctamente.');
+          // F-21 / Backend L-04: usar el flag wasNoOp del envelope (no
+          // comparar client-side). El backend hace no-op cuando el destino
+          // coincide con la estancia activa actual; el FE antes inferia el
+          // caso comparando, pero estaba sujeto a estados stale (H-3).
+          if (result.wasNoOp) {
+            toast.info(
+              'Sin movimiento registrado',
+              moveCoords
+                ? 'El bovino ya estaba en este potrero. Solo se actualizó su posición GPS.'
+                : 'El bovino ya estaba en este potrero. No se registró ningún movimiento.',
+            );
+          } else if (force) {
+            // Caso especial F-20: el movimiento exitoso fue un forceOverride.
+            // Toast con warning para que quede claro que se excedio capacidad.
+            toast.warning(
+              'Bovino movido (capacidad excedida)',
+              'El movimiento se registró aunque el potrero está sobre su capacidad máxima. Acción auditada en el backend.',
+            );
+          } else {
+            toast.success('Bovino movido', 'La ubicación fue actualizada correctamente.');
+          }
+
           setShowMoveModal(false);
           setMoveLocationId(null);
           setMoveReason(MovementReason.TRANSFER);
@@ -376,8 +540,30 @@ export function BovineDetailPage() {
           setMoveNotes('');
           setMoveCoords(null);
           setMoveError(null);
+          setRequireSaleAck(false);
+          setForceOverridePrompt(null);
         },
         onError: (err: unknown) => {
+          // F-20 / Backend L-01: si el potrero esta lleno, abrir prompt de
+          // confirmacion en lugar de mostrar error inline. El usuario decide
+          // si reenvia con `forceOverride: true` (uso reservado para casos
+          // clinicos / emergencia). El backend audita la accion.
+          const code = getErrorCode(err);
+          if (code === 'BOVINE_LOCATION_FULL') {
+            // Extraer details del error si existen (axios envuelve en .response.data.details).
+            const details = (err as { response?: { data?: { details?: { currentOccupancy?: number; maxAnimals?: number } } } })
+              ?.response?.data?.details;
+            if (canMove && typeof details?.currentOccupancy === 'number' && typeof details?.maxAnimals === 'number') {
+              setForceOverridePrompt({
+                currentOccupancy: details.currentOccupancy,
+                maxAnimals:       details.maxAnimals,
+              });
+              // No setear moveError — el prompt es modal, no error inline.
+              return;
+            }
+            // Fallback si no hay details o el usuario no puede forzar:
+            // mostrar el mensaje del handler centralizado en el alert inline.
+          }
           // Centralized handler resolves BOVINE_LOCATION_FULL (with capacity
           // details), RANCH_MISMATCH (with ranch names), and falls back to
           // getFriendlyMessage for everything else.
@@ -466,14 +652,77 @@ export function BovineDetailPage() {
     }).catch(() => toast.error('No se pudo copiar', 'Tu navegador bloqueó el portapapeles'));
   }
 
-  const gradient = TYPE_GRADIENT[bovine.cattleType] ?? 'from-gray-400 to-gray-600';
-  const emoji    = TYPE_EMOJI[bovine.cattleType] ?? '🐄';
+  const gradient = getCattleTypeGradient(bovine.cattleType);
+  const emoji    = getCattleTypeEmoji(bovine.cattleType);
   const lat = bovine.location?.latitude;
   const lng = bovine.location?.longitude;
   const hasCoords = lat != null && lng != null && !(lat === 0 && lng === 0);
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
+      {/* ── ALERTA LEGAL DE PERÍODO DE RETIRO ────────────────────────────
+          Si el bovino tiene medicamentos en withdrawal activo, se muestra
+          ANTES del header. Imposible de ignorar (rojo, ancho completo).
+          Si no hay retiro, no se renderiza (el chip "Apto" lo agregamos
+          junto a los badges del header, no aquí — aquí solo gritamos
+          cuando hay riesgo legal real). */}
+      <WithdrawalStatusBanner
+        status={withdrawalStatus}
+        isLoading={isLoadingWithdrawal}
+      />
+
+      {/* F-28 / Backend X-03: banner persistente cuando el bovino esta
+          fallecido. Toda la accion del detail page sigue visible en modo
+          de solo-consulta visual (el backend ya bloquea mutaciones
+          imposibles: vacunar, mover, enfermar a un bovino DECEASED). */}
+      {full.death && (
+        <div className="rounded-xl bg-gradient-to-r from-gray-800 to-gray-900 dark:from-gray-900 dark:to-gray-950 border border-gray-700 dark:border-gray-800 px-4 py-3 flex items-start gap-3 shadow-md">
+          <div className="w-10 h-10 rounded-lg bg-gray-700/50 flex items-center justify-center shrink-0">
+            <Skull className="w-5 h-5 text-gray-200" />
+          </div>
+          <div className="flex-1 min-w-0 text-gray-100">
+            <p className="text-sm font-semibold flex items-center gap-2 flex-wrap">
+              <span>Bovino fallecido</span>
+              <span className="text-[11px] font-normal px-1.5 py-0.5 rounded bg-gray-700/70 text-gray-300">
+                {full.death.causeLabel}
+              </span>
+              {full.death.necropsyPerformed && (
+                <span className="text-[11px] font-normal px-1.5 py-0.5 rounded bg-emerald-700/40 text-emerald-200">
+                  Necropsia realizada
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-gray-300 mt-0.5 flex items-center gap-2 flex-wrap">
+              <span>
+                <Calendar className="inline w-3 h-3 mr-1 -mt-0.5" />
+                Fecha de muerte: <strong>{formatDate(full.death.deathDate)}</strong>
+              </span>
+              {full.death.weightAtDeath != null && (
+                <span>
+                  <Weight className="inline w-3 h-3 mr-1 -mt-0.5" />
+                  {full.death.weightAtDeath} kg
+                </span>
+              )}
+              {full.death.diseaseCaseId && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/health/cases/${full.death!.diseaseCaseId}`)}
+                  className="inline-flex items-center gap-1 text-sky-300 hover:text-sky-200 hover:underline"
+                  title="Ver caso clínico relacionado"
+                >
+                  Ver caso clínico
+                </button>
+              )}
+            </p>
+            {full.death.notes && (
+              <p className="text-[11px] text-gray-400 italic mt-1 line-clamp-2">
+                "{full.death.notes}"
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Header ───────────────────────────────────────────────────────── */}
       <div className="flex items-start gap-3">
         <button
@@ -506,10 +755,29 @@ export function BovineDetailPage() {
                   : bovine.genderLabel}
             </Badge>
             <HealthStatusBadge status={bovine.healthStatus as any} />
-            <Badge variant={VAC_STATUS_VARIANT[bovine.vaccinationStatus]}>
+            {riskScore && (
+              <span
+                title={riskScore.factors.map((f) => `${f.factor}: +${f.points}`).join('\n')}
+                className={cn(
+                  'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold cursor-help',
+                  riskScore.level === 'LOW'      && 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400',
+                  riskScore.level === 'MEDIUM'   && 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
+                  riskScore.level === 'HIGH'     && 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400',
+                  riskScore.level === 'CRITICAL' && 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
+                )}
+              >
+                <ShieldCheck className="w-3 h-3" />
+                Riesgo: {riskScore.riskScore}/100
+              </span>
+            )}
+            {/* F-12: el badge de vacunacion lee del bloque dedicado
+                `vaccinationStatus` (derivado, con statusLabel embebido),
+                NO de `profile.vaccinationStatus` que es la columna legacy
+                de la tabla bovines y puede estar desactualizada. */}
+            <Badge variant={getVaccinationStatusVariant(vacStatus.status)}>
               <span className="inline-flex items-center gap-1">
                 <Syringe className="w-3 h-3" />
-                {VAC_STATUS_LABEL[bovine.vaccinationStatus]}
+                {vacStatus.statusLabel || getVaccinationStatusLabel(vacStatus.status)}
               </span>
             </Badge>
           </div>
@@ -536,6 +804,27 @@ export function BovineDetailPage() {
               QR
             </Button>
           )}
+          {/* F-24 / Backend C-04: "Marcar enfermo" solo se ofrece para
+              bovinos sanos/desconocidos. Si el bovino ya esta en SICK,
+              RECOVERING o QUARANTINE, gestionar el caso desde el modulo
+              Salud (donde estan los flujos de cierre/tratamiento). El
+              boton se gatea con el mismo permiso que editar (canEdit). */}
+          {canEdit && (bovine.healthStatus === 'HEALTHY' || bovine.healthStatus === 'UNKNOWN') && (
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<Activity className="w-3.5 h-3.5" />}
+              onClick={() => {
+                setShowMarkSickModal(true);
+                setMarkSickData(null);
+                setMarkSickErrors({});
+                markSickMutation.reset();
+              }}
+              title="Abrir caso clínico inicial para este bovino"
+            >
+              Marcar enfermo
+            </Button>
+          )}
           {canMove && (
             <Button size="sm" variant="outline" icon={<MoveRight className="w-3.5 h-3.5" />} onClick={() => setShowMoveModal(true)}>
               Mover
@@ -544,6 +833,20 @@ export function BovineDetailPage() {
           {canEdit && (
             <Button size="sm" variant="outline" icon={<Edit className="w-3.5 h-3.5" />} onClick={() => navigate(`/bovines/${id}/edit`)}>
               Editar
+            </Button>
+          )}
+          {/* F-25 / Backend X-03: "Registrar muerte" gated por MANAGE_BOVINE
+              (canEdit). Solo visible si el bovino NO esta ya fallecido —
+              el backend devuelve 409 ALREADY_DECEASED si se intentara. */}
+          {canEdit && !full.death && bovine.healthStatus !== 'DECEASED' && (
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<Skull className="w-3.5 h-3.5" />}
+              onClick={() => setShowDeathModal(true)}
+              title="Registrar la muerte / baja del bovino"
+            >
+              Registrar muerte
             </Button>
           )}
           {canDelete && (
@@ -573,8 +876,70 @@ export function BovineDetailPage() {
             <InfoRow label="Arete">{bovine.earTag}</InfoRow>
             {bovine.name && <InfoRow label="Nombre">{bovine.name}</InfoRow>}
             <InfoRow label="Tipo">{bovine.cattleTypeLabel}</InfoRow>
+            {/* Clasificacion derivada (Backend B-05): label gendered ("Vaca",
+                "Becerra", "Novillo"...). Solo se muestra cuando el backend
+                la calculo (bovinos serializados post-B-05); para los demas
+                la fila "Tipo" sigue siendo el dato canonico. */}
+            {bovine.classificationLabel && (
+              <InfoRow label="Clasificación">
+                <span className="inline-flex items-center gap-2 flex-wrap">
+                  <span>{bovine.classificationLabel}</span>
+                  {bovine.isReproductiveAge && (
+                    <span
+                      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                      title="Edad reproductiva alcanzada"
+                    >
+                      Edad reproductiva
+                    </span>
+                  )}
+                </span>
+              </InfoRow>
+            )}
             <InfoRow label="Raza">{bovine.breed}</InfoRow>
             <InfoRow label="Sexo">{bovine.genderLabel}</InfoRow>
+            {/* F-17 / Backend G-05: genealogia. `profile.mother` y `profile.father`
+                vienen siempre en /full cuando estan asignados (mini-objetos con
+                id+earTag+name+gender+breed). Solo renderizar la fila cuando hay
+                referencia; sin valor no se muestra placeholder para no saturar
+                el card. Click navega al detalle del padre. */}
+            {bovine.mother && (
+              <InfoRow label="Madre">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/bovines/${bovine.mother!.id}`)}
+                  className="text-primary-600 dark:text-primary-400 hover:underline inline-flex items-center gap-1.5"
+                  title={`Ver detalle de ${bovine.mother.name || bovine.mother.earTag}`}
+                >
+                  <Venus className="w-3 h-3" />
+                  <span className="font-mono">{bovine.mother.earTag}</span>
+                  {bovine.mother.name && (
+                    <span className="text-gray-500 dark:text-gray-400">· {bovine.mother.name}</span>
+                  )}
+                  {bovine.mother.breed && (
+                    <span className="text-xs text-gray-400 ml-1">({bovine.mother.breed})</span>
+                  )}
+                </button>
+              </InfoRow>
+            )}
+            {bovine.father && (
+              <InfoRow label="Padre">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/bovines/${bovine.father!.id}`)}
+                  className="text-primary-600 dark:text-primary-400 hover:underline inline-flex items-center gap-1.5"
+                  title={`Ver detalle de ${bovine.father.name || bovine.father.earTag}`}
+                >
+                  <Mars className="w-3 h-3" />
+                  <span className="font-mono">{bovine.father.earTag}</span>
+                  {bovine.father.name && (
+                    <span className="text-gray-500 dark:text-gray-400">· {bovine.father.name}</span>
+                  )}
+                  {bovine.father.breed && (
+                    <span className="text-xs text-gray-400 ml-1">({bovine.father.breed})</span>
+                  )}
+                </button>
+              </InfoRow>
+            )}
             <InfoRow label="Nacimiento">
               {bovine.birthDate ? formatDate(bovine.birthDate) : '—'} · {bovine.ageDisplay}
               {bovine.isAdult && <Badge variant="default" className="ml-2">Adulto</Badge>}
@@ -722,12 +1087,12 @@ export function BovineDetailPage() {
 
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Badge variant={VAC_STATUS_VARIANT[vacStatus.status]}>
+              <Badge variant={getVaccinationStatusVariant(vacStatus.status)}>
                 <span className="inline-flex items-center gap-1 text-sm font-semibold">
                   {vacStatus.status === 'UP_TO_DATE'
                     ? <ShieldCheck className="w-3.5 h-3.5" />
                     : <Syringe className="w-3.5 h-3.5" />}
-                  {VAC_STATUS_LABEL[vacStatus.status]}
+                  {vacStatus.statusLabel || getVaccinationStatusLabel(vacStatus.status)}
                 </span>
               </Badge>
               <div className="text-xs text-gray-500">
@@ -816,7 +1181,7 @@ export function BovineDetailPage() {
           {activeTab === 'health' && <BovineHealthTab bovineId={id!} />}
           {activeTab === 'treatments' && <BovineTreatmentsTab bovineId={id!} />}
           {activeTab === 'vaccinations' && (
-            <BovineVaccinationsTab bovineId={id!} vaccinationStatus={bovine.vaccinationStatus} />
+            <BovineVaccinationsTab bovineId={id!} vaccinationStatus={vacStatus.status} />
           )}
           {activeTab === 'location_history' && <BovineLocationHistoryTab bovineId={id!} />}
           {activeTab === 'media' && <MediaGallery entityType="bovine" entityId={id!} />}
@@ -885,7 +1250,7 @@ export function BovineDetailPage() {
       {/* Move location */}
       <Modal
         open={showMoveModal}
-        onClose={() => { setShowMoveModal(false); setMoveError(null); }}
+        onClose={() => { setShowMoveModal(false); setMoveError(null); setRequireSaleAck(false); }}
         title="Mover bovino a otro potrero"
         size="lg"
       >
@@ -901,6 +1266,12 @@ export function BovineDetailPage() {
             }}
             ranchId={bovine.ranchId}
             placeholder="Selecciona el potrero..."
+            // F-13 / Backend M-01: deshabilitar visualmente el potrero donde
+            // el bovino ya esta. El backend tambien hace no-op si lo intentan
+            // bypass-ear; aqui solo mejoramos UX para que el caso ni se
+            // presente.
+            disabledIds={currentLoc.location?.id ? [currentLoc.location.id] : undefined}
+            disabledHint="Ubicación actual"
           />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -913,7 +1284,14 @@ export function BovineDetailPage() {
               </label>
               <select
                 value={moveReason}
-                onChange={(e) => setMoveReason(e.target.value as MovementReason)}
+                onChange={(e) => {
+                  setMoveReason(e.target.value as MovementReason);
+                  // Reset del ack al cambiar reason — si pasan de SALE a
+                  // MEDICAL y vuelven, no queremos que el checkbox quede
+                  // "encendido" sin contexto. Forzamos re-consentimiento.
+                  setRequireSaleAck(false);
+                  setMoveError(null);
+                }}
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
               >
                 <option value={MovementReason.TRANSFER}>Traslado</option>
@@ -956,6 +1334,56 @@ export function BovineDetailPage() {
             />
           </div>
 
+          {/* ── BLOQUEO LEGAL POR PERÍODO DE RETIRO ─────────────────────────
+              Aparece SOLO si el bovino tiene retiro activo Y el reason es
+              SALE o TRANSFER. Explica las consecuencias legales y ofrece
+              al operador un escape hatch explícito ("acuso recibo y asumo
+              responsabilidad") para casos legítimos como necropsia o
+              decomiso oficial. La marca queda registrada en `moveNotes`
+              para auditoría sanitaria posterior. */}
+          {withdrawalStatus?.hasActiveWithdrawal &&
+            (moveReason === MovementReason.SALE || moveReason === MovementReason.TRANSFER) && (
+              <div className="rounded-lg border-2 border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-red-800 dark:text-red-200">
+                      {moveReason === MovementReason.SALE
+                        ? 'No se puede vender este bovino: período de retiro activo'
+                        : 'Movimiento delicado: bovino en período de retiro'}
+                    </p>
+                    <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+                      Apto para consumo humano a partir del{' '}
+                      <strong className="whitespace-nowrap">
+                        {new Date(withdrawalStatus.finalClearedAt!).toLocaleDateString('es-MX', {
+                          day: '2-digit', month: 'long', year: 'numeric',
+                        })}
+                      </strong>
+                      . Hay {withdrawalStatus.activeCount}{' '}
+                      medicamento(s) con residuos activos en el animal —
+                      enviar a matadero, subasta o procesadora ahora puede
+                      causar decomiso del lote y sanciones SENASICA/COFEPRIS.
+                    </p>
+                  </div>
+                </div>
+                <label className="flex items-start gap-2 pt-2 border-t border-red-200/60 dark:border-red-800/40 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 w-4 h-4 rounded text-red-600 focus:ring-red-500"
+                    checked={requireSaleAck}
+                    onChange={(e) => setRequireSaleAck(e.target.checked)}
+                  />
+                  <span className="text-xs text-red-800 dark:text-red-200">
+                    <strong>Acuso recibo y asumo la responsabilidad legal.</strong>{' '}
+                    Confirmo que conozco el período de retiro activo del animal y
+                    que este movimiento corresponde a un caso especial (necropsia,
+                    decomiso oficial, donación a rendering, traslado interno, etc.).
+                    Anota el motivo en las notas arriba para auditoría.
+                  </span>
+                </label>
+              </div>
+            )}
+
           {/* GPS picker — lets the user update the bovine's coordinates
               alongside the potrero change. Without this, the visual position
               on the mini-map / map view does NOT move and stays stale. The
@@ -982,12 +1410,25 @@ export function BovineDetailPage() {
           {moveError && <Alert variant="error">{moveError}</Alert>}
 
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => { setShowMoveModal(false); setMoveError(null); }}>
+            <Button variant="outline" onClick={() => { setShowMoveModal(false); setMoveError(null); setRequireSaleAck(false); }}>
               Cancelar
             </Button>
             <Button
               icon={<MoveRight className="w-4 h-4" />}
-              disabled={!moveLocationId || moveMutation.isPending || moveCoordsOutside}
+              disabled={
+                !moveLocationId
+                || moveMutation.isPending
+                || moveCoordsOutside
+                // Deshabilita Confirmar mientras haya bloqueo legal sin
+                // acknowledgement. El bovino en retiro NO se puede mover
+                // a SALE/TRANSFER sin que el operador marque el checkbox
+                // de responsabilidad.
+                || (
+                  withdrawalStatus?.hasActiveWithdrawal === true
+                  && (moveReason === MovementReason.SALE || moveReason === MovementReason.TRANSFER)
+                  && !requireSaleAck
+                )
+              }
               loading={moveMutation.isPending}
               onClick={handleMove}
               title={moveCoordsOutside
@@ -1029,6 +1470,145 @@ export function BovineDetailPage() {
           </div>
         </div>
       </Modal>
+
+      {/* F-25 / F-26 / Backend X-03: modal de registro de muerte. Tiene su
+          propio toast + manejo de errores; aqui solo lo orquestamos con el
+          estado local del detail page. */}
+      <DeathRegistrationModal
+        open={showDeathModal}
+        onClose={() => setShowDeathModal(false)}
+        bovineId={id!}
+        bovineEarTag={bovine.earTag}
+        bovineName={bovine.name}
+        ranchId={bovine.ranchId}
+        // Si hay un caso activo y la causa elegida es DISEASE, el modal lo
+        // preseleccionara automaticamente (el form envia diseaseCaseId).
+        activeCaseId={(full.bovine as { healthSnapshot?: { activeCaseId?: string | null } }).healthSnapshot?.activeCaseId ?? null}
+        currentLocationId={currentLoc.location?.id ?? null}
+      />
+
+      {/* F-24 / Backend C-04: modal "Marcar enfermo". Reusa
+          ClinicalDataForm (el mismo que el wizard de alta usa en F-22)
+          para mantener UX consistente y un solo lugar de validacion. */}
+      <Modal
+        open={showMarkSickModal}
+        onClose={() => {
+          if (markSickMutation.isPending) return; // evitar cerrar durante request
+          setShowMarkSickModal(false);
+          setMarkSickData(null);
+          setMarkSickErrors({});
+          markSickMutation.reset();
+        }}
+        title={`Marcar como enfermo a ${bovine.name || bovine.earTag}`}
+        size="lg"
+      >
+        <div className="space-y-4">
+          <Alert variant="warning">
+            <p className="font-medium">Se abrirá un caso clínico inicial.</p>
+            <p className="mt-1 text-xs">
+              El estado de salud del bovino y su snapshot serán actualizados
+              automáticamente. El cierre del caso (recuperación / fallecimiento)
+              se gestiona desde el módulo Salud.
+            </p>
+          </Alert>
+
+          <ClinicalDataForm
+            value={markSickData}
+            onChange={(v) => {
+              setMarkSickData(v);
+              setMarkSickErrors({});
+            }}
+            errors={markSickErrors}
+            compact
+            title="Datos clínicos iniciales"
+            subtitle="Captura la enfermedad y severidad; los síntomas son opcionales."
+          />
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={markSickMutation.isPending}
+              onClick={() => {
+                setShowMarkSickModal(false);
+                setMarkSickData(null);
+                setMarkSickErrors({});
+                markSickMutation.reset();
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              icon={<Activity className="w-4 h-4" />}
+              loading={markSickMutation.isPending}
+              onClick={handleMarkSick}
+            >
+              Abrir caso clínico
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* F-20 / Backend L-01: confirm modal de forceOverride cuando el
+          potrero destino esta lleno. Solo se abre tras un 409, y solo si
+          el usuario tiene permiso para mover (canMove). El backend audita
+          cualquier forceOverride aceptado. */}
+      <Modal
+        open={!!forceOverridePrompt}
+        onClose={() => setForceOverridePrompt(null)}
+        title="Potrero al máximo de capacidad"
+        size="sm"
+      >
+        {forceOverridePrompt && (
+          <div className="space-y-4">
+            <Alert variant="warning">
+              <p className="font-medium">
+                El potrero destino está al {Math.round((forceOverridePrompt.currentOccupancy / Math.max(forceOverridePrompt.maxAnimals, 1)) * 100)}% de su capacidad.
+              </p>
+              <p className="mt-1 text-xs">
+                Ocupación actual: <strong>{forceOverridePrompt.currentOccupancy}</strong> de <strong>{forceOverridePrompt.maxAnimals}</strong> bovinos.
+              </p>
+            </Alert>
+
+            <div className="text-sm text-gray-700 dark:text-gray-300 space-y-2">
+              <p>
+                Si forzas el movimiento, el bovino se asignará al potrero aunque
+                exceda el límite recomendado. Usa esta opción solo para casos
+                excepcionales:
+              </p>
+              <ul className="list-disc list-inside text-xs text-gray-500 dark:text-gray-400 ml-2 space-y-0.5">
+                <li>Cuarentena clínica urgente</li>
+                <li>Parto inminente sin alternativa</li>
+                <li>Decomiso oficial / emergencia sanitaria</li>
+                <li>Reagrupación temporal previa a traslado</li>
+              </ul>
+              <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+                La acción quedará registrada en la auditoría del backend.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setForceOverridePrompt(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                loading={moveMutation.isPending}
+                onClick={() => performMove(true)}
+              >
+                Forzar movimiento
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -1042,7 +1622,10 @@ function InfoTabContent({
   full: BovineFullResponse;
   onNavigate: (bovineId: string) => void;
 }) {
-  const { bovine, recentHealthRecords, recentMovements } = full;
+  // Backend D-01: leemos del bloque `profile` (labels normalizados +
+  // clasificacion + flags derivados). Alias local `bovine` por compat con
+  // el JSX existente.
+  const { profile: bovine, recentHealthRecords, recentMovements } = full;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

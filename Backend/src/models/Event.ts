@@ -27,7 +27,10 @@ export enum EventType {
   // Movimiento (programados)
   MOVEMENT = 'MOVEMENT',                  // Movimiento programado
   QUARANTINE = 'QUARANTINE',              // Cuarentena programada
-  
+
+  // Hitos del ciclo de vida (registrados, no programados)
+  DEATH = 'DEATH',                        // Muerte / baja por fallecimiento (Módulo 8)
+
   // Generales
   OTHER = 'OTHER'
 }

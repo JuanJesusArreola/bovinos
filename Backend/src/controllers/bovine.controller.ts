@@ -1,6 +1,7 @@
 // controllers/bovine.controller.ts
 import { Request, Response } from 'express';
 import { bovineService } from '../services/BovineService';
+import { bovineDeathService } from '../services/BovineDeathService';
 import { BovineError } from '../utils/BovineErrors';
 import logger from '../utils/logger';
 
@@ -13,11 +14,61 @@ export class BovineController {
         this.listBovines = this.listBovines.bind(this);
         this.getBovineById = this.getBovineById.bind(this);
         this.createBovine = this.createBovine.bind(this);
+        this.markSick = this.markSick.bind(this);
+        this.decease = this.decease.bind(this);
+        this.getMortalityReport = this.getMortalityReport.bind(this);
         this.updateBovine = this.updateBovine.bind(this);
         this.deleteBovine = this.deleteBovine.bind(this);
         this.getBovineByEarTag = this.getBovineByEarTag.bind(this);
         this.getStatistics = this.getStatistics.bind(this);
         this.regenerateQR = this.regenerateQR.bind(this);
+    }
+
+    /**
+     * POST /api/bovines/:id/decease  (X-03)
+     * Registra la muerte/baja de un bovino.
+     */
+    async decease(req: Request, res: Response): Promise<void> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                res.status(401).json({ success: false, error: 'Usuario no autenticado' });
+                return;
+            }
+            const { id } = req.params;
+            const death = await bovineDeathService.deceaseBovine(id, req.body, userId);
+            res.status(201).json({ success: true, data: death, message: 'Baja por muerte registrada' });
+        } catch (error) {
+            logger.error('Error en decease', this.context, { id: req.params.id, body: req.body }, error as Error);
+            if (error instanceof BovineError) {
+                res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+            } else {
+                res.status(500).json({ success: false, error: 'Error interno del servidor' });
+            }
+        }
+    }
+
+    /**
+     * GET /api/ranches/:ranchId/mortality  (X-07)
+     * Reporte de mortalidad por causa | mes | ubicación.
+     */
+    async getMortalityReport(req: Request, res: Response): Promise<void> {
+        try {
+            const { ranchId } = req.params;
+            const report = await bovineDeathService.getMortalityReport(ranchId, {
+                from: req.query.from ? new Date(req.query.from as string) : undefined,
+                to: req.query.to ? new Date(req.query.to as string) : undefined,
+                groupBy: req.query.groupBy as 'cause' | 'month' | 'location' | undefined,
+            });
+            res.json({ success: true, data: report });
+        } catch (error) {
+            logger.error('Error en getMortalityReport', this.context, { params: req.params, query: req.query }, error as Error);
+            if (error instanceof BovineError) {
+                res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+            } else {
+                res.status(500).json({ success: false, error: 'Error interno del servidor' });
+            }
+        }
     }
 
     /**
@@ -41,7 +92,8 @@ export class BovineController {
                 : undefined;
 
             const filters = {
-                searchTerm: req.query.search as string,
+                // F-1: el parámetro de búsqueda es `searchTerm` (alineado con el validador).
+                searchTerm: req.query.searchTerm as string,
                 cattleType: req.query.cattleType as any,
                 breed: req.query.breed as string,
                 gender: req.query.gender as any,
@@ -51,10 +103,13 @@ export class BovineController {
                 ranchIds, // multi-rancho (CSV → string[])
                 locationId: req.query.locationId as string, // ubicación actual (stay activa)
                 ownerId: req.query.ownerId as string,
-                ageRange: req.query.ageMin && req.query.ageMax ? {
-                    min: parseInt(req.query.ageMin as string),
-                    max: parseInt(req.query.ageMax as string)
+                // B-02: edad en MESES con rangos abiertos (basta con ageMin O ageMax).
+                ageRange: (req.query.ageMin !== undefined || req.query.ageMax !== undefined) ? {
+                    min: req.query.ageMin !== undefined ? parseInt(req.query.ageMin as string, 10) : undefined,
+                    max: req.query.ageMax !== undefined ? parseInt(req.query.ageMax as string, 10) : undefined
                 } : undefined,
+                // Preset de grupo etario: calf | young | adult (se resuelve a meses)
+                ageGroup: req.query.ageGroup as any,
                 weightRange: req.query.weightMin && req.query.weightMax ? {
                     min: parseInt(req.query.weightMin as string),
                     max: parseInt(req.query.weightMax as string)
@@ -64,6 +119,19 @@ export class BovineController {
                     : req.query.isPregnant === 'false'
                         ? false
                         : undefined,
+                disease: req.query.disease as string,
+                diseaseId: req.query.diseaseId as string,
+                // G-03: candidatos genealógicos
+                excludeIds: req.query.excludeIds
+                    ? (req.query.excludeIds as string).split(',').map((s) => s.trim()).filter(Boolean)
+                    : undefined,
+                purpose: req.query.purpose as 'dam' | 'sire' | undefined,
+                // F-30: visibilidad de inactivos / fallecidos
+                isActive: req.query.isActive === 'true' ? true
+                    : req.query.isActive === 'false' ? false
+                    : undefined,
+                includeInactive: req.query.includeInactive === 'true',
+                exitReason: req.query.exitReason as any,
             };
 
             // Whitelist de campos permitidos para ordenar (nombres de columnas reales)
@@ -86,11 +154,17 @@ export class BovineController {
 
             const result = await bovineService.getBovines(filters, pagination, userId);
 
+            // H-2: enriquecer cada bovino del listado con los campos formateados
+            // (classificationLabel, isReproductiveAge, labels, ageDisplay) SIN perder
+            // los campos crudos que el front ya consumía → merge no-breaking.
             res.json({
                 success: true,
                 data: {
-                    bovines: result.bovines,
-                    pagination: result.pagination 
+                    bovines: result.bovines.map((b) => ({
+                        ...(b.toJSON() as object),
+                        ...bovineService.formatBovineResponse(b),
+                    })),
+                    pagination: result.pagination
                 }
             });
 
@@ -128,7 +202,11 @@ export class BovineController {
                 return;
             }
 
-            const bovine = await bovineService.getBovineById(id, userId);
+            // G-05: ?include=parents → eager-load madre/padre
+            const includeParents = typeof req.query.include === 'string'
+                && req.query.include.split(',').map((s) => s.trim()).includes('parents');
+
+            const bovine = await bovineService.getBovineById(id, userId, { includeParents });
 
             if (!bovine) {
                 res.status(404).json({
@@ -199,6 +277,34 @@ export class BovineController {
                     success: false,
                     error: 'Error interno del servidor'
                 });
+            }
+        }
+    }
+
+    /**
+     * POST /api/bovines/:id/sick  (C-04)
+     * Marca enfermo a un bovino existente abriendo un caso clínico.
+     */
+    async markSick(req: Request, res: Response): Promise<void> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                res.status(401).json({ success: false, error: 'Usuario no autenticado' });
+                return;
+            }
+            const { id } = req.params;
+            const diseaseCase = await bovineService.markBovineSick(id, req.body, userId);
+            res.status(201).json({
+                success: true,
+                data: diseaseCase,
+                message: 'Bovino marcado como enfermo (caso clínico abierto)'
+            });
+        } catch (error) {
+            logger.error('Error en markSick', this.context, { id: req.params.id, body: req.body }, error as Error);
+            if (error instanceof BovineError) {
+                res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+            } else {
+                res.status(500).json({ success: false, error: 'Error interno del servidor' });
             }
         }
     }

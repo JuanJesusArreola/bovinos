@@ -125,6 +125,8 @@ export interface Diagnosis {
   basedOn?: string[];           // En qué se basa el diagnóstico
   prognosis?: 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR' | 'GRAVE'; // Pronóstico
   actualRecoveryTime?: number; // Tiempo esperado de recuperación (días)
+  confirmedAt?: Date | string;   // Fecha de confirmación (se sella al confirmar)
+  confirmedBy?: string;          // Usuario que confirmó el diagnóstico
 }
 
 // Interface para tratamientos
@@ -225,6 +227,9 @@ export interface HealthAttributes {
   // Relación OPCIONAL con el evento que lo generó
   eventId?: string;  // Para trazabilidad
 
+  // Relación OPCIONAL con el catálogo de enfermedades
+  diseaseId?: string;  // FK a diseases.id
+
   // Datos del registro
   recordType: HealthRecordType;
   recordDate: Date;  // Cuándo ocurrió realmente
@@ -305,7 +310,7 @@ export interface HealthAttributes {
 // Atributos opcionales al crear un nuevo registro de salud
 export interface HealthCreationAttributes
   extends Optional<HealthAttributes,
-    'id' | 'eventId' | 'veterinarianId' | 'veterinarianName' | 'veterinarianLicense' |
+    'id' | 'eventId' | 'diseaseId' | 'veterinarianId' | 'veterinarianName' | 'veterinarianLicense' |
     'technicianId' | 'location' | 'chiefComplaint' | 'historyPresent' | 'historyPast' |
     'vitalSigns' | 'physicalExam' | 'symptoms' | 'treatment' | 'laboratoryResults' |
     'nutritionalAssessment' | 'reproductiveAssessment' | 'recommendations' |
@@ -320,6 +325,7 @@ class Health extends Model<HealthAttributes, HealthCreationAttributes>
   public id!: string;
   public bovineId!: string;
   public eventId?: string;
+  public diseaseId?: string;
   public recordType!: HealthRecordType;
   public recordDate!: Date;
   public veterinarianId?: string;
@@ -390,6 +396,13 @@ Health.init(
       allowNull: true,
       references: { model: 'events', key: 'id' },
       comment: 'ID del evento que generó este registro (opcional)'
+    },
+    diseaseId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: 'diseases', key: 'id' },
+      onDelete: 'SET NULL',
+      comment: 'FK opcional al catálogo canónico de enfermedades'
     },
     recordType: {
       type: DataTypes.ENUM(...Object.values(HealthRecordType)),

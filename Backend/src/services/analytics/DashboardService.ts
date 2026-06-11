@@ -590,7 +590,7 @@ export class DashboardService {
         since: Date
     ): Promise<HealthDashboard['recentHealthEvents']> {
         try {
-            const [users] = await sequelize.query(`
+            const users = await sequelize.query(`
             SELECT id FROM users 
             WHERE is_active = true 
             AND status = 'ACTIVE'
@@ -1213,7 +1213,7 @@ export class DashboardService {
                 attributes: [
                     'id', 'email', 'username', 'role', 'status',
                     'isActive', 'emailVerified', 'lastLoginAt',
-                    'createdAt', 'personalInfo', 'ranchAccess'
+                    'created_at', 'personalInfo', 'ranchAccess'
                 ]
             });
 
@@ -1288,7 +1288,7 @@ export class DashboardService {
                 attributes: [
                     'id', 'email', 'username', 'role', 'status',
                     'isActive', 'emailVerified', 'lastLoginAt',
-                    'createdAt', 'personalInfo', 'ranchAccess'
+                    'created_at', 'personalInfo', 'ranchAccess'
                 ]
             });
 

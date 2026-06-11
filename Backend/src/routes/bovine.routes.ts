@@ -66,6 +66,18 @@ router.get(
 );
 
 /**
+ * GET /api/bovines/filters/active-diseases
+ * Devuelve solo las enfermedades con al menos un caso activo en los ranchos
+ * accesibles del usuario. Cache 5min por combinación de ranchos.
+ * Debe ir ANTES de /:id para no chocar con la ruta paramétrica.
+ */
+router.get(
+    '/filters/active-diseases',
+    authenticateToken,
+    bovineFiltersController.getActiveDiseases
+);
+
+/**
  * GET /api/bovines/:id
  * Obtiene un bovino por su ID
  */
@@ -99,6 +111,30 @@ router.post(
     ...createBovineSchema,
     runValidation,
     bovineController.createBovine
+);
+
+/**
+ * POST /api/bovines/:id/sick  (C-04)
+ * Marca enfermo a un bovino existente (abre un caso clínico).
+ */
+router.post(
+    '/:id/sick',
+    authenticateToken,
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.VETERINARIAN),
+    validateId('id'),
+    bovineController.markSick
+);
+
+/**
+ * POST /api/bovines/:id/decease  (X-03)
+ * Registra la muerte/baja de un bovino. Permiso de gestión.
+ */
+router.post(
+    '/:id/decease',
+    authenticateToken,
+    authorizeRoles(UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.VETERINARIAN),
+    validateId('id'),
+    bovineController.decease
 );
 
 /**

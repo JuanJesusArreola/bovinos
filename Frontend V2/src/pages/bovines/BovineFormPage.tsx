@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
@@ -25,7 +25,8 @@ import { FileUpload } from '@/components/ui/FileUpload';
 import { cn } from '@/utils/cn';
 import { getErrorCode, getFriendlyMessage, ErrorCodes, getBovineErrorMessage } from '@/utils/errorHandler';
 import type { BovineFormData } from '@/types';
-import type { BovineMediaItemResponse } from '@/types/bovine.dtos';
+import type { BovineMediaItemResponse, InitialCaseInput } from '@/types/bovine.dtos';
+import { ClinicalDataForm, isClinicalDataValid } from '@/components/bovines/ClinicalDataForm';
 import {
   ArrowLeft, ArrowRight, Check, Tag, HeartPulse, MapPin,
   Save, Camera, X, ChevronDown, ChevronUp, Users,
@@ -71,7 +72,8 @@ const bovineSchema = z.object({
     z.coerce.number().min(1, 'Mínimo 1 kg').max(2000, 'Máximo 2000 kg').optional(),
   ),
   healthStatus: z.string().optional().or(z.literal('')),
-  vaccinationStatus: z.string().optional().or(z.literal('')),
+  // F-31 / Backend P-02: `vaccinationStatus` removido del schema. El campo
+  // ya no es captura manual ni se envia al backend. El UI tampoco lo expone.
   motherId: z.string().optional().or(z.literal('')),
   fatherId: z.string().optional().or(z.literal('')),
   acquisitionDate: z.string().optional().or(z.literal('')),
@@ -160,13 +162,9 @@ const healthStatusOptions = [
   { value: 'UNKNOWN', label: 'Desconocido' },
 ];
 
-const vaccinationStatusOptions = [
-  { value: '', label: 'Sin especificar' },
-  { value: 'UP_TO_DATE', label: 'Al Día' },
-  { value: 'PENDING', label: 'Pendiente' },
-  { value: 'OVERDUE', label: 'Atrasado' },
-  { value: 'NONE', label: 'Sin Vacunas' },
-];
+// F-31 / Backend P-02: `vaccinationStatusOptions` eliminado — el form
+// ya no tiene el select de "Estado de vacunacion". El estado real se
+// gestiona via el tab Vacunacion del detalle.
 
 /**
  * Motivos disponibles para el PRIMER registro de entrada a un potrero al crear
@@ -282,6 +280,17 @@ export function BovineFormPage() {
   const [showAcquisition, setShowAcquisition] = useState(false);
   const [showGps, setShowGps] = useState(false);
 
+  // F-22 / Backend C-01: bloque clinico inicial. Vive como state local
+  // (NO en RHF) porque su shape es complejo y se hidrata desde un
+  // componente controlado (ClinicalDataForm). Se envia en `initialCase`
+  // del payload de create cuando `healthStatus` es enfermo.
+  const [initialCase, setInitialCase] = useState<InitialCaseInput | null>(null);
+  // Errores especificos del bloque clinico — se hidratan desde el onError
+  // cuando el backend rechaza por MISSING_CLINICAL_DATA / VALIDATION_ERROR.
+  const [clinicalErrors, setClinicalErrors] = useState<
+    Partial<Record<keyof InitialCaseInput, string>>
+  >({});
+
   // ── Load existing bovine when editing ────────────────────────────────────────
   const { data: bovine, isLoading } = useQuery({
     queryKey: ['bovine', id],
@@ -337,7 +346,6 @@ export function BovineFormPage() {
       birthDate: '',
       weight: undefined,
       healthStatus: '',
-      vaccinationStatus: '',
       motherId: '',
       fatherId: '',
       acquisitionDate: '',
@@ -447,7 +455,7 @@ export function BovineFormPage() {
         birthDate: bovine.birthDate?.split('T')[0] || '',
         weight: bovine.weight || undefined,
         healthStatus: bovine.healthStatus || '',
-        vaccinationStatus: bovine.vaccinationStatus || '',
+        // F-31 / Backend P-02: vaccinationStatus ya no es parte del form.
         motherId: '',
         fatherId: '',
         acquisitionDate: '',
@@ -457,7 +465,7 @@ export function BovineFormPage() {
           ? { latitude: bovine.location.latitude, longitude: bovine.location.longitude }
           : undefined,
       });
-      if (bovine.healthStatus || bovine.vaccinationStatus) setShowGenealogy(false);
+      if (bovine.healthStatus) setShowGenealogy(false);
       if (bovine.location?.latitude) setShowGps(true);
       // In edit mode, all steps are already accessible
       setCompletedSteps(new Set([1, 2, 3]));
@@ -467,7 +475,7 @@ export function BovineFormPage() {
   // ── Mutation ──────────────────────────────────────────────────────────────────
   const mutation = useMutation({
     mutationFn: async (data: FormValues) => {
-      const payload: BovineFormData = {
+      const payload: BovineFormData & { initialCase?: InitialCaseInput } = {
         earTag: data.earTag,
         name: data.name || undefined,
         breed: data.breed,
@@ -481,12 +489,31 @@ export function BovineFormPage() {
         // Sending {latitude:0, longitude:0} causes a backend validation error ("Null Island").
         location: data.location?.latitude ? data.location : undefined,
         healthStatus: data.healthStatus || undefined,
-        vaccinationStatus: data.vaccinationStatus || undefined,
+        // F-31: NO se envia vaccinationStatus. El backend ignoraria el campo
+        // de todas formas (P-02 lo desacoplo), pero lo omitimos del payload
+        // para mantener el body limpio y dejar claro que el FE no lo gestiona.
         motherId: data.motherId || undefined,
         fatherId: data.fatherId || undefined,
         acquisitionDate: data.acquisitionDate || undefined,
         acquisitionPrice: data.acquisitionPrice,
       };
+
+      // F-22 / Backend C-01: si el healthStatus es enfermo y se capturaron
+      // los datos clinicos, incluirlos en el payload. El backend valida
+      // coherencia (C-03) y aborta toda la transaccion si faltan campos
+      // requeridos. Si el usuario marca healthy, `initialCase` esta en null
+      // por el effect anterior y no se incluye.
+      const isSickStatus = data.healthStatus === 'SICK'
+        || data.healthStatus === 'RECOVERING'
+        || data.healthStatus === 'QUARANTINE';
+      if (!isEditing && isSickStatus && initialCase && isClinicalDataValid(initialCase)) {
+        payload.initialCase = {
+          ...initialCase,
+          // Limpiar strings vacios opcionales antes de enviar.
+          diagnosedBy: initialCase.diagnosedBy?.trim() || undefined,
+          notes:       initialCase.notes?.trim() || undefined,
+        };
+      }
 
       // Cast: legacy BovineFormData uses string fields for enums; the strict
       // CreateBovineInput uses enum types. The runtime values come from the
@@ -604,6 +631,50 @@ export function BovineFormPage() {
           setStep(3);
           toast.error('Rancho incorrecto', 'La ubicación seleccionada no pertenece a este rancho.');
           break;
+        // F-18 / Backend M5: errores de validacion de padres. El backend
+        // emite codigos sin el prefijo BOVINE_ (INVALID_PARENT, SELF_PARENT),
+        // pero el catalogo de ErrorCodes del FE los tiene con prefijo
+        // (BOVINE_INVALID_PARENT). Hasta alinear ambos lados (hallazgo H-4),
+        // toleramos los dos.
+        case 'INVALID_PARENT':
+        case ErrorCodes.BOVINE_INVALID_PARENT: {
+          const msg = getFriendlyMessage(err)
+            || 'El bovino seleccionado no cumple las reglas (sexo, edad reproductiva, mismo rancho o inactivo).';
+          // Mensaje en ambos campos — el backend no nos dice cual es el
+          // problematico; el VET lo identifica al ver el form abierto.
+          form.setError('motherId', { message: msg });
+          form.setError('fatherId', { message: msg });
+          setStep(2);
+          toast.error('Padre/madre inválido', msg);
+          break;
+        }
+        case 'SELF_PARENT':
+        case ErrorCodes.BOVINE_SELF_PARENT: {
+          const msg = 'Un bovino no puede ser su propio padre/madre ni padre directo de su progenitor.';
+          form.setError('motherId', { message: msg });
+          form.setError('fatherId', { message: msg });
+          setStep(2);
+          toast.error('Genealogía inválida', msg);
+          break;
+        }
+        // F-23 / Backend C-03: coherencia clinica fallo en el backend
+        // (faltan diseaseId/severity/diagnosedAt). Esto solo deberia
+        // ocurrir si el guard local del submit fallo o si hay drift de
+        // estado. Marcar errores en los tres campos minimos y volver al
+        // paso 2 para que el usuario los corrija.
+        case 'MISSING_CLINICAL_DATA': {
+          setStep(2);
+          setClinicalErrors({
+            diseaseId:   'Captura la enfermedad.',
+            severity:    'Captura la severidad.',
+            diagnosedAt: 'Captura la fecha de diagnóstico.',
+          });
+          toast.error(
+            'Faltan datos clínicos',
+            'Faltan datos clínicos: enfermedad, severidad y fecha de diagnóstico.',
+          );
+          break;
+        }
         case ErrorCodes.VALIDATION_ERROR:
           // Backend sent field-level errors — show a generic message; fields already shown
           toast.error('Datos inválidos', getFriendlyMessage(err));
@@ -659,12 +730,45 @@ export function BovineFormPage() {
       return;
     }
 
+    // F-22 / Backend C-03: si el usuario marco healthStatus enfermo, exigir
+    // los datos clinicos minimos ANTES de submit. El backend tambien valida
+    // (MISSING_CLINICAL_DATA), pero la UX es mucho mejor si bloqueamos
+    // localmente y mostramos errores junto a los campos.
+    const isSickStatus = data.healthStatus === 'SICK'
+      || data.healthStatus === 'RECOVERING'
+      || data.healthStatus === 'QUARANTINE';
+    if (!isEditing && isSickStatus && !isClinicalDataValid(initialCase)) {
+      setStep(2);
+      const errs: Partial<Record<keyof InitialCaseInput, string>> = {};
+      if (!initialCase?.diseaseId)   errs.diseaseId   = 'Selecciona la enfermedad.';
+      if (!initialCase?.severity)    errs.severity    = 'Selecciona la severidad.';
+      if (!initialCase?.diagnosedAt) errs.diagnosedAt = 'Captura la fecha de diagnóstico.';
+      setClinicalErrors(errs);
+      toast.error(
+        'Faltan datos clínicos',
+        'Para registrar un bovino enfermo, captura la enfermedad, severidad y fecha de diagnóstico.',
+      );
+      return;
+    }
+
     mutation.mutate(data);
   });
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
   const watchedValues = watch(['earTag', 'name', 'breed', 'cattleType', 'gender', 'birthDate', 'weight', 'healthStatus']);
   const [wEarTag, wName, wBreed, wCattleType, wGender, wBirthDate, wWeight, wHealth] = watchedValues;
+
+  // F-22: si el usuario cambia healthStatus a HEALTHY/UNKNOWN/'', resetear
+  // los datos clinicos para no enviar `initialCase` con basura. Tambien
+  // limpia errores backend previos.
+  useEffect(() => {
+    const isSickStatus = wHealth === 'SICK' || wHealth === 'RECOVERING' || wHealth === 'QUARANTINE';
+    if (!isSickStatus) {
+      if (initialCase !== null) setInitialCase(null);
+      if (Object.keys(clinicalErrors).length > 0) setClinicalErrors({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wHealth]);
 
   // Watch GPS coords to validate them against the selected location's boundary
   // every time either changes. We do this in a memo so the validation badge
@@ -1064,12 +1168,33 @@ export function BovineFormPage() {
                   options={healthStatusOptions}
                   {...register('healthStatus')}
                 />
-                <Select
-                  label="Estado de Vacunación"
-                  options={vaccinationStatusOptions}
-                  {...register('vaccinationStatus')}
-                />
+                {/* F-31 / Backend P-02: select "Estado de Vacunación" removido.
+                    El estado no es captura manual — se deriva server-side de
+                    las vacunas aplicadas (tabla `bovine_vaccination_status`).
+                    El VET gestiona vacunas desde el tab Vacunación del
+                    detalle, y el badge derivado aparece ahi automaticamente. */}
               </div>
+
+              {/* F-22 / Backend C-01: seccion clinica condicional. Solo se
+                  muestra cuando el usuario marca el bovino como enfermo. Se
+                  envia en `initialCase` del payload y el backend abre el
+                  caso clinico atomico (mismo trx que createBovine). En modo
+                  edicion NO se muestra: enfermar a un bovino existente se
+                  hace desde el modal "Marcar enfermo" (F-24) en el detail
+                  page, que es un endpoint distinto (/sick). */}
+              {!isEditing && (wHealth === 'SICK' || wHealth === 'RECOVERING' || wHealth === 'QUARANTINE') && (
+                <div className="mt-4">
+                  <ClinicalDataForm
+                    value={initialCase}
+                    onChange={(v) => {
+                      setInitialCase(v);
+                      // Limpiar errores previos del campo que el usuario edito
+                      setClinicalErrors({});
+                    }}
+                    errors={clinicalErrors}
+                  />
+                </div>
+              )}
 
               {/* Notes */}
               <div className="mt-4">
@@ -1109,13 +1234,18 @@ export function BovineFormPage() {
                     control={control}
                     render={({ field }) => (
                       <BovineSelector
-                        label="Madre (hembra)"
+                        label="Madre (hembra ≥ 15 meses)"
                         placeholder="Buscar por arete o nombre..."
-                        filterGender="FEMALE"
+                        // F-16 / G-07: purpose=dam aplica server-side
+                        // FEMALE + edad reproductiva ≥ 15m. Reemplaza al
+                        // filtro client-side por filterGender que no
+                        // consideraba la edad reproductiva.
+                        purpose="dam"
                         ranchId={activeRanchId}
                         value={field.value || null}
                         excludeIds={id ? [id] : []}
                         onChange={(bovineId) => field.onChange(bovineId || '')}
+                        error={errors.motherId?.message}
                       />
                     )}
                   />
@@ -1124,13 +1254,16 @@ export function BovineFormPage() {
                     control={control}
                     render={({ field }) => (
                       <BovineSelector
-                        label="Padre (macho)"
+                        label="Padre (macho ≥ 18 meses)"
                         placeholder="Buscar por arete o nombre..."
-                        filterGender="MALE"
+                        // F-16 / G-07: purpose=sire aplica server-side
+                        // MALE + edad reproductiva ≥ 18m.
+                        purpose="sire"
                         ranchId={activeRanchId}
                         value={field.value || null}
                         excludeIds={id ? [id] : []}
                         onChange={(bovineId) => field.onChange(bovineId || '')}
+                        error={errors.fatherId?.message}
                       />
                     )}
                   />

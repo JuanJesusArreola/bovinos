@@ -22,6 +22,7 @@ import {
   listVaccinationsSchema,
   getVaccinationStatusSchema,
   deleteVaccinationSchema,
+  updateVaccinationSchema,
   runValidation,
 } from '../validators';
 
@@ -72,12 +73,52 @@ vaccinationBovineNestedRouter.get(
   vaccinationController.getStatus
 );
 
+/**
+ * GET /api/bovines/:id/protection
+ * Estado de protección por enfermedad (derivado de vacunas × catálogo).
+ */
+vaccinationBovineNestedRouter.get(
+  '/:id/protection',
+  ...getVaccinationStatusSchema,
+  runValidation,
+  vaccinationController.getProtection
+);
+
+/**
+ * GET /api/bovines/:id/vaccination-schedule   (V-05)
+ * Calendario sugerido del bovino según edad/sexo/raza.
+ */
+vaccinationBovineNestedRouter.get(
+  '/:id/vaccination-schedule',
+  ...getVaccinationStatusSchema,
+  runValidation,
+  vaccinationController.getSuggestedSchedule
+);
+
 // ============================================================================
 // Router 2: bajo /api/vaccinations (acciones globales)
 // ============================================================================
 export const vaccinationGlobalRouter = Router();
 
 vaccinationGlobalRouter.use(authenticateToken);
+
+/**
+ * PATCH /api/vaccinations/:vaccinationId  (V-04)
+ * Edita una vacuna existente y recalcula el estado del bovino.
+ */
+vaccinationGlobalRouter.patch(
+  '/:vaccinationId',
+  authorizeRoles(
+    UserRole.SUPER_ADMIN,
+    UserRole.OWNER,
+    UserRole.RANCH_MANAGER,
+    UserRole.MANAGER,
+    UserRole.VETERINARIAN
+  ),
+  ...updateVaccinationSchema,
+  runValidation,
+  vaccinationController.update
+);
 
 /**
  * DELETE /api/vaccinations/:vaccinationId

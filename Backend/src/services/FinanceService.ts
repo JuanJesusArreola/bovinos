@@ -473,7 +473,7 @@ export class FinanceService {
     ): Promise<Array<{ month: string; amount: number }>> {
         const results = await this.financeModel.findAll({
             attributes: [
-                [sequelize.fn('DATE_TRUNC', 'month', sequelize.col('transactionDate')), 'month'],
+                [sequelize.fn('DATE_TRUNC', 'month', sequelize.col('transaction_date')), 'month'],
                 [sequelize.fn('SUM', sequelize.col('amount')), 'total'],
             ],
             where: {
@@ -482,8 +482,8 @@ export class FinanceService {
                 category: { [Op.in]: categories },
                 transactionDate: { [Op.between]: [startDate, endDate] },
             },
-            group: [sequelize.fn('DATE_TRUNC', 'month', sequelize.col('transactionDate'))],
-            order: [[sequelize.fn('DATE_TRUNC', 'month', sequelize.col('transactionDate')), 'ASC']],
+            group: [sequelize.fn('DATE_TRUNC', 'month', sequelize.col('transaction_date'))],
+            order: [[sequelize.fn('DATE_TRUNC', 'month', sequelize.col('transaction_date')), 'ASC']],
             raw: true,
         });
 

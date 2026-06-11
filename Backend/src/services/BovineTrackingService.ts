@@ -1359,6 +1359,9 @@ export class BovineTrackingService {
             const totalLocations = await BovineTracking.count({
                 include: [{
                     model: Bovine,
+                    as: 'bovine',
+                    attributes: [],
+                    required: true,
                     where: { ranchId }
                 }],
                 where: { recordedAt: { [Op.gte]: startDate } }
@@ -1369,6 +1372,9 @@ export class BovineTrackingService {
                 attributes: [[sequelize.fn('AVG', sequelize.col('accuracy')), 'avgAccuracy']],
                 include: [{
                     model: Bovine,
+                    as: 'bovine',
+                    attributes: [],
+                    required: true,
                     where: { ranchId }
                 }],
                 where: { recordedAt: { [Op.gte]: startDate }, accuracy: { [Op.ne]: null } as any },
@@ -1386,6 +1392,9 @@ export class BovineTrackingService {
                 ],
                 include: [{
                     model: Bovine,
+                    as: 'bovine',
+                    attributes: [],
+                    required: true,
                     where: { ranchId }
                 }],
                 where: { recordedAt: { [Op.gte]: startDate } },
@@ -1402,6 +1411,9 @@ export class BovineTrackingService {
                 ],
                 include: [{
                     model: Bovine,
+                    as: 'bovine',
+                    attributes: [],
+                    required: true,
                     where: { ranchId }
                 }],
                 where: { recordedAt: { [Op.gte]: startDate } },
@@ -1430,6 +1442,9 @@ export class BovineTrackingService {
                 ],
                 include: [{
                     model: Bovine,
+                    as: 'bovine',
+                    attributes: [],
+                    required: true,
                     where: { ranchId }
                 }],
                 where: { recordedAt: { [Op.gte]: startDate } },
@@ -1453,6 +1468,9 @@ export class BovineTrackingService {
                 attributes: [[sequelize.fn('AVG', sequelize.col('speed')), 'avgSpeed']],
                 include: [{
                     model: Bovine,
+                    as: 'bovine',
+                    attributes: [],
+                    required: true,
                     where: { ranchId }
                 }],
                 where: { recordedAt: { [Op.gte]: startDate }, speed: { [Op.ne]: null } as any },

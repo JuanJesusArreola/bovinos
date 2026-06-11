@@ -201,7 +201,7 @@ export class UserController {
                     isActive: user.isActive,
                     emailVerified: user.emailVerified,
                     lastLoginAt: user.lastLoginAt,
-                    createdAt: user.createdAt
+                    createdAt: user.createdAt ?? (user as any).get('created_at')
                 })),
                 pagination: result.pagination
             });

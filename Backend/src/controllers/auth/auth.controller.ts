@@ -26,7 +26,11 @@ export class AuthController {
      */
     async register(req: Request, res: Response): Promise<void> {
         try {
-            const { email, password, confirmPassword, firstName, lastName, phone, role } = req.body;
+            // SEGURIDAD: el registro público NUNCA debe aceptar `role` del cliente
+            // (escalada de privilegios). Se IGNORA a propósito; el rol lo asigna
+            // AuthService con el default mínimo (VIEWER). La elevación de rol solo
+            // se hace por un endpoint de admin autenticado.
+            const { email, password, confirmPassword, firstName, lastName, phone } = req.body;
             const ipAddress = req.ip || req.socket.remoteAddress;
             const userAgent = req.get('User-Agent');
 
@@ -37,7 +41,7 @@ export class AuthController {
                 firstName,
                 lastName,
                 phone,
-                role,
+                // role: OMITIDO intencionalmente → AuthService usa VIEWER por defecto
                 ipAddress,
                 userAgent
             });

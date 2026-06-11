@@ -137,6 +137,7 @@ export class ReproductionService {
       where,
       limit,
       offset,
+      subQuery: false,
       order: [[sequelize.literal(`("serviceInfo"->>'serviceDate')::timestamp`), 'DESC']],
     });
 

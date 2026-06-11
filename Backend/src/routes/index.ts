@@ -36,6 +36,8 @@ declare global {
 
 
 import bovineRoutes from './bovine.routes';
+import { bovineController } from '../controllers/bovine.controller';
+import { epidemiologicalController } from '../controllers/epidemiological.controller';
 import {
   vaccinationBovineNestedRouter,
   vaccinationGlobalRouter,
@@ -75,6 +77,11 @@ import userRoutes from './auth/user.routes';
 //import healthRoutes from './health';
 import productionRoutes from './production.routes';
 import uploadRoutes from './upload.routes';
+import diseaseRoutes from './disease.routes';
+import bovineDiseaseCase_Routes from './bovineDiseaseCase.routes';
+import vaccineProtectionRoutes from './vaccineProtection.routes';
+import vaccinationScheduleRoutes from './vaccinationSchedule.routes';
+import epidemiologicalRoutes from './epidemiological.routes';
 
 
 // Bovine controllers are loaded through bovine.routes.ts
@@ -427,6 +434,10 @@ router.post('/echo', (req: Request, res: Response) => {
   });
 });
 
+// E-05: score de riesgo por bovino. Antes del router de /bovines para que
+// /:id/risk-score se resuelva aquí.
+router.get('/bovines/:id/risk-score', authenticateToken, epidemiologicalController.getBovineRiskScore);
+
 router.use('/bovines', bovineRoutes);
 // Vacunación — anidada bajo /bovines/:id/* y endpoint global
 router.use('/bovines', vaccinationBovineNestedRouter);
@@ -448,6 +459,10 @@ router.use('/locations', locationRelationByLocationRoutes);
 router.use('/locations', locationMediaRoutes);
 router.use('/locations', locationMovementsRoutes);
 router.use('/location-relations', locationRelationRoutes);
+// X-07: reporte de mortalidad por rancho. Se declara ANTES de los routers de
+// rancho para que /:ranchId/mortality se resuelva aquí.
+router.get('/ranches/:ranchId/mortality', authenticateToken, bovineController.getMortalityReport);
+
 router.use('/ranch', ranchCoreRoutes);
 router.use('/ranches', ranchOccupancyRoutes);
 // Alias plural — el frontend usa /api/ranches/* para todas las rutas de rancho
@@ -468,6 +483,11 @@ router.use('/security', securityRoutes);
 router.use('/users', userRoutes);
 router.use('/production', productionRoutes);
 router.use('/uploads', uploadRoutes);
+router.use('/diseases', diseaseRoutes);
+router.use('/bovine-cases', bovineDiseaseCase_Routes);
+router.use('/vaccine-protections', vaccineProtectionRoutes);
+router.use('/vaccination-schedules', vaccinationScheduleRoutes);
+router.use('/epidemiology', epidemiologicalRoutes);
 
 
 // ===================================================================

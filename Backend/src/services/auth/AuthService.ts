@@ -108,8 +108,10 @@ export class AuthService {
                 throw new ValidationError('El usuario ya existe con este email');
             }
 
-            // Crear usuario usando UserService
-            const role = data.role || UserRole.VIEWER;
+            // SEGURIDAD: el registro público SIEMPRE crea con el rol mínimo (VIEWER),
+            // ignorando cualquier `role` recibido. La elevación de rol solo ocurre
+            // por un endpoint de admin autenticado (userService.updateUser).
+            const role = UserRole.VIEWER;
             const user = await userService.createUser({
                 email: data.email,
                 password: data.password,

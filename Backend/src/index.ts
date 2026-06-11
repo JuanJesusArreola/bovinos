@@ -14,7 +14,12 @@ import path from 'path';
 // Importar middleware personalizado
 import { errorHandler } from './middleware/error';
 
+import * as cron from 'node-cron';
 import { scheduleRanchProductionUpdate } from './jobs/updateRanchProduction';
+import { epidemiologicalService } from './services/EpidemiologicalService';
+import { bovineVaccinationStatusService } from './services/BovineVaccinationStatusService';
+import { runDiseaseSeeds } from './seeders/runDiseaseSeeds';
+import logger from './utils/logger';
 
 import { initRateLimiter, closeRateLimiter } from './middleware/rate-limit';
 
@@ -398,6 +403,22 @@ async function initializeServices(): Promise<boolean> {
     await initializeDatabase();
     console.log('✅ Base de datos inicializada correctamente');
 
+    // Poblar catálogo de enfermedades (idempotente — usa findOrCreate)
+    console.log('🦠 Ejecutando seeders de enfermedades...');
+    await runDiseaseSeeds();
+    console.log('✅ Catálogo de enfermedades listo');
+
+    // Backfill del estado de vacunación (V-01) — solo bovinos SIN fila de estado.
+    // Best-effort: si falla, no bloquea el arranque (el job diario lo corrige).
+    try {
+      const bf = await bovineVaccinationStatusService.recomputeAll({ onlyMissing: true });
+      if (bf.processed > 0) {
+        console.log(`✅ Estado de vacunación backfilled — nuevos: ${bf.processed}`);
+      }
+    } catch (bfErr) {
+      console.warn('⚠️ Backfill de estado de vacunación falló (no bloquea arranque):', (bfErr as Error).message);
+    }
+
     if (!process.env.DB_HOST) {
       console.warn('⚠️ DB_HOST no configurado');
     }
@@ -424,6 +445,81 @@ async function initializeServices(): Promise<boolean> {
     console.error('❌ Error crítico durante la inicialización:', error);
     return false;
   }
+}
+
+/**
+ * Programa el job de cómputo epidemiológico.
+ *
+ * Schedules:
+ *  - Ejecución inmediata al arrancar (cubre el día actual si el servidor
+ *    reinició y el snapshot de hoy todavía no existe).
+ *  - Cron diario a las 03:00 AM hora del servidor — usando node-cron para
+ *    que la hora sea fija independientemente de cuándo reinicie el proceso.
+ *
+ * Errores no detienen el servidor — cada fallo se loguea y el job
+ * continúa su schedule normal.
+ */
+function scheduleEpidemiologicalJob(): void {
+  const JOB_CONTEXT = 'EpidemiologicalJob';
+
+  const run = async () => {
+    logger.info('Iniciando cómputo de snapshots epidemiológicos', JOB_CONTEXT);
+    try {
+      const result = await epidemiologicalService.computeSnapshots();
+      logger.info(
+        `Snapshots computados — ok: ${result.computed}, errores: ${result.errors}`,
+        JOB_CONTEXT,
+        { computed: result.computed, errors: result.errors }
+      );
+
+      // E-03: evaluar triggers de alertas con los snapshots recién computados
+      const alerts = await epidemiologicalService.evaluateAlerts();
+      logger.info(`Alertas epidemiológicas evaluadas — nuevas: ${alerts.created}`, JOB_CONTEXT);
+    } catch (err) {
+      logger.error('Error en cómputo de snapshots epidemiológicos', JOB_CONTEXT, {}, err as Error);
+    }
+  };
+
+  // 1. Ejecución inmediata al arrancar
+  run();
+
+  // 2. Cron diario: todos los días a las 03:00 AM
+  cron.schedule('0 3 * * *', run, { timezone: 'America/Mexico_City' });
+
+  logger.info('Job epidemiológico programado — diario a las 03:00 AM', JOB_CONTEXT);
+}
+
+/**
+ * Job de recálculo del estado de vacunación (V-02).
+ *
+ * Reevalúa OVERDUE/UP_TO_DATE/PENDING de TODOS los bovinos activos, porque el
+ * vencimiento depende del paso del tiempo (nextDueDate) y, sin este job, un
+ * estado solo cambiaría al crear/editar/borrar una vacuna.
+ *
+ * Schedule: diario a las 03:30 AM (después del epidemiológico). Los errores no
+ * detienen el servidor.
+ */
+function scheduleVaccinationRecomputeJob(): void {
+  const JOB_CONTEXT = 'VaccinationRecomputeJob';
+
+  const run = async () => {
+    logger.info('Iniciando recálculo de estado de vacunación', JOB_CONTEXT);
+    try {
+      const result = await bovineVaccinationStatusService.recomputeAll();
+      logger.info(
+        `Estado de vacunación recalculado — ok: ${result.processed}, errores: ${result.errors}`,
+        JOB_CONTEXT,
+        result
+      );
+    } catch (err) {
+      logger.error('Error en recálculo de estado de vacunación', JOB_CONTEXT, {}, err as Error);
+    }
+  };
+
+  // Cron diario: todos los días a las 03:30 AM
+  cron.schedule('30 3 * * *', run, { timezone: 'America/Mexico_City' });
+
+  logger.info('Job de estado de vacunación programado — diario a las 03:30 AM', JOB_CONTEXT);
 }
 
 /**
@@ -564,6 +660,8 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     scheduleRanchProductionUpdate();
+    scheduleEpidemiologicalJob();
+    scheduleVaccinationRecomputeJob();
 
     // Iniciar servidor
     await startServer();

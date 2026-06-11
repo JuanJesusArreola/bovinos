@@ -20,6 +20,7 @@ import {
   useBovineFilterOptions,
   useBovineStatistics,
   useBulkMoveBovines,
+  useRanchActiveDiseases,
 } from '@/hooks/useBovines';
 import { getBovineErrorMessage } from '@/utils/errorHandler';
 import { BovineMapView } from '@/components/bovines/BovineMapView';
@@ -31,6 +32,8 @@ import type {
   HealthStatus,
   VaccinationStatus,
   MapMarkersFilters,
+  AgeGroup,
+  AgeGroupOption,
 } from '@/types/bovine.dtos';
 import { MovementReason, MovementType } from '@/types/bovine.dtos';
 import {
@@ -56,12 +59,20 @@ function parseNumber(value: string | null): number | undefined {
 }
 
 // ─── Age presets ─────────────────────────────────────────────────────────────
+//
+// Despues de Backend B-02 los presets se envian como `?ageGroup=calf|young|adult`
+// y el backend los resuelve a rangos de meses con los umbrales unificados de
+// `bovine.constants.ts`. Esto evita drift entre FE y BE.
+//
+// Las opciones reales llegan en `filterOptions.ageGroups` (TTL 1h); este array
+// local es FALLBACK para el primer paint o backends antiguos que aun no las
+// exponen. Los labels y rangos deben quedar sincronizados con el backend.
 
-const AGE_PRESETS = [
-  { value: '0-6',   label: 'Becerros (0-6 m)',  min: 0,  max: 6  },
-  { value: '6-18',  label: 'Novillos (6-18 m)', min: 6,  max: 18 },
-  { value: '18-',   label: 'Adultos (>18 m)',   min: 18, max: undefined as number | undefined },
-] as const;
+const AGE_GROUP_FALLBACK: AgeGroupOption[] = [
+  { value: 'calf',  label: 'Becerro / Becerra (0-12 meses)',   minMonths: 0,  maxMonths: 12 },
+  { value: 'young', label: 'Novillo / Vaquilla (12-24 meses)', minMonths: 12, maxMonths: 24 },
+  { value: 'adult', label: 'Toro / Vaca (>= 24 meses)',        minMonths: 24 },
+];
 
 // ─── Multi-select chip filter ────────────────────────────────────────────────
 //
@@ -207,14 +218,20 @@ interface FiltersPanelProps {
   genderOptions: FilterOption[];
   breedOptions: FilterOption[];
   vacOptions: FilterOption[];
+  /** Enfermedades con casos activos en el rancho (value = UUID). */
+  diseaseOptions: FilterOption[];
 
   healthFilter: string[];
   typeFilter: string[];
   genderFilter: string[];
   breedFilter: string[];
   vaccinationFilter: string[];
-  ageMin: number | undefined;
-  ageMax: number | undefined;
+  /** UUID de la enfermedad seleccionada, o undefined si no hay. */
+  diseaseId: string | undefined;
+  /** Preset etario activo (`calf|young|adult`) o `undefined` si no hay. */
+  ageGroup: AgeGroup | undefined;
+  /** Lista de presets desde backend o fallback local. */
+  ageGroupOptions: AgeGroupOption[];
   locationId: string | undefined;
   activeRanchId: string | null;
   activeFilterChips: { key: string; label: string; clear: () => void }[];
@@ -224,8 +241,9 @@ interface FiltersPanelProps {
 
 function FiltersPanel({
   healthOptions, typeOptions, genderOptions, breedOptions, vacOptions,
+  diseaseOptions, diseaseId,
   healthFilter, typeFilter, genderFilter, breedFilter, vaccinationFilter,
-  ageMin, ageMax, locationId, activeRanchId, activeFilterChips,
+  ageGroup, ageGroupOptions, locationId, activeRanchId, activeFilterChips,
   updateParams, clearAllFilters,
 }: FiltersPanelProps) {
   // Single source of truth for which dropdown is currently expanded.
@@ -291,20 +309,25 @@ function FiltersPanel({
           />
         )}
 
-        {/* Age presets — quick selectors that overwrite ageMin/ageMax */}
+        {/* Age presets — envian `?ageGroup=...` (Backend B-02). El backend
+            resuelve a rangos de meses; aqui solo manejamos el valor logico. */}
         <div className="flex items-center gap-1 ml-auto">
           <span className="text-xs text-gray-600 dark:text-gray-300 mr-1">Edad:</span>
-          {AGE_PRESETS.map((p) => {
-            const active = ageMin === p.min && (ageMax ?? undefined) === p.max;
+          {ageGroupOptions.map((p) => {
+            const active = ageGroup === p.value;
             return (
               <button
                 key={p.value}
                 type="button"
                 onClick={() => updateParams({
-                  ageMin: active ? undefined : p.min,
-                  ageMax: active ? undefined : p.max,
+                  ageGroup: active ? undefined : p.value,
                   page: 1,
                 })}
+                title={
+                  p.maxMonths != null
+                    ? `${p.minMonths}-${p.maxMonths} meses`
+                    : `>= ${p.minMonths} meses`
+                }
                 className={cn(
                   'px-2 py-1 rounded text-xs border transition-colors font-medium',
                   active
@@ -327,6 +350,25 @@ function FiltersPanel({
           </button>
         )}
       </div>
+
+      {/* Disease filter — UUIDs via /filters/active-diseases */}
+      {diseaseOptions.length > 0 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Enfermedad activa
+          </label>
+          <select
+            value={diseaseId ?? ''}
+            onChange={(e) => updateParams({ diseaseId: e.target.value || undefined, page: 1 })}
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+          >
+            <option value="">Todas las enfermedades</option>
+            {diseaseOptions.map((d) => (
+              <option key={d.value} value={d.value}>{d.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Location filter — depends on active ranch */}
       {activeRanchId && (
@@ -379,8 +421,20 @@ export function BovinesListPage() {
   const breedFilter      = parseCsv(searchParams.get('breed'));
   const vaccinationFilter= parseCsv(searchParams.get('vaccinationStatus'));
   const locationId       = searchParams.get('locationId') || '';
-  const ageMin           = parseNumber(searchParams.get('ageMin'));
-  const ageMax           = parseNumber(searchParams.get('ageMax'));
+  // Preset etario (Backend B-02). Reemplazo de ageMin/ageMax como URL param
+  // porque ahora el backend resuelve los rangos desde un alias logico.
+  const ageGroupParam    = searchParams.get('ageGroup');
+  const ageGroup: AgeGroup | undefined =
+    ageGroupParam === 'calf' || ageGroupParam === 'young' || ageGroupParam === 'adult'
+      ? ageGroupParam
+      : undefined;
+
+  const diseaseId = searchParams.get('diseaseId') || undefined;
+
+  // F-30 / Backend Modulo 8: switch "incluir fallecidos". Default = false
+  // (solo activos, comportamiento previo). Cuando es true, el listado
+  // incluye fallecidos junto a los vivos para auditoria y reportes.
+  const includeInactive = searchParams.get('includeInactive') === 'true';
 
   // Local debounced search input (URL gets updated 300ms after typing stops).
   const [searchInput, setSearchInput] = useState(search);
@@ -436,11 +490,18 @@ export function BovinesListPage() {
     vaccinationStatus: vaccinationFilter.length === 1 ? vaccinationFilter[0] as VaccinationStatus : undefined,
     ranchId: activeRanchId ?? undefined,
     locationId: locationId || undefined,
-    ageRange: (ageMin != null || ageMax != null)
-      ? { min: ageMin ?? 0, max: ageMax ?? 1200 }
-      : undefined,
+    // Enviar solo `ageGroup`; el backend resuelve a rangos de meses (B-02).
+    // Quitamos el ageRange artificial (min:0, max:1200) que enmascaraba el
+    // bug viejo donde el backend interpretaba meses como anios.
+    ageGroup,
+    diseaseId: diseaseId || undefined,
+    // F-30 / Backend Modulo 8: si el switch esta ON, el backend agrega los
+    // bovinos inactivos al resultado. Omitir el param (no enviar `false`)
+    // para que el listado mantenga el comportamiento default cuando esta
+    // OFF — evita ruido en el query string y queries identicas en cache.
+    includeInactive: includeInactive ? true : undefined,
   }), [page, search, typeFilter, healthFilter, genderFilter, breedFilter,
-       vaccinationFilter, activeRanchId, locationId, ageMin, ageMax]);
+       vaccinationFilter, activeRanchId, locationId, ageGroup, includeInactive, diseaseId]);
 
   // ── Data fetching (centralized hooks) ─────────────────────────────────────
   const { data, isLoading, isFetching } = useBovineList(filters);
@@ -448,6 +509,15 @@ export function BovinesListPage() {
   // Map filters — same URL params, but the map endpoint accepts arrays
   // (multi-select) directly instead of single-value filters. This is
   // distinct from the list endpoint which currently uses one-of-N.
+  // Resolver el ageGroup activo a un rango de meses para el endpoint del mapa.
+  // El endpoint `/bovines/geo/map-markers` acepta ageMin/ageMax en meses
+  // (mismo modelo que el listado tras B-02); traducimos client-side para no
+  // depender de que ese controller tambien soporte `ageGroup` como alias.
+  const ageGroupResolved = useMemo(() => {
+    if (!ageGroup) return null;
+    return AGE_GROUP_FALLBACK.find((g) => g.value === ageGroup) ?? null;
+  }, [ageGroup]);
+
   const mapFilters: MapMarkersFilters = useMemo(() => ({
     ranchIds: activeRanchId ? [activeRanchId] : null,
     healthStatus: healthFilter.length ? (healthFilter as HealthStatus[]) : undefined,
@@ -458,13 +528,14 @@ export function BovinesListPage() {
       ? vaccinationFilter[0] as VaccinationStatus
       : undefined,
     locationId: locationId || undefined,
-    ageRange: (ageMin != null || ageMax != null)
-      ? { min: ageMin ?? 0, max: ageMax ?? 1200 }
+    ageRange: ageGroupResolved
+      ? { min: ageGroupResolved.minMonths, max: ageGroupResolved.maxMonths }
       : undefined,
   }), [activeRanchId, healthFilter, typeFilter, genderFilter, breedFilter,
-       vaccinationFilter, locationId, ageMin, ageMax]);
+       vaccinationFilter, locationId, ageGroupResolved]);
   const { data: stats }                 = useBovineStatistics();
   const { data: filterOptions }         = useBovineFilterOptions();
+  const { data: activeDiseases }        = useRanchActiveDiseases({ enabled: !!activeRanchId });
 
   // Catalog options preferring backend-driven, with fallbacks for first render.
   const HEALTH_OPTIONS  = filterOptions?.healthStatuses ?? [];
@@ -474,6 +545,12 @@ export function BovinesListPage() {
   const BREED_OPTIONS   = useMemo(
     () => (filterOptions?.breeds ?? []).map((b) => ({ value: b, label: b })),
     [filterOptions?.breeds],
+  );
+  // Presets etarios: preferir los del backend (B-02); fallback local cuando
+  // el backend aun no los expone (TTL 1h del cache podria estar frio).
+  const AGE_GROUP_OPTIONS: AgeGroupOption[] = useMemo(
+    () => filterOptions?.ageGroups ?? AGE_GROUP_FALLBACK,
+    [filterOptions?.ageGroups],
   );
 
   // ── Selection state ───────────────────────────────────────────────────────
@@ -485,7 +562,7 @@ export function BovinesListPage() {
   const [moveReason, setMoveReason] = useState<MovementReason>(MovementReason.TRANSFER);
   const [moveMovementType, setMoveMovementType] = useState<MovementType>(MovementType.MANUAL);
   const [moveNotesBulk, setMoveNotesBulk] = useState('');
-        console.log('BOVINE RESPONSE', data);
+
   const bovines: BovineDetailResponse[] = data?.bovines ?? [];
   const totalCount = data?.pagination?.total ?? 0;
   const totalPages = data?.pagination?.totalPages ?? 1;
@@ -535,8 +612,13 @@ export function BovinesListPage() {
         notes: moveNotesBulk || undefined,
       },
       {
-        onSuccess: () => {
-          toast.success('Movimiento registrado', `${selectedIds.size} bovino(s) movidos.`);
+        onSuccess: (summary) => {
+          const msg = summary.moved > 0 && summary.noOps > 0
+            ? `${summary.moved} movido(s). ${summary.noOps} ya estaban en ese potrero.`
+            : summary.moved > 0
+              ? `${summary.moved} bovino(s) movidos correctamente.`
+              : `Todos ya estaban en ese potrero (sin cambios).`;
+          toast.success('Movimiento registrado', msg);
           setShowMoveModal(false);
           setMoveLocationId(null);
           setMoveReason('');
@@ -594,19 +676,30 @@ export function BovinesListPage() {
         clear: () => updateParams({ locationId: undefined, page: 1 }),
       });
     }
-    if (ageMin != null || ageMax != null) {
-      const label = ageMax != null
-        ? `Edad: ${ageMin ?? 0}-${ageMax} m`
-        : `Edad: > ${ageMin} m`;
+    if (diseaseId) {
+      const opt = (activeDiseases ?? []).find((d) => d.value === diseaseId);
       chips.push({
-        key: 'age', label,
-        clear: () => updateParams({ ageMin: undefined, ageMax: undefined, page: 1 }),
+        key: `disease-${diseaseId}`,
+        label: opt?.label ? `Enfermedad: ${opt.label}` : 'Enfermedad filtrada',
+        clear: () => updateParams({ diseaseId: undefined, page: 1 }),
+      });
+    }
+    if (ageGroup) {
+      // Buscar label en options dinamicas (vienen del backend en TTL 1h)
+      // antes que en el fallback local. Mejora consistencia si el backend
+      // cambia los textos.
+      const opt = (filterOptions?.ageGroups ?? AGE_GROUP_FALLBACK)
+        .find((g) => g.value === ageGroup);
+      chips.push({
+        key: 'age',
+        label: opt?.label ?? `Edad: ${ageGroup}`,
+        clear: () => updateParams({ ageGroup: undefined, page: 1 }),
       });
     }
     return chips;
   }, [healthFilter, typeFilter, genderFilter, breedFilter, vaccinationFilter,
-      locationId, ageMin, ageMax, HEALTH_OPTIONS, TYPE_OPTIONS, GENDER_OPTIONS,
-      VAC_OPTIONS, updateParams]);
+      locationId, diseaseId, ageGroup, HEALTH_OPTIONS, TYPE_OPTIONS, GENDER_OPTIONS,
+      VAC_OPTIONS, filterOptions?.ageGroups, activeDiseases, updateParams]);
 
   function clearAllFilters() {
     const next = new URLSearchParams();
@@ -722,8 +815,23 @@ export function BovinesListPage() {
     {
       key: 'cattleType',
       header: 'Tipo',
+      // Mostramos la clasificacion derivada (Backend B-05) cuando viene
+      // ("Vaca", "Becerra", "Novillo"...) porque es gendered y mas precisa.
+      // Fallback a `cattleTypeLabel` para bovinos serializados antes de B-05.
       render: (b) => (
-        <Badge variant="info">{b.cattleTypeLabel || b.cattleType}</Badge>
+        <div className="flex items-center gap-1 flex-wrap">
+          <Badge variant="info">
+            {b.classificationLabel || b.cattleTypeLabel || b.cattleType}
+          </Badge>
+          {b.isReproductiveAge && (
+            <span
+              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+              title="Edad reproductiva (>= 15 meses hembras, >= 18 meses machos)"
+            >
+              Reprod.
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -755,16 +863,15 @@ export function BovinesListPage() {
       header: 'Salud',
       render: (b) => <HealthStatusBadge status={b.healthStatus as any} />,
     },
-    {
-      key: 'vac',
-      header: 'Vacunación',
-      render: (b) => (
-        <span className="inline-flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
-          <Syringe className="w-3 h-3 text-gray-400" />
-          {b.vaccinationStatusLabel || b.vaccinationStatus}
-        </span>
-      ),
-    },
+    // F-31 / Backend P-02: la columna "Vacunación" fue removida del listado.
+    // La columna `bovines.vaccinationStatus` se desacoplo y el endpoint
+    // /api/bovines (listado) ya no incluye el estado de vacunacion en cada
+    // fila — venia siendo basura (siempre NONE) desde la migracion previa.
+    // El estado real vive en `bovine_vaccination_status` y solo se carga
+    // en el detalle del bovino (via /full o /:id/vaccination-status). Si
+    // se necesita filtrar el listado por estado de vacunacion, el filtro
+    // del panel (`?vaccinationStatus=`) sigue funcionando — hace JOIN con
+    // la tabla derivada en el backend.
   ];
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -813,6 +920,32 @@ export function BovinesListPage() {
               <MapIcon className="w-4 h-4" /> Mapa
             </button>
           </div>
+          {/* F-30 / Backend Modulo 8: switch "incluir fallecidos". Default OFF
+              para mantener el comportamiento previo (solo activos). Cuando
+              esta ON, el listado agrega los fallecidos al final con badge
+              visual y se nota en el contador de resultados. Persiste en
+              URL como ?includeInactive=true para que el filtro sobreviva
+              recargas y bookmarks. */}
+          <label
+            className={cn(
+              'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium cursor-pointer transition-colors',
+              includeInactive
+                ? 'border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+                : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50',
+            )}
+            title="Incluir bovinos fallecidos o inactivos en el listado"
+          >
+            <input
+              type="checkbox"
+              checked={includeInactive}
+              onChange={(e) =>
+                updateParams({ includeInactive: e.target.checked ? 'true' : undefined, page: 1 })
+              }
+              className="rounded border-gray-400 text-primary-600 focus:ring-primary-500"
+            />
+            <span className="hidden sm:inline">Incluir fallecidos</span>
+          </label>
+
           {canManage && (
             <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/bovines/new')}>
               Nuevo
@@ -861,7 +994,7 @@ export function BovinesListPage() {
         {!showQrInput ? (
           <div className="flex-1">
             <Input
-              placeholder="Buscar por arete, nombre o raza..."
+              placeholder="Buscar por arete, nombre, raza, QR o RFID..."
               icon={<Search className="w-4 h-4" />}
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -922,13 +1055,15 @@ export function BovinesListPage() {
           genderOptions={GENDER_OPTIONS}
           breedOptions={BREED_OPTIONS}
           vacOptions={VAC_OPTIONS}
+          diseaseOptions={activeDiseases ?? []}
+          diseaseId={diseaseId}
           healthFilter={healthFilter}
           typeFilter={typeFilter}
           genderFilter={genderFilter}
           breedFilter={breedFilter}
           vaccinationFilter={vaccinationFilter}
-          ageMin={ageMin}
-          ageMax={ageMax}
+          ageGroup={ageGroup}
+          ageGroupOptions={AGE_GROUP_OPTIONS}
           locationId={locationId}
           activeRanchId={activeRanchId}
           activeFilterChips={activeFilterChips}
@@ -1001,10 +1136,15 @@ export function BovinesListPage() {
               ? 'No se encontraron bovinos con los filtros aplicados.'
               : 'No hay bovinos registrados todavía.'
           }
-          rowClassName={(b: BovineDetailResponse) => selectedIds.has(b.id)
-            ? 'bg-primary-50/50 dark:bg-primary-900/10'
-            : ''
-          }
+          rowClassName={(b: BovineDetailResponse) => {
+            // F-30: bovinos fallecidos se muestran atenuados cuando el switch
+            // "incluir fallecidos" esta ON. Combinar con la selección activa
+            // (que tiene mayor prioridad visual).
+            const isDeceased = b.healthStatus === 'DECEASED' || b.isActive === false;
+            if (selectedIds.has(b.id)) return 'bg-primary-50/50 dark:bg-primary-900/10';
+            if (isDeceased) return 'opacity-60 bg-gray-50 dark:bg-gray-900/40';
+            return '';
+          }}
         />
       ) : (
         <BovineMapView
@@ -1035,6 +1175,11 @@ export function BovinesListPage() {
             </p>
           </div>
 
+          {/* F-13 NO se aplica al bulk-move: los bovinos seleccionados pueden
+              estar en potreros distintos, no hay UN "potrero actual" que
+              deshabilitar. Para los que ya estan en el destino elegido, el
+              backend hace no-op (M-01) por bovino — silenciosamente sin
+              romper el batch. */}
           <LocationSelector
             label="Potrero / Ubicación destino"
             value={moveLocationId}

@@ -59,19 +59,19 @@ export const createBovineSchema = [
     .custom((value) => {
       const birthDate = new Date(value);
       const today = new Date();
-      
+
       // No puede ser futura
       if (birthDate > today) {
         throw new Error('La fecha de nacimiento no puede ser futura');
       }
-      
+
       // No puede ser muy antigua (más de 20 años)
       const maxAge = new Date();
       maxAge.setFullYear(maxAge.getFullYear() - 20);
       if (birthDate < maxAge) {
         throw new Error('La fecha de nacimiento es muy antigua (máximo 20 años)');
       }
-      
+
       return true;
     }),
 
@@ -291,7 +291,7 @@ export const getBovineByEarTagSchema = [
     .withMessage('El arete es requerido')
     .isLength({ min: 3, max: 50 })
     .withMessage('El arete debe tener entre 3 y 50 caracteres'),
-  
+
   query('ranchId')
     .optional()
     .isUUID()
@@ -361,6 +361,18 @@ export const listBovinesSchema = [
     .optional()
     .isUUID()
     .withMessage('ID de ubicación inválido'),
+    
+  query('disease')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage('El diagnóstico no puede superar 100 caracteres'),
+
+  query('diseaseId')
+    .optional()
+    .isUUID()
+    .withMessage('diseaseId debe ser un UUID válido'),
 
   query('ageMin')
     .optional()
@@ -377,6 +389,22 @@ export const listBovinesSchema = [
       }
       return true;
     }),
+
+  query('ageGroup')
+    .optional()
+    .isIn(['calf', 'young', 'adult'])
+    .withMessage("ageGroup debe ser 'calf', 'young' o 'adult'"),
+
+  // G-03: candidatos genealógicos
+  query('purpose')
+    .optional()
+    .isIn(['dam', 'sire'])
+    .withMessage("purpose debe ser 'dam' (madre) o 'sire' (padre)"),
+
+  query('excludeIds')
+    .optional()
+    .isString()
+    .withMessage('excludeIds debe ser una lista de UUIDs separada por comas'),
 
   query('weightMin')
     .optional()

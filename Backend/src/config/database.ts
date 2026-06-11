@@ -6,6 +6,21 @@ import { BackupManager } from '../backup/BackupManager';
 import logger from '../utils/logger';
 
 // ============================================================================
+// P-01 — COERCIÓN DE TIPOS NUMÉRICOS DE POSTGRES
+// ============================================================================
+// Por defecto el driver `pg` devuelve NUMERIC/DECIMAL (OID 1700) como STRING
+// para no perder precisión. Eso causaba que campos como tasas/montos llegaran
+// como "12.50" y rompía operaciones tipo `value.toFixed()` o cálculos directos.
+// Forzamos NUMERIC → number a nivel global (una sola vez, al cargar el módulo).
+// Nota: con valores extremadamente grandes parseFloat puede perder precisión;
+// en este dominio (pesos, tasas, montos) es seguro.
+// Usamos require porque `@types/pg` no está instalado (evita dependencia de tipos).
+// ============================================================================
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { types: pgTypes } = require('pg');
+pgTypes.setTypeParser(1700, (val: string | null) => (val === null ? null : parseFloat(val)));
+
+// ============================================================================
 // INTERFACES Y TIPOS
 // ============================================================================
 

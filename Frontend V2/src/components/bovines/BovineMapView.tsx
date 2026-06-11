@@ -40,6 +40,7 @@ import type {
   BovineMapMarkerResponse,
   BovineMapClusterResponse,
 } from '@/types/bovine.dtos';
+import { getHealthColor } from '@/design-system/tokens';
 import { MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM } from '@/utils/constants';
 import { Beef, MapPin, HelpCircle } from 'lucide-react';
 
@@ -227,16 +228,20 @@ export function BovineMapView({
   }, [data]);
 
   // ── Modo de render ──────────────────────────────────────────────────────
-  // 1) Si hay filtro de locationId → mostrar SOLO ese potrero (boundary +
-  //    markers individuales), sin clusters de otros.
-  // 2) Si zoom >= EXPLODE_ZOOM → boundaries + markers individuales.
-  // 3) Si zoom <  EXPLODE_ZOOM → burbujas-por-potrero con count.
+  // El modo lo decide ÚNICAMENTE el nivel de zoom — el filtro de ubicación
+  // ya no fuerza el modo "explosión". Esto preserva la progresión natural
+  // cluster → puntos también con un solo potrero filtrado:
+  //   • Zoom <  EXPLODE_ZOOM → burbuja con count del potrero (agrupada).
+  //   • Zoom >= EXPLODE_ZOOM → boundary teal + markers individuales.
+  //
+  // (Antes, con filtro de location la burbuja-con-count se saltaba siempre
+  // — los usuarios reportaron que no veían el conteo agrupado al filtrar.)
   const currentZoom = viewport?.zoom ?? initialZoom;
   const hasLocationFilter = !!filters.locationId;
-  const showAsBubbles = !hasLocationFilter && currentZoom < EXPLODE_ZOOM;
+  const showAsBubbles = currentZoom < EXPLODE_ZOOM;
 
-  // Locations visibles (las que tienen al menos 1 bovino del grupo o son
-  // el filtro activo). Si no hay markers todavía, mostramos todas como hint.
+  // Locations visibles. Con filtro activo se restringe al potrero filtrado;
+  // sin filtro, mostramos los que tienen al menos un bovino en el viewport.
   const visibleLocations = useMemo(() => {
     if (!markersByLocation) return [];
     if (hasLocationFilter) {
@@ -449,8 +454,12 @@ function BovineMarker({
       radius={7}
       pathOptions={{
         // El COLOR del fill es siempre el de salud (no se altera al ser huérfano).
+        // Antes leíamos `bovine.color` (pre-calculado server-side), pero migramos
+        // a derivarlo del design-system para mantener UN SOLO origen de verdad
+        // y evitar drift entre el verde del mapa y el del resto de la UI.
+        // El campo `bovine.color` queda en el DTO solo como compatibilidad.
         color: isOrphan ? '#9ca3af' : '#ffffff',
-        fillColor: bovine.color,
+        fillColor: getHealthColor(bovine.healthStatus),
         fillOpacity: 0.9,
         weight: isOrphan ? 2 : 2,
         dashArray: isOrphan ? '2 3' : undefined, // borde punteado = huérfano
@@ -550,15 +559,22 @@ function LocationBubble({
   }, [location, bovines, count]);
 
   // Color predominante por estado de salud dentro del potrero.
+  // Agrupamos por `healthStatus` (no por `color` directo) y resolvemos el
+  // hex al final vía el design-system. Esto garantiza coherencia con los
+  // markers individuales del mismo bovino y con badges de salud del resto
+  // de la UI — todos beben del mismo `getHealthColor`.
   const dominantColor = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const b of bovines) counts.set(b.color, (counts.get(b.color) ?? 0) + 1);
-    let best = '#22c55e';
-    let max = 0;
-    for (const [color, c] of counts) {
-      if (c > max) { max = c; best = color; }
+    for (const b of bovines) {
+      const status = b.healthStatus ?? 'UNKNOWN';
+      counts.set(status, (counts.get(status) ?? 0) + 1);
     }
-    return best;
+    let bestStatus = 'HEALTHY';
+    let max = 0;
+    for (const [status, c] of counts) {
+      if (c > max) { max = c; bestStatus = status; }
+    }
+    return getHealthColor(bestStatus);
   }, [bovines]);
 
   // Si solo hay 1 bovino, mejor renderizar el marker individual directo

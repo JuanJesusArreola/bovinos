@@ -186,6 +186,7 @@ export class ClusterService {
                 ...point,
                 metadata: {
                     ...point.metadata,
+                    diagnosis: point.metadata.diagnosis ?? undefined,
                     healthStatusLabel: this.getHealthStatusLabel(point.metadata.healthStatus),
                     ageDisplay: this.getAgeDisplay(point.metadata.age)
                 }

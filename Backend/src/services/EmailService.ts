@@ -697,7 +697,12 @@ export class EmailService extends EventEmitter {
     }
 
     async sendPasswordResetEmail(email: string, resetToken: string, firstName: string): Promise<SendResult> {
-        const resetLink = `${process.env.BASE_URL}/api/auth/reset-password?token=${resetToken}`;
+        // El link de recuperación apunta al FRONTEND (no a la API), donde la
+        // página `/reset-password` toma el token, lo valida y ofrece el form
+        // para escribir la nueva contraseña. Si apuntara al backend, el usuario
+        // vería un JSON crudo al abrir el correo.
+        const frontendBase = process.env.FRONTEND_URL || process.env.BASE_URL || 'http://localhost:5173';
+        const resetLink = `${frontendBase}/reset-password?token=${resetToken}`;
 
         return this.sendEmail({
             to: email,
@@ -712,7 +717,12 @@ export class EmailService extends EventEmitter {
     }
 
     async sendEmailVerification(email: string, verificationToken: string, firstName: string): Promise<SendResult> {
-        const verificationLink = `${process.env.BASE_URL}/api/auth/verify-email?token=${verificationToken}`;
+        // El link de verificación apunta al FRONTEND `/verify-email?token=...`
+        // — esa página llama al endpoint `/api/auth/verify-email` por debajo
+        // y muestra al usuario un mensaje de éxito/error con botón a Login.
+        // Antes apuntaba directo al backend → el usuario veía un JSON.
+        const frontendBase = process.env.FRONTEND_URL || process.env.BASE_URL || 'http://localhost:5173';
+        const verificationLink = `${frontendBase}/verify-email?token=${verificationToken}`;
 
         return this.sendEmail({
             to: email,

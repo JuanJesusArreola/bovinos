@@ -93,6 +93,12 @@ export const createVaccinationSchema = [
     .withMessage('withdrawalPeriodDays debe ser entero entre 0 y 365')
     .toInt(),
 
+  body('immunityDurationDays')
+    .optional()
+    .isInt({ min: 0, max: 3650 })
+    .withMessage('immunityDurationDays debe ser entero entre 0 y 3650')
+    .toInt(),
+
   body('notes')
     .optional({ checkFalsy: true })
     .isString()
@@ -160,4 +166,51 @@ export const deleteVaccinationSchema = [
   param('vaccinationId')
     .isUUID()
     .withMessage('ID de vacuna inválido (UUID requerido)'),
+];
+
+/**
+ * PATCH /api/vaccinations/:vaccinationId  (V-04)
+ * Edición parcial: todos los campos opcionales.
+ */
+export const updateVaccinationSchema = [
+  param('vaccinationId')
+    .isUUID()
+    .withMessage('ID de vacuna inválido (UUID requerido)'),
+
+  body('vaccineType')
+    .optional()
+    .isIn(Object.values(VaccineType))
+    .withMessage(`vaccineType debe ser uno de: ${Object.values(VaccineType).join(', ')}`),
+
+  body('vaccineName').optional({ nullable: true }).isString().isLength({ max: 150 }),
+  body('manufacturer').optional({ nullable: true }).isString().isLength({ max: 150 }),
+  body('batchNumber').optional({ nullable: true }).isString().isLength({ max: 100 }),
+
+  body('doseNumber').optional().isInt({ min: 1, max: 20 }).toInt(),
+  body('doseAmountMl').optional({ nullable: true }).isFloat({ min: 0, max: 1000 }).toFloat(),
+
+  body('applicationRoute')
+    .optional({ nullable: true })
+    .isIn(Object.values(ApplicationRoute))
+    .withMessage(`applicationRoute debe ser uno de: ${Object.values(ApplicationRoute).join(', ')}`),
+
+  body('applicationDate')
+    .optional()
+    .isISO8601()
+    .withMessage('applicationDate debe ser ISO8601')
+    .custom((value) => {
+      if (new Date(value) > new Date()) throw new Error('applicationDate no puede ser futura');
+      return true;
+    }),
+
+  body('nextDueDate')
+    .optional({ nullable: true })
+    .isISO8601()
+    .withMessage('nextDueDate debe ser ISO8601'),
+
+  body('applicatorId').optional().isUUID().withMessage('applicatorId debe ser UUID'),
+  body('withdrawalPeriodDays').optional({ nullable: true }).isInt({ min: 0, max: 365 }).toInt(),
+  body('immunityDurationDays').optional({ nullable: true }).isInt({ min: 0, max: 3650 }).toInt(),
+  body('notes').optional({ nullable: true }).isString().isLength({ max: 2000 }),
+  body('metadata').optional({ nullable: true }).isObject(),
 ];

@@ -27,13 +27,26 @@ export enum VaccineType {
   IBR = 'IBR',                                  // Rinotraqueítis Bovina Infecciosa
   BVD = 'BVD',                                  // Diarrea Viral Bovina
   LEPTOSPIROSIS = 'LEPTOSPIROSIS',
-  CLOSTRIDIAL = 'CLOSTRIDIAL',                  // Polivalente clostridial
+  CLOSTRIDIAL = 'CLOSTRIDIAL',                  // Polivalente clostridial (7/8 vías)
   PASTEURELLA = 'PASTEURELLA',
   TUBERCULOSIS = 'TUBERCULOSIS',                // (test, no vacuna en muchos países, se incluye por trazabilidad)
   TETANUS = 'TETANUS',
   VIRAL_DIARRHEA = 'VIRAL_DIARRHEA',
   PARAINFLUENZA = 'PARAINFLUENZA',
   RSV = 'RSV',                                  // Respiratorio Sincicial
+  // ── Tipos añadidos (Fase: puente vacunación↔enfermedad) ──────────────────
+  RESPIRATORY_COMPLEX = 'RESPIRATORY_COMPLEX', // Polivalente IBR-BVD-PI3-BRSV
+  CAMPYLOBACTER = 'CAMPYLOBACTER',             // Vibriosis / campilobacteriosis genital
+  TRICHOMONIASIS = 'TRICHOMONIASIS',           // Tricomoniasis bovina
+  PINKEYE = 'PINKEYE',                          // Queratoconjuntivitis (Moraxella bovis)
+  NEONATAL_DIARRHEA = 'NEONATAL_DIARRHEA',     // Rotavirus-Coronavirus-E.coli-K99
+  SALMONELLA = 'SALMONELLA',                    // Salmonelosis (bacterina)
+  FUSOBACTERIUM = 'FUSOBACTERIUM',             // Foot rot / abscesos hepáticos
+  LUMPY_SKIN = 'LUMPY_SKIN',                    // Dermatosis nodular contagiosa
+  BLUETONGUE = 'BLUETONGUE',                    // Lengua azul
+  THEILERIA = 'THEILERIA',                      // Teileriosis
+  BABESIA_ANAPLASMA = 'BABESIA_ANAPLASMA',     // Babesiosis + anaplasmosis (viva atenuada)
+  PARATUBERCULOSIS = 'PARATUBERCULOSIS',       // Enfermedad de Johne
   OTHER = 'OTHER',
 }
 
@@ -64,6 +77,7 @@ export interface VaccinationAttributes {
   nextDueDate?: Date;                // null si es dosis única
   applicatorId: string;              // FK User (veterinario)
   withdrawalPeriodDays?: number;     // periodo de retiro carne/leche
+  immunityDurationDays?: number;     // override de la duración de inmunidad (si null, usa el catálogo)
   notes?: string;
   metadata?: Record<string, any>;    // ruta, sitio, reacciones adversas, etc.
   createdAt?: Date;
@@ -82,6 +96,7 @@ export interface VaccinationCreationAttributes
     | 'applicationRoute'
     | 'nextDueDate'
     | 'withdrawalPeriodDays'
+    | 'immunityDurationDays'
     | 'notes'
     | 'metadata'
     | 'deletedAt'
@@ -106,6 +121,7 @@ class Vaccination extends Model<VaccinationAttributes, VaccinationCreationAttrib
   public nextDueDate?: Date;
   public applicatorId!: string;
   public withdrawalPeriodDays?: number;
+  public immunityDurationDays?: number;
   public notes?: string;
   public metadata?: Record<string, any>;
   public readonly createdAt!: Date;
@@ -205,6 +221,12 @@ Vaccination.init(
       allowNull: true,
       validate: { min: 0 },
       comment: 'Días de retiro (carne/leche) antes de poder consumir productos del animal',
+    },
+    immunityDurationDays: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      validate: { min: 0 },
+      comment: 'Override de la duración de inmunidad en días. Si null, se usa el valor del catálogo VaccineDiseaseProtection.',
     },
     notes: {
       type: DataTypes.TEXT,

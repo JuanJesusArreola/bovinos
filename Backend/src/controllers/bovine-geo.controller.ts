@@ -71,10 +71,18 @@ export class BovineGeoController {
                 }
             }
 
+            // Filtro por UUID de enfermedad activa (Phase 2)
+            const diseaseIdsQuery = req.query.diseaseIds as string;
+            let diseaseIds: string[] | undefined;
+            if (diseaseIdsQuery) {
+                diseaseIds = diseaseIdsQuery.split(',').map((d) => d.trim()).filter(Boolean);
+            }
+
             const filters = {
                 healthStatus,
                 breeds,
-                ageRange
+                ageRange,
+                diseaseIds,
             };
 
             const data = await bovineGeoService.getHeatmapData(ranchId, filters);
@@ -273,7 +281,8 @@ export class BovineGeoController {
      *   ranchId | ranchIds (CSV)
      *   healthStatus (CSV) | breeds (CSV) | cattleTypes (CSV) | genders (CSV)
      *   ageMin | ageMax
-     *   diseases (CSV)
+     *   diseases (CSV texto, legacy)
+     *   diseaseIds (CSV de UUIDs de Disease — Phase 2)
      *   vaccinationStatus
      *   locationId
      *   zoom (number)  default 12
@@ -326,6 +335,7 @@ export class BovineGeoController {
                 cattleTypes: parseCsv(req.query.cattleTypes) as CattleType[] | undefined,
                 genders: parseCsv(req.query.genders) as GenderType[] | undefined,
                 diseases: parseCsv(req.query.diseases),
+                diseaseIds: parseCsv(req.query.diseaseIds),
                 vaccinationStatus: req.query.vaccinationStatus
                     ? (req.query.vaccinationStatus as VaccinationStatus)
                     : undefined,

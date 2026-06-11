@@ -7,15 +7,34 @@ interface BovineSelectorProps {
   value?: string | null;
   onChange: (bovineId: string | null, bovineTag?: string) => void;
   ranchId?: string | null;
-  /** Optionally restrict to a specific gender (e.g. 'FEMALE' for dam selection) */
+  /**
+   * @deprecated para selectores de padres usar `purpose='dam'|'sire'` que
+   * resuelve las reglas reproductivas en el backend (gender + edad minima).
+   * `filterGender` se mantiene para casos genericos (listas de hembras/machos
+   * sin restriccion de edad reproductiva) donde el backend solo filtra por
+   * sexo. Si se pasan ambos, `purpose` gana.
+   */
   filterGender?: string;
+  /**
+   * Backend G-03 / G-07: resuelve sexo + edad reproductiva server-side
+   *   - `dam`  → `gender=FEMALE` + edad ≥ 15 meses
+   *   - `sire` → `gender=MALE`   + edad ≥ 18 meses
+   * Los umbrales viven en `bovine.constants.ts` del backend; el frontend no
+   * los duplica. Si cambian las reglas reproductivas, solo se actualiza alli.
+   */
+  purpose?: 'dam' | 'sire';
   label?: string;
   placeholder?: string;
   error?: string;
   disabled?: boolean;
   clearable?: boolean;
   className?: string;
-  /** Exclude specific bovine IDs from the list (e.g. exclude self) */
+  /**
+   * Excluir IDs especificos. Tras G-03 esto se envia al backend como
+   * `?excludeIds=` para que los resultados ya vengan filtrados (paginas no
+   * "huecas" cuando se excluye al propio bovino del selector de padres).
+   * Tambien se aplica client-side por defensa.
+   */
   excludeIds?: string[];
 }
 
@@ -28,6 +47,7 @@ export function BovineSelector({
   onChange,
   ranchId,
   filterGender,
+  purpose,
   label = 'Bovino',
   placeholder = 'Buscar por arete o nombre...',
   error,
@@ -40,20 +60,33 @@ export function BovineSelector({
   const [search, setSearch] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Si se pasan ambos, `purpose` tiene prioridad: el backend resuelve las
+  // reglas reproductivas (sexo + edad) — `filterGender` se ignora para
+  // evitar enviar el filtro duplicado y porque las restricciones de edad
+  // solo aplican via `purpose`.
+  const queryParams = {
+    limit: 100,                 // backend max
+    ...(ranchId ? { ranchId } : {}),
+    ...(purpose
+      ? { purpose }
+      : filterGender ? { gender: filterGender } : {}),
+    ...(excludeIds.length > 0 ? { excludeIds } : {}),
+  };
+
   const { data, isLoading } = useQuery({
-    queryKey: ['bovines-selector', ranchId, filterGender],
+    queryKey: ['bovines-selector', ranchId, filterGender, purpose, excludeIds.join(',')],
     queryFn: () =>
       bovinesApi
-        .list({
-          limit: 100,          // backend max is 100
-          ...(ranchId ? { ranchId } : {}),
-          ...(filterGender ? { gender: filterGender } : {}),
-        })
+        .list(queryParams as Parameters<typeof bovinesApi.list>[0])
         .then((r) => r.data.data),
     staleTime: 1000 * 60 * 3,
   });
 
-  const bovines = (data?.items || []).filter((b) => !excludeIds.includes(b.id));
+  // G-06 (Backend M5): el listado viene en `data.bovines`, NO `data.items`
+  // (campo legacy que ya no existe). Antes de este fix los selectores de
+  // padres mostraban lista vacia siempre. Mantenemos el filtro client-side
+  // por `excludeIds` como defensa adicional aunque el backend ya excluye.
+  const bovines = (data?.bovines || []).filter((b) => !excludeIds.includes(b.id));
   const filtered = bovines.filter((b) => {
     const q = search.toLowerCase();
     return (

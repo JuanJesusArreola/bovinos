@@ -22,13 +22,34 @@ import {
   HealthRecordType,
   OverallHealthStatus,
   DiagnosisStatus,
+  isTreatmentActive,
   type HealthRecord,
+  type TreatmentMedication,
 } from '@/types/health.types';
+import { RecordMedicationDoseModal } from '@/components/health/RecordMedicationDoseModal';
+import { StartTreatmentModal } from '@/components/health/StartTreatmentModal';
+import { CompleteTreatmentModal } from '@/components/health/CompleteTreatmentModal';
+import { EditHealthRecordModal } from '@/components/health/EditHealthRecordModal';
+import { DeleteHealthRecordModal } from '@/components/health/DeleteHealthRecordModal';
+import { UploadLabResultsModal } from '@/components/health/UploadLabResultsModal';
+import { LabResultsSection } from '@/components/health/LabResultsSection';
+import { BovineLabTrendCard } from '@/components/health/BovineLabTrendCard';
+import { BovineHealthSummaryCard } from '@/components/health/BovineHealthSummaryCard';
+import { RegisterDiagnosisModal } from '@/components/health/RegisterDiagnosisModal';
+import { useConfirmDiagnosis } from '@/hooks/useBovineHealth';
+import { Link } from 'react-router-dom';
+import {
+  HEALTH_RECORD_TYPE_LABELS,
+  HEALTH_RECORD_TYPE_DOT_CLASSES,
+  HEALTH_RECORD_TYPE_BADGE_CLASSES,
+  getHealthRecordTypeLabel,
+} from '@/design-system/tokens';
 import {
   Plus, ChevronDown, ChevronUp, AlertTriangle, Stethoscope,
   Syringe, FlaskConical, ClipboardList, RefreshCw, Thermometer,
   Scale, Heart, Calendar, DollarSign, User, FileText,
-  CheckCircle2, Clock, Pill, Zap, Activity,
+  CheckCircle2, Clock, Pill, Zap, Activity, Play,
+  Pencil, Trash2, ExternalLink,
 } from 'lucide-react';
 
 // ─── Record type config ───────────────────────────────────────────────────────
@@ -40,22 +61,39 @@ interface RecordTypeConfig {
   icon: React.ElementType;
 }
 
-const RECORD_TYPE_CONFIG: Record<string, RecordTypeConfig> = {
-  ROUTINE_CHECKUP:       { label: 'Revisión Rutinaria',   dotColor: 'bg-emerald-500', badgeClasses: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400', icon: Stethoscope },
-  EMERGENCY_VISIT:       { label: 'Emergencia',           dotColor: 'bg-red-500',     badgeClasses: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',                 icon: Zap },
-  FOLLOW_UP:             { label: 'Seguimiento',          dotColor: 'bg-sky-500',     badgeClasses: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400',                 icon: RefreshCw },
-  VACCINATION:           { label: 'Vacunación',           dotColor: 'bg-blue-500',    badgeClasses: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',             icon: Syringe },
-  TREATMENT:             { label: 'Tratamiento',          dotColor: 'bg-amber-500',   badgeClasses: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',         icon: Pill },
-  SURGERY:               { label: 'Cirugía',              dotColor: 'bg-rose-500',    badgeClasses: 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400',             icon: Activity },
-  LABORATORY_TEST:       { label: 'Laboratorio',          dotColor: 'bg-purple-500',  badgeClasses: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',     icon: FlaskConical },
-  PHYSICAL_EXAM:         { label: 'Examen Físico',        dotColor: 'bg-teal-500',    badgeClasses: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',             icon: ClipboardList },
-  REPRODUCTIVE_EXAM:     { label: 'Examen Reproductivo',  dotColor: 'bg-pink-500',    badgeClasses: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-400',             icon: Heart },
-  QUARANTINE_ASSESSMENT: { label: 'Cuarentena',           dotColor: 'bg-orange-500',  badgeClasses: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',     icon: AlertTriangle },
-  OTHER:                 { label: 'Otro',                 dotColor: 'bg-gray-400',    badgeClasses: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',                icon: FileText },
+/**
+ * Iconos por tipo de registro — viven local porque son componentes React.
+ * Labels y clases vienen del design-system.
+ */
+const RECORD_TYPE_ICONS: Record<string, React.ElementType> = {
+  ROUTINE_CHECKUP:       Stethoscope,
+  EMERGENCY_VISIT:       Zap,
+  FOLLOW_UP:             RefreshCw,
+  VACCINATION:           Syringe,
+  TREATMENT:             Pill,
+  SURGERY:               Activity,
+  LABORATORY_TEST:       FlaskConical,
+  PHYSICAL_EXAM:         ClipboardList,
+  REPRODUCTIVE_EXAM:     Heart,
+  QUARANTINE_ASSESSMENT: AlertTriangle,
+  OTHER:                 FileText,
 };
 
+/**
+ * Resuelve label + dot + badge + icono para un tipo de registro de salud.
+ * Si el tipo es desconocido, cae al config de `OTHER` para que el render
+ * nunca falle (defensive: el backend podría agregar tipos nuevos).
+ */
 function getRecordConfig(type: string): RecordTypeConfig {
-  return RECORD_TYPE_CONFIG[type] ?? RECORD_TYPE_CONFIG['OTHER'];
+  const labels = HEALTH_RECORD_TYPE_LABELS as Record<string, string>;
+  const dots   = HEALTH_RECORD_TYPE_DOT_CLASSES as Record<string, string>;
+  const badges = HEALTH_RECORD_TYPE_BADGE_CLASSES as Record<string, string>;
+  return {
+    label:        labels[type] ?? labels.OTHER,
+    dotColor:     dots[type]   ?? dots.OTHER,
+    badgeClasses: badges[type] ?? badges.OTHER,
+    icon:         RECORD_TYPE_ICONS[type] ?? RECORD_TYPE_ICONS.OTHER,
+  };
 }
 
 // ─── Form schema ──────────────────────────────────────────────────────────────
@@ -95,7 +133,9 @@ type ConsultaFormValues = z.infer<typeof consultaSchema>;
 
 const recordTypeOptions = Object.entries(HealthRecordType).map(([, v]) => ({
   value: v,
-  label: RECORD_TYPE_CONFIG[v]?.label ?? v,
+  // Usa el helper defensivo del design-system — antes referenciaba el
+  // `RECORD_TYPE_CONFIG` local que se eliminó en la migración a tokens.
+  label: getHealthRecordTypeLabel(v),
 }));
 
 const healthStatusOptions = [
@@ -123,9 +163,31 @@ function todayISO() {
 function TimelineRecord({
   record,
   isLast,
+  canManage,
+  onEdit,
+  onDelete,
+  onAddLab,
+  onRegisterDiagnosis,
+  onConfirmDiagnosis,
+  confirmingDiagnosisId,
 }: {
   record: HealthRecord;
   isLast: boolean;
+  /** Si true, se muestran los botones de editar/eliminar/subir lab/diagnosis. */
+  canManage?: boolean;
+  /** Click "Editar" - el caller abre el modal correspondiente. */
+  onEdit?: (record: HealthRecord) => void;
+  /** Click "Eliminar" - el caller abre el modal de confirmacion. */
+  onDelete?: (record: HealthRecord) => void;
+  /** Click "Subir resultados de lab" - abre el modal de upload. */
+  onAddLab?: (healthId: string) => void;
+  /** Click "Registrar/actualizar diagnostico" - abre el modal. */
+  onRegisterDiagnosis?: (record: HealthRecord) => void;
+  /** Click "Confirmar diagnostico" - dispara la mutacion inline. */
+  onConfirmDiagnosis?: (healthId: string) => void;
+  /** Si la mutacion de confirmar esta corriendo para ESTE record, el
+   *  caller pasa el healthId aqui para deshabilitar el boton mientras. */
+  confirmingDiagnosisId?: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const cfg = getRecordConfig(record.recordType ?? record.type ?? 'OTHER');
@@ -200,8 +262,47 @@ function TimelineRecord({
               </div>
             </div>
 
-            {/* Expand toggle */}
-            <div className="shrink-0 flex items-start">
+            {/* Expand toggle + edit/delete actions.
+                Los botones de editar/eliminar NO van DENTRO del <button>
+                expand-toggle (anidar buttons rompe accesibilidad). Los
+                ponemos como hermanos en el contenedor flex y usan
+                stopPropagation para evitar disparar el toggle al hacer
+                click. Solo se muestran si canManage es true. */}
+            <div className="shrink-0 flex items-start gap-2">
+              {canManage && (
+                <div className="flex items-center gap-1 mt-0.5">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onEdit?.(record); }}
+                    className="p-1 rounded text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
+                    title="Editar registro"
+                    aria-label="Editar registro"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onDelete?.(record); }}
+                    className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+                    title="Eliminar registro (soft delete)"
+                    aria-label="Eliminar registro"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+              {/* Link a la pagina completa del record. NO anidado dentro del
+                  button del expand-toggle (rompe accesibilidad), por eso
+                  hermano en el flex container con stopPropagation. */}
+              <Link
+                to={`/health/records/${record.id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="p-1 rounded text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors mt-0.5"
+                title="Ver pagina completa del registro"
+                aria-label="Ver pagina completa"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Link>
               <span className="flex items-center gap-1 text-xs text-gray-400 group-hover:text-primary-500 transition-colors mt-1">
                 {expanded ? (
                   <><ChevronUp className="w-4 h-4" /> Contraer</>
@@ -263,59 +364,239 @@ function TimelineRecord({
               </section>
             )}
 
-            {/* Diagnosis */}
-            {record.diagnosis && (
+            {/* Diagnosis - SIEMPRE se renderiza si el usuario tiene
+                permiso (asi puede registrar uno aunque el record no
+                tenga). Si el record SI tiene diagnosis, mostramos
+                detalles + opciones de Actualizar / Confirmar. */}
+            {(record.diagnosis?.primaryDiagnosis || canManage) && (
               <section>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1">
-                  <ClipboardList className="w-3.5 h-3.5" /> Diagnóstico
-                </p>
-                {record.diagnosis.primaryDiagnosis && (
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                    <ClipboardList className="w-3.5 h-3.5" /> Diagnostico
+                    {record.diagnosis?.confirmedAt && (
+                      <span className="ml-1 inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                        <CheckCircle2 className="w-2.5 h-2.5" />
+                        Confirmado
+                      </span>
+                    )}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {canManage && record.diagnosis?.primaryDiagnosis
+                      && !record.diagnosis.confirmedAt
+                      && onConfirmDiagnosis && (
+                        <button
+                          type="button"
+                          onClick={() => onConfirmDiagnosis(record.id)}
+                          disabled={confirmingDiagnosisId === record.id}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Confirmar diagnostico (anade confirmedAt + confirmedBy)"
+                        >
+                          <CheckCircle2 className="w-3 h-3" />
+                          {confirmingDiagnosisId === record.id ? 'Confirmando...' : 'Confirmar'}
+                        </button>
+                      )}
+                    {canManage && onRegisterDiagnosis && (
+                      <button
+                        type="button"
+                        onClick={() => onRegisterDiagnosis(record)}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                      >
+                        <Stethoscope className="w-3 h-3" />
+                        {record.diagnosis?.primaryDiagnosis ? 'Actualizar' : 'Registrar diagnostico'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {record.diagnosis?.primaryDiagnosis && (
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{record.diagnosis.primaryDiagnosis}</p>
                 )}
-                {record.diagnosis.secondaryDiagnoses && record.diagnosis.secondaryDiagnoses.length > 0 && (
+                {!record.diagnosis?.primaryDiagnosis && canManage && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+                    Sin diagnostico registrado. Usa el boton arriba cuando tengas los datos.
+                  </p>
+                )}
+                {record.diagnosis?.secondaryDiagnoses && record.diagnosis.secondaryDiagnoses.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {record.diagnosis.secondaryDiagnoses.map((d, i) => (
                       <span key={i} className="text-xs text-gray-500 italic">{d}</span>
                     ))}
                   </div>
                 )}
-                <div className="mt-1.5 flex items-center gap-3 text-xs text-gray-500">
-                  <span>Estado: <span className="font-medium capitalize">{record.diagnosis.status?.toLowerCase()}</span></span>
+                {record.diagnosis && (
+                <div className="mt-1.5 flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+                  {record.diagnosis.status && (
+                    <span>Estado: <span className="font-medium capitalize">{record.diagnosis.status?.toLowerCase()}</span></span>
+                  )}
                   {record.diagnosis.prognosis && (
-                    <span>Pronóstico: <span className="font-medium">{record.diagnosis.prognosis}</span></span>
+                    <span>Pronostico: <span className="font-medium">{record.diagnosis.prognosis}</span></span>
                   )}
                   {record.diagnosis.confidence != null && (
                     <span>Confianza: <span className="font-medium">{record.diagnosis.confidence}%</span></span>
                   )}
                 </div>
+                )}
               </section>
             )}
 
             {/* Treatment summary */}
             {record.treatment && (
               <section>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1">
-                  <Pill className="w-3.5 h-3.5" /> Tratamiento
-                </p>
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                    <Pill className="w-3.5 h-3.5" /> Tratamiento
+                    {record.treatment.status && (
+                      <span
+                        className={cn(
+                          'ml-1 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                          isTreatmentActive(record.treatment.status)
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+                        )}
+                      >
+                        {record.treatment.status}
+                      </span>
+                    )}
+                  </p>
+                  {/* Boton contextual: si no hay treatment activo, ofrecer
+                      "Iniciar tratamiento"; si esta abierto, ofrecer
+                      "Completar". El permiso usa RECORD_HEALTH (mismo
+                      gate que la creacion de records y la dosis). */}
+                  {canRecord && (() => {
+                    const active = isTreatmentActive(record.treatment.status);
+                    if (active) {
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setCompleteTreatmentTarget({
+                            healthId: record.id,
+                            medications: record.treatment?.medications as
+                              TreatmentMedication[] | undefined,
+                          })}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline"
+                        >
+                          <CheckCircle2 className="w-3 h-3" />
+                          Completar tratamiento
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setStartTreatmentTarget({
+                          healthId: record.id,
+                          defaultDiagnosis:
+                            record.diagnosis?.primaryDiagnosis ?? undefined,
+                        })}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                      >
+                        <Play className="w-3 h-3" />
+                        Iniciar tratamiento
+                      </button>
+                    );
+                  })()}
+                </div>
                 {record.treatment.treatmentPlan && (
                   <p className="text-sm text-gray-700 dark:text-gray-300">{record.treatment.treatmentPlan}</p>
                 )}
                 {record.treatment.medications && record.treatment.medications.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {record.treatment.medications.map((med, i) => (
-                      <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                        <span className="font-medium">{med.name}</span>
-                        <span className="text-gray-400">{med.dosage} {med.dosageUnit} · {med.route}</span>
-                        {med.withdrawalPeriod != null && (
-                          <span className="text-orange-500">Retiro: {med.withdrawalPeriod}d</span>
-                        )}
-                      </li>
-                    ))}
+                  <ul className="mt-2 space-y-1.5">
+                    {record.treatment.medications.map((med, i) => {
+                      // Conteo de dosis aplicadas a la fecha. Si el backend
+                      // no envia administeredAt[], asumimos 0 y dejamos el
+                      // boton disponible para registrar la primera.
+                      const dosesGiven = med.administeredAt?.length
+                        ?? med.administeredCount
+                        ?? 0;
+                      // No tenemos forma robusta de calcular "dosis planeadas
+                      // totales" desde frequency + duration sin parsear
+                      // texto libre ("cada 48h"), asi que mostramos solo el
+                      // conteo aplicadas. Si el backend expone un total
+                      // calculado en futuro lo agregamos aqui.
+                      return (
+                        <li
+                          key={i}
+                          className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-1.5 flex-wrap"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                          <span className="font-medium">{med.name}</span>
+                          <span className="text-gray-400">
+                            {med.dosage} {med.dosageUnit} &middot; {med.route}
+                          </span>
+                          {med.withdrawalPeriod != null && (
+                            <span className="text-orange-500">
+                              Retiro: {med.withdrawalPeriod}d
+                            </span>
+                          )}
+                          <span
+                            className={cn(
+                              'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                              dosesGiven > 0
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+                            )}
+                          >
+                            {dosesGiven} {dosesGiven === 1 ? 'dosis' : 'dosis'} aplicada{dosesGiven === 1 ? '' : 's'}
+                          </span>
+                          {canRecord && (
+                            <button
+                              type="button"
+                              onClick={() => setDoseTarget({
+                                healthId: record.id,
+                                medicationIndex: i,
+                                medication: med,
+                              })}
+                              className="ml-auto inline-flex items-center gap-1 text-[11px] text-primary-600 dark:text-primary-400 hover:underline"
+                              title="Registrar una dosis aplicada hoy"
+                            >
+                              <Pill className="w-3 h-3" />
+                              Registrar dosis
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </section>
             )}
+
+            {/* Laboratorio - resultados con auto-interpretacion.
+                LabResultsSection se autocontrola (filtros, agrupacion
+                por testName, badges de NORMAL/ABNORMAL/CRITICAL). Si
+                no hay resultados, no se renderiza nada. */}
+            {(() => {
+              const labResults = (record as any).laboratoryResults
+                ?? (record as any).labResults
+                ?? [];
+              const hasLab = Array.isArray(labResults) && labResults.length > 0;
+              if (hasLab) {
+                return (
+                  <LabResultsSection
+                    results={labResults}
+                    onAddMore={canManage && onAddLab
+                      ? () => onAddLab(record.id)
+                      : undefined}
+                  />
+                );
+              }
+              // Sin resultados todavia: si el usuario tiene permiso,
+              // ofrecemos un atajo para subir el primer resultado.
+              if (canManage && onAddLab) {
+                return (
+                  <section>
+                    <button
+                      type="button"
+                      onClick={() => onAddLab(record.id)}
+                      className="inline-flex items-center gap-1.5 text-xs text-primary-600 dark:text-primary-400 hover:underline"
+                    >
+                      <FlaskConical className="w-3.5 h-3.5" />
+                      Subir resultados de laboratorio
+                    </button>
+                  </section>
+                );
+              }
+              return null;
+            })()}
 
             {/* Recommendations */}
             {record.recommendations && record.recommendations.length > 0 && (
@@ -397,6 +678,57 @@ export function BovineHealthTab({ bovineId }: Props) {
   const [showModal, setShowModal] = useState(false);
   const [showVitals, setShowVitals] = useState(false);
   const [showFollowUp, setShowFollowUp] = useState(false);
+  // Estado del modal "Registrar dosis aplicada". Guardamos el contexto
+  // completo (record + medicamento + indice) en una sola entrada para
+  // que el modal sepa que mostrar y a donde mandar el POST.
+  const [doseTarget, setDoseTarget] = useState<{
+    healthId:        string;
+    medicationIndex: number;
+    medication:      TreatmentMedication;
+  } | null>(null);
+  // Targets de los modales de start / complete. Cada uno guarda el id
+  // del HealthRecord sobre el que se acciona + datos auxiliares para
+  // pre-llenar el form. Solo uno puede estar abierto a la vez.
+  const [startTreatmentTarget, setStartTreatmentTarget] = useState<{
+    healthId:         string;
+    defaultDiagnosis?: string;
+  } | null>(null);
+  const [completeTreatmentTarget, setCompleteTreatmentTarget] = useState<{
+    healthId:    string;
+    medications?: TreatmentMedication[];
+  } | null>(null);
+  // Targets de los modales de edit/delete. Cada uno guarda el record
+  // completo para que el modal pre-llene defaults y muestre resumen.
+  const [editRecordTarget, setEditRecordTarget] = useState<HealthRecord | null>(null);
+  const [deleteRecordTarget, setDeleteRecordTarget] = useState<HealthRecord | null>(null);
+  // Target del modal de upload de lab. Solo el healthId hace falta -
+  // el modal no necesita el record entero porque siempre agrega
+  // (POST acumula) en lugar de editar.
+  const [uploadLabTarget, setUploadLabTarget] = useState<string | null>(null);
+  // Target del modal de diagnostico (capa 2). Guarda el record completo
+  // para que el modal sepa si pre-llenar campos o no.
+  const [diagnosisTarget, setDiagnosisTarget] = useState<HealthRecord | null>(null);
+
+  // Mutacion para "Confirmar diagnostico" (boton inline, sin modal).
+  // No necesita confirmacion - es un click idempotente desde la UI
+  // (la UI oculta el boton tras confirmar para evitar dobles).
+  const confirmMutation = useConfirmDiagnosis({ bovineId });
+  async function handleConfirmDiagnosis(healthId: string) {
+    try {
+      await confirmMutation.mutateAsync({ healthId });
+      toast.success(
+        'Diagnostico confirmado',
+        'Se registro confirmedAt + confirmedBy en el registro.',
+      );
+    } catch (err) {
+      toast.error(
+        'No se pudo confirmar',
+        (err as any)?.response?.data?.error?.message
+          ?? (err as Error)?.message
+          ?? 'Intenta nuevamente.',
+      );
+    }
+  }
 
   const canRecord = canUser(user?.role, 'RECORD_HEALTH');
 
@@ -505,6 +837,22 @@ export function BovineHealthTab({ bovineId }: Props) {
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <>
+      {/* Summary card - hero del tab de salud. Muestra estado clinico
+          actual, caso activo, KPIs operativos y desglose por tipo.
+          Es la primera vista que el VET tiene al entrar al tab. */}
+      <div className="mb-4">
+        <BovineHealthSummaryCard bovineId={bovineId} />
+      </div>
+
+      {/* Tendencia de laboratorio - se renderiza ANTES del historial
+          como vista "panoramica": el VET ve si el bovino ha tenido
+          parametros fuera de rango y si estan mejorando o empeorando,
+          antes de entrar al detalle de cada visita. Se autocontrola
+          (collapse, empty state, etc.) - aqui solo lo montamos. */}
+      <div className="mb-4">
+        <BovineLabTrendCard bovineId={bovineId} />
+      </div>
+
       <Card>
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -552,6 +900,21 @@ export function BovineHealthTab({ bovineId }: Props) {
                 key={record.id}
                 record={record}
                 isLast={i === sorted.length - 1}
+                canManage={canRecord}
+                onEdit={(r) => setEditRecordTarget(r)}
+                onDelete={(r) => setDeleteRecordTarget(r)}
+                onAddLab={(id) => setUploadLabTarget(id)}
+                onRegisterDiagnosis={(r) => setDiagnosisTarget(r)}
+                onConfirmDiagnosis={handleConfirmDiagnosis}
+                confirmingDiagnosisId={
+                  confirmMutation.isPending
+                    // El hook no nos dice CUAL fue el ultimo healthId,
+                    // asi que pasamos el id del record si la mutacion
+                    // esta pending. Como solo puede haber una activa
+                    // a la vez en este componente, es razonable.
+                    ? (confirmMutation.variables?.healthId ?? record.id)
+                    : null
+                }
               />
             ))}
           </div>
@@ -761,6 +1124,84 @@ export function BovineHealthTab({ bovineId }: Props) {
           </div>
         </form>
       </Modal>
+
+      {/* Modal de "Registrar dosis aplicada" - se monta solo si hay
+          un medicamento seleccionado como target. El propio modal
+          maneja submit, validacion, toasts e invalidacion de caches
+          via useRecordMedicationDose(). */}
+      {doseTarget && (
+        <RecordMedicationDoseModal
+          open={!!doseTarget}
+          onClose={() => setDoseTarget(null)}
+          healthId={doseTarget.healthId}
+          medicationIndex={doseTarget.medicationIndex}
+          medication={doseTarget.medication}
+          bovineId={bovineId}
+        />
+      )}
+
+      {/* Modal de iniciar tratamiento - solo se monta si hay target. */}
+      {startTreatmentTarget && (
+        <StartTreatmentModal
+          open={!!startTreatmentTarget}
+          onClose={() => setStartTreatmentTarget(null)}
+          healthId={startTreatmentTarget.healthId}
+          bovineId={bovineId}
+          defaultDiagnosis={startTreatmentTarget.defaultDiagnosis}
+          defaultVet={user ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : undefined}
+        />
+      )}
+
+      {/* Modal de completar tratamiento - solo si hay target. */}
+      {completeTreatmentTarget && (
+        <CompleteTreatmentModal
+          open={!!completeTreatmentTarget}
+          onClose={() => setCompleteTreatmentTarget(null)}
+          healthId={completeTreatmentTarget.healthId}
+          bovineId={bovineId}
+          medications={completeTreatmentTarget.medications}
+        />
+      )}
+
+      {/* Modal de edicion de record - solo si hay target. */}
+      {editRecordTarget && (
+        <EditHealthRecordModal
+          open={!!editRecordTarget}
+          onClose={() => setEditRecordTarget(null)}
+          record={editRecordTarget}
+          bovineId={bovineId}
+        />
+      )}
+
+      {/* Modal de eliminacion (con confirmacion estricta). */}
+      {deleteRecordTarget && (
+        <DeleteHealthRecordModal
+          open={!!deleteRecordTarget}
+          onClose={() => setDeleteRecordTarget(null)}
+          record={deleteRecordTarget}
+          bovineId={bovineId}
+        />
+      )}
+
+      {/* Modal de upload de resultados de laboratorio (Capa 4). */}
+      {uploadLabTarget && (
+        <UploadLabResultsModal
+          open={!!uploadLabTarget}
+          onClose={() => setUploadLabTarget(null)}
+          healthId={uploadLabTarget}
+          bovineId={bovineId}
+        />
+      )}
+
+      {/* Modal de registrar / actualizar diagnostico (Capa 2). */}
+      {diagnosisTarget && (
+        <RegisterDiagnosisModal
+          open={!!diagnosisTarget}
+          onClose={() => setDiagnosisTarget(null)}
+          record={diagnosisTarget}
+          bovineId={bovineId}
+        />
+      )}
     </>
   );
 }

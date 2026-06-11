@@ -12,6 +12,7 @@ import type {
   VaccinationListResponse,
   VaccinationStatusResponse,
   CreateVaccinationInput,
+  UpdateVaccinationInput,
   ListVaccinationsFilters,
   BovineMediaListResponse,
   BovineMediaUploadResponse,
@@ -22,6 +23,16 @@ import type {
   BovineFiltersOptionsResponse,
   CreateBovineInput,
   MoveBovineInput,
+  MoveBovineResponse,
+  MarkBovineSickInput,
+  DeceaseBovineInput,
+  BovineDeathRecord,
+  MortalityReport,
+  MortalityReportFilters,
+  FilterOption,
+  BovineProtectionItem,
+  SuggestedScheduleItem,
+  BovineRiskScore,
 } from '@/types/bovine.dtos';
 
 /**
@@ -109,6 +120,51 @@ export const bovinesApi = {
   delete: (id: string) =>
     apiClient.delete<ApiSuccessResponse<null>>(`/bovines/${id}`),
 
+  /**
+   * POST /api/bovines/:id/sick (Backend C-04) — abre un caso clinico en un
+   * bovino existente. Internamente reusa `openCase()` del backend, asi que:
+   *   - Actualiza `Bovine.healthStatus` segun severidad/disease
+   *   - Sincroniza `BovineHealthSnapshot.activeDiseaseId/activeCaseId`
+   *   - Crea CaseSymptom[] si se enviaron
+   * Devuelve el caso creado (no el bovino completo).
+   */
+  markSick: (id: string, data: MarkBovineSickInput) =>
+    apiClient.post<ApiSuccessResponse<{ id: string; diseaseId: string; status: string }>>(
+      `/bovines/${id}/sick`,
+      data,
+    ),
+
+  /**
+   * POST /api/bovines/:id/decease (Backend X-03) — registra la muerte del
+   * bovino en una sola transaccion atomica:
+   *   - Crea fila en `bovine_deaths`
+   *   - Marca `Bovine.healthStatus = DECEASED`, `isActive = false`,
+   *     `exitReason = DECEASED`, `currentLocationId = null`
+   *   - Cierra la estancia activa de potrero
+   *   - Si `cause = DISEASE` y hay caso activo, cierra el caso con
+   *     `outcome = DECEASED` (sin recursion, usa applyDeathSideEffects)
+   *   - Elimina (soft) el snapshot de mapa
+   *   - Emite evento `DEATH` (best-effort)
+   *
+   * Errores que la UI debe distinguir:
+   *   - 409 ALREADY_DECEASED   → el bovino ya estaba marcado como fallecido
+   *   - 400 MISSING_DEATH_CAUSE → falta `cause` en el body
+   *   - 400 INVALID_DEATH_DATE → fecha futura o anterior al birthDate
+   */
+  decease: (id: string, data: DeceaseBovineInput) =>
+    apiClient.post<ApiSuccessResponse<BovineDeathRecord>>(`/bovines/${id}/decease`, data),
+
+  /**
+   * GET /api/ranches/:ranchId/mortality (Backend X-07) — reporte agregado.
+   * Devuelve total + lista de grupos con conteo y porcentaje. El backend
+   * resuelve labels en espanol para `cause`.
+   */
+  getRanchMortality: (ranchId: string, filters?: MortalityReportFilters) =>
+    apiClient.get<ApiSuccessResponse<MortalityReport>>(
+      `/ranches/${ranchId}/mortality`,
+      { params: filters },
+    ),
+
   // ── Statistics ───────────────────────────────────────────────────────────
 
   statistics: () =>
@@ -119,9 +175,19 @@ export const bovinesApi = {
 
   // ── Movement ─────────────────────────────────────────────────────────────
 
-  /** PATCH /api/bovines/:id/location — register entry to a new location. */
+  /**
+   * PATCH /api/bovines/:id/location — register entry to a new location.
+   *
+   * Backend L-04: la respuesta incluye flags top-level `wasNoOp` y
+   * `locationChanged` para que el frontend no compare cliente-side
+   * (`MoveBovineResponse` extiende el envelope estandar).
+   *
+   * Backend L-01: puede responder 409 BOVINE_LOCATION_FULL con
+   * `details: { currentOccupancy, maxAnimals }`. Para omitir la validacion
+   * reenviar con `data.forceOverride = true`.
+   */
   moveToLocation: (id: string, data: MoveBovineInput) =>
-    apiClient.patch<ApiSuccessResponse<BovineDetailResponse>>(`/bovines/${id}/location`, data),
+    apiClient.patch<MoveBovineResponse>(`/bovines/${id}/location`, data),
 
   /**
    * Sequential bulk-move helper. The backend has no batch endpoint yet, so we
@@ -137,7 +203,7 @@ export const bovinesApi = {
   ) =>
     Promise.all(
       ids.map((id) =>
-        apiClient.patch<ApiSuccessResponse<BovineDetailResponse>>(
+        apiClient.patch<MoveBovineResponse>(
           `/bovines/${id}/location`,
           {
             locationId,
@@ -169,11 +235,68 @@ export const bovinesApi = {
     apiClient.post<ApiSuccessResponse<VaccinationResponse>>(`/bovines/${id}/vaccinations`, data),
 
   /**
+   * PATCH /api/vaccinations/:vaccinationId (Backend V-04) — patch parcial.
+   *
+   * Errores que la UI debe manejar:
+   *   - 404 VACCINATION_NOT_FOUND — registro no existe / borrado.
+   *   - 409 VACCINATION_DUPLICATE — el cambio crearia otra vacuna del mismo
+   *     tipo en la misma fecha para el mismo bovino.
+   *   - 400 VALIDATION_ERROR — p.ej. `nextDueDate <= applicationDate`.
+   *
+   * Backend recalcula `BovineVaccinationStatus` y la proteccion derivada,
+   * por lo que el hook debe invalidar los caches relacionados.
+   */
+  updateVaccination: (vaccinationId: string, data: UpdateVaccinationInput) =>
+    apiClient.patch<ApiSuccessResponse<VaccinationResponse>>(
+      `/vaccinations/${vaccinationId}`,
+      data,
+    ),
+
+  /**
+   * DELETE /api/vaccinations/:vaccinationId — soft delete.
+   * Backend recalcula el status del bovino post-delete.
+   */
+  deleteVaccination: (vaccinationId: string) =>
+    apiClient.delete<ApiSuccessResponse<null>>(`/vaccinations/${vaccinationId}`),
+
+  /**
    * GET /api/bovines/:id/vaccination-status — derived status snapshot.
    * Recalculated server-side from the active vaccination calendar.
    */
   getVaccinationStatus: (id: string) =>
     apiClient.get<ApiSuccessResponse<VaccinationStatusResponse>>(`/bovines/${id}/vaccination-status`),
+
+  /**
+   * GET /api/bovines/:id/protection — proteccion por enfermedad derivada
+   * de las vacunas aplicadas + catalogo VaccineDiseaseProtection.
+   * Ordenado por daysUntilExpiry asc (lo que ya vencio o esta proximo a
+   * vencer arriba). Array vacio si no hay vacunas que mapeen a alguna
+   * enfermedad del catalogo.
+   */
+  getProtection: (id: string) =>
+    apiClient.get<ApiSuccessResponse<BovineProtectionItem[]>>(`/bovines/${id}/protection`),
+
+  /**
+   * GET /api/bovines/:id/risk-score (Backend E-05) — score de riesgo
+   * epidemiológico del bovino (0-100) con nivel y factores ponderados.
+   *   Niveles: <25 LOW · <50 MEDIUM · <75 HIGH · ≥75 CRITICAL
+   */
+  getRiskScore: (id: string) =>
+    apiClient.get<ApiSuccessResponse<BovineRiskScore>>(`/bovines/${id}/risk-score`),
+
+  /**
+   * GET /api/bovines/:id/vaccination-schedule (Backend V-05 / Modulo 11) —
+   * Calendario sugerido para el bovino: que vacunas le tocan segun su
+   * edad/sexo/raza, con estado por cada una (APPLIED_CURRENT / OVERDUE /
+   * MISSING / ONE_TIME_DONE) y nextDueDate cuando aplica.
+   *
+   * Array vacio cuando el calendario base no tiene entradas que apliquen
+   * a este perfil. 404 si el bovino no existe.
+   */
+  getVaccinationSchedule: (id: string) =>
+    apiClient.get<ApiSuccessResponse<SuggestedScheduleItem[]>>(
+      `/bovines/${id}/vaccination-schedule`,
+    ),
 
   // ── Media (unified API) ──────────────────────────────────────────────────
 
@@ -217,9 +340,30 @@ export const bovinesApi = {
   /**
    * GET /api/bovines/filters/options — global catalog of dropdown options.
    * Cached 30 min server-side.
+   *
+   * ⚠️ `diseases[].value` aquí es el **slug** (para formularios y URLs).
+   * NO usar para filtrar el backend por `diseaseId` — ese campo espera UUID.
+   * Para filtros usa `getActiveDiseases()` (endpoint hermano, UUIDs).
    */
   getFilterOptions: () =>
     apiClient.get<ApiSuccessResponse<BovineFiltersOptionsResponse>>('/bovines/filters/options'),
+
+  /**
+   * GET /api/bovines/filters/active-diseases — enfermedades con al menos un
+   * caso activo en el rancho del usuario, en forma `{ value: UUID, label }`.
+   *
+   * Diseñado para alimentar los selects de filtro de `/health/cases` y de la
+   * capa Epidemiología del mapa (`?diseaseId=<uuid>`, `?diseaseIds=<uuid>`).
+   * Más ligero que `/diseases` (que devuelve el catálogo entero con sub-
+   * collections) y semánticamente filtrado: solo lo que tiene sentido elegir
+   * para el rancho actual.
+   *
+   * ⚠️ Diferencia clave vs `getFilterOptions().diseases`:
+   *   - `getActiveDiseases()  → value = UUID`  → para queries (`?diseaseId=`).
+   *   - `getFilterOptions().diseases → value = slug` → para formularios / URLs.
+   */
+  getActiveDiseases: () =>
+    apiClient.get<ApiSuccessResponse<FilterOption[]>>('/bovines/filters/active-diseases'),
 
   // ── Map markers ──────────────────────────────────────────────────────────
 
@@ -260,11 +404,78 @@ export const bovinesApi = {
 
   // ── Legacy geo (pre-/map-markers — kept for MapsPage until migrated) ─────
 
-  /** @deprecated Use `getMapMarkers` with `mode: 'clusters'` instead. */
-  getHeatmap: (
+  /**
+   * @deprecated Use `getMapMarkers` with `mode: 'clusters'` instead.
+   *
+   * NOTA SOBRE LA SHAPE:
+   *   El backend devuelve `BovineHealthSnapshot` raw con la geometría
+   *   ANIDADA: `{ bovineId, location: { latitude, longitude }, healthStatus,
+   *   healthColor, breed, ageMonths, diagnosis }`.
+   *
+   *   Pero el frontend / consumidores esperan la shape PLANA:
+   *   `{ lat, lng, intensity, healthStatus, bovineId }`.
+   *
+   *   Esta función aplica un adapter de aplanamiento antes de devolver,
+   *   para que callers como `MapsPage` no tengan que conocer el shape
+   *   interno del modelo Sequelize. Sin este adapter `p.lat` y `p.lng`
+   *   llegaban `undefined` y el heatmap se renderizaba vacío.
+   */
+  getHeatmap: async (
     ranchId: string,
     filters?: { healthStatus?: string; breeds?: string; ageMin?: number; ageMax?: number },
-  ) => apiClient.get<ApiSuccessResponse<HeatmapPoint[]>>(`/bovines/geo/heatmap/${ranchId}`, { params: filters }),
+  ) => {
+    const res = await apiClient.get<ApiSuccessResponse<unknown[]>>(
+      `/bovines/geo/heatmap/${ranchId}`,
+      { params: filters },
+    );
+    // Shape REAL devuelta por el backend (BovineGeoService.getHeatmapData):
+    //   { id, lat, lng, value, metadata: { healthStatus, breed, age, diagnosis } }
+    // Soportamos también shapes alternativas (legacy / future) para no
+    // romper si el backend cambia la estructura.
+    const raw = (res.data?.data ?? []) as Array<{
+      // Shape canónica del backend
+      id?: string;
+      lat?: number;
+      lng?: number;
+      value?: number;
+      metadata?: {
+        healthStatus?: string;
+        breed?: string;
+        age?: number;
+        diagnosis?: string;
+      };
+      // Shapes alternativas (fallback defensive)
+      bovineId?: string;
+      location?: { latitude?: number; longitude?: number } | null;
+      healthStatus?: string;
+      breed?: string;
+      ageMonths?: number;
+      diagnosis?: string;
+    }>;
+    const items: HeatmapPoint[] = raw
+      .map((r) => {
+        const lat = typeof r.lat === 'number' ? r.lat : r.location?.latitude;
+        const lng = typeof r.lng === 'number' ? r.lng : r.location?.longitude;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        // El backend lo manda en `metadata.healthStatus`; fallback al
+        // top-level por si en el futuro la shape se aplana.
+        const healthStatus = r.metadata?.healthStatus ?? r.healthStatus;
+        return {
+          lat: lat as number,
+          lng: lng as number,
+          intensity: typeof r.value === 'number' ? r.value : 1,
+          healthStatus,
+          bovineId: r.id ?? r.bovineId,
+        };
+      })
+      .filter((p): p is HeatmapPoint => p !== null);
+
+    // Re-envuelve en el envelope ApiSuccessResponse que esperan los callers.
+    return {
+      ...res,
+      data: { ...res.data, data: items } as ApiSuccessResponse<HeatmapPoint[]>,
+    };
+  },
 
   /** @deprecated Use `getMapMarkers` (mode discriminated by backend). */
   getClusters: (
@@ -416,7 +627,14 @@ export type {
   CreateBovineInput,
   UpdateBovineInput,
   MoveBovineInput,
+  MoveBovineResponse,
   CreateVaccinationInput,
+  UpdateVaccinationInput,
   MapMarkersFilters,
   MapMarkersOptions,
+  DeceaseBovineInput,
+  BovineDeathRecord,
+  MortalityReport,
+  MortalityReportFilters,
+  DeathCause,
 } from '@/types/bovine.dtos';

@@ -8,11 +8,22 @@ import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/utils/cn';
 import { LocationType, type LocationMovement } from '@/types/location.types';
 import {
+  LOCATION_TYPE_LABELS,
+  LOCATION_TYPE_BADGE_CLASSES,
+  LOCATION_TYPE_DOT_CLASSES,
+  LOCATION_TYPE_FALLBACK,
+  getMovementReasonLabel,
+} from '@/design-system/tokens';
+import {
   MapPin, Trees, Home, Fence, Milk, Droplets,
   Stethoscope, ShieldAlert, TruckIcon, Package,
   ArrowRightLeft, Clock, CalendarDays, User,
   CheckCircle2, Circle, ChevronDown, ChevronUp,
   Navigation, AlertTriangle,
+  // Iconos añadidos para los 17 tipos nuevos del enum LocationType.
+  Wheat, Microscope, HeartHandshake, Building2, House,
+  Wrench, Route, Factory, Trash2, DoorOpen, Shield,
+  CheckSquare, AlertOctagon, Ban, ShieldCheck, MoreHorizontal,
 } from 'lucide-react';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -23,89 +34,84 @@ interface BovineLocationHistoryTabProps {
 
 // ─── Location type config ─────────────────────────────────────────────────────
 
-const LOCATION_TYPE_CONFIG: Record<string, {
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  badgeClasses: string;
-  dotClasses: string;
-}> = {
-  [LocationType.PASTURE]: {
-    label: 'Potrero',
-    icon: Trees,
-    badgeClasses: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-    dotClasses: 'bg-emerald-500',
-  },
-  [LocationType.CORRAL]: {
-    label: 'Corral',
-    icon: Fence,
-    badgeClasses: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-    dotClasses: 'bg-amber-500',
-  },
-  [LocationType.BARN]: {
-    label: 'Establo',
-    icon: Home,
-    badgeClasses: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
-    dotClasses: 'bg-orange-500',
-  },
-  [LocationType.MILKING_PARLOR]: {
-    label: 'Sala de Ordeño',
-    icon: Milk,
-    badgeClasses: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-    dotClasses: 'bg-blue-500',
-  },
-  [LocationType.WATER_SOURCE]: {
-    label: 'Fuente de Agua',
-    icon: Droplets,
-    badgeClasses: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400',
-    dotClasses: 'bg-cyan-500',
-  },
-  [LocationType.VETERINARY_CLINIC]: {
-    label: 'Clínica Veterinaria',
-    icon: Stethoscope,
-    badgeClasses: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
-    dotClasses: 'bg-purple-500',
-  },
-  [LocationType.QUARANTINE_AREA]: {
-    label: 'Cuarentena',
-    icon: ShieldAlert,
-    badgeClasses: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-    dotClasses: 'bg-red-500',
-  },
-  [LocationType.LOADING_AREA]: {
-    label: 'Área de Carga',
-    icon: TruckIcon,
-    badgeClasses: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400',
-    dotClasses: 'bg-slate-500',
-  },
-  [LocationType.STORAGE]: {
-    label: 'Almacenamiento',
-    icon: Package,
-    badgeClasses: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
-    dotClasses: 'bg-gray-500',
-  },
+/**
+ * Iconos por tipo de ubicación. Los iconos viven aquí (no en el design-system)
+ * porque son componentes React de lucide-react — el token solo se ocupa de
+ * colores/labels (presentation-data) y los iconos son markup.
+ */
+const LOCATION_TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  // Operación ganadera
+  [LocationType.PASTURE]:           Trees,
+  [LocationType.CORRAL]:            Fence,
+  [LocationType.BARN]:              Home,
+  [LocationType.MILKING_PARLOR]:    Milk,
+  [LocationType.FEED_AREA]:         Wheat,
+  // Recursos hídricos
+  [LocationType.WATER_SOURCE]:      Droplets,
+  // Salud animal
+  [LocationType.VETERINARY_CLINIC]: Stethoscope,
+  [LocationType.QUARANTINE_AREA]:   ShieldAlert,
+  [LocationType.LABORATORY]:        Microscope,
+  // Reproducción
+  [LocationType.BREEDING_CENTER]:   HeartHandshake,
+  // Administración
+  [LocationType.OFFICE]:            Building2,
+  [LocationType.RESIDENTIAL]:       House,
+  // Logística
+  [LocationType.LOADING_AREA]:      TruckIcon,
+  [LocationType.STORAGE]:           Package,
+  [LocationType.EQUIPMENT_SHED]:    Wrench,
+  [LocationType.ROUTE]:             Route,
+  // Procesamiento industrial
+  [LocationType.PROCESSING_PLANT]:  Factory,
+  // Manejo de residuos
+  [LocationType.WASTE_MANAGEMENT]:  Trash2,
+  // Seguridad y acceso
+  [LocationType.ENTRANCE_GATE]:     DoorOpen,
+  [LocationType.SECURITY_POST]:     Shield,
+  [LocationType.CHECKPOINT]:        CheckSquare,
+  // Riesgo / Restricción
+  [LocationType.EMERGENCY_POINT]:   AlertOctagon,
+  [LocationType.RESTRICTED_AREA]:   Ban,
+  [LocationType.DANGER_ZONE]:       AlertTriangle,
+  // Zona segura
+  [LocationType.SAFE_ZONE]:         ShieldCheck,
+  // Misc
+  [LocationType.OTHER]:             MoreHorizontal,
 };
 
-const getLocationConfig = (type: string) =>
-  LOCATION_TYPE_CONFIG[type] ?? {
-    label: type.replace(/_/g, ' '),
-    icon: MapPin,
-    badgeClasses: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
-    dotClasses: 'bg-gray-400',
+/**
+ * Resuelve label + icono + clases (badge / dot) para un tipo de ubicación.
+ * Labels y clases vienen del design-system; el icono se mapea localmente.
+ * Defensive: type null/undefined → fallback gris para evitar TypeError
+ * (este crash bloqueaba el tab "Potreros" anteriormente).
+ */
+const getLocationConfig = (type: string | undefined | null) => {
+  if (!type || typeof type !== 'string') {
+    return {
+      label: LOCATION_TYPE_FALLBACK.label,
+      icon:  MapPin,
+      badgeClasses: LOCATION_TYPE_FALLBACK.badgeClasses,
+      dotClasses:   LOCATION_TYPE_FALLBACK.dotClasses,
+    };
+  }
+  const label = (LOCATION_TYPE_LABELS as Record<string, string>)[type];
+  const badgeClasses = (LOCATION_TYPE_BADGE_CLASSES as Record<string, string>)[type];
+  const dotClasses   = (LOCATION_TYPE_DOT_CLASSES as Record<string, string>)[type];
+  const icon         = LOCATION_TYPE_ICONS[type];
+  return {
+    label:        label        ?? type.replace(/_/g, ' '),
+    icon:         icon         ?? MapPin,
+    badgeClasses: badgeClasses ?? LOCATION_TYPE_FALLBACK.badgeClasses,
+    dotClasses:   dotClasses   ?? LOCATION_TYPE_FALLBACK.dotClasses,
   };
+};
 
 // ─── Duration badge ───────────────────────────────────────────────────────────
-
-const REASON_LABELS: Record<string, string> = {
-  GRAZING:      'Pastoreo',
-  HEALTH:       'Salud',
-  ROUTINE:      'Rutina',
-  SALE_PREP:    'Preparación venta',
-  QUARANTINE:   'Cuarentena',
-  BREEDING:     'Reproducción',
-  FEEDING:      'Alimentación',
-  MAINTENANCE:  'Mantenimiento',
-  TRANSPORT:    'Transporte',
-};
+// Las razones de movimiento (incluyendo aliases legacy: HEALTH→MEDICAL,
+// ROUTINE→GRAZING, SALE_PREP→SALE, etc.) se resuelven vía
+// `getMovementReasonLabel` del design-system. Centraliza los 8 valores
+// canónicos del enum `MovementReason` con fallback a "Otro".
 
 function durationLabel(days?: number): string {
   if (days == null || days < 0) return '—';
@@ -118,10 +124,14 @@ function durationLabel(days?: number): string {
   return rem > 0 ? `${base} y ${rem} días` : base;
 }
 
-function daysElapsed(enteredAt: string, exitedAt?: string): number {
+function daysElapsed(enteredAt: string | undefined | null, exitedAt?: string | null): number {
+  // Sin enteredAt no podemos calcular nada — devolvemos 0 silenciosamente.
+  if (!enteredAt) return 0;
   const start = new Date(enteredAt).getTime();
+  if (!Number.isFinite(start)) return 0;
   const end = exitedAt ? new Date(exitedAt).getTime() : Date.now();
-  return Math.floor((end - start) / (1000 * 60 * 60 * 24));
+  if (!Number.isFinite(end)) return 0;
+  return Math.max(0, Math.floor((end - start) / (1000 * 60 * 60 * 24)));
 }
 
 // ─── Timeline entry card ──────────────────────────────────────────────────────
@@ -234,7 +244,7 @@ function MovementCard({ movement, isCurrent, isFirst }: MovementCardProps) {
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-400 dark:text-gray-500 w-16 shrink-0">Motivo</span>
                 <span className="text-xs font-medium text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-700">
-                  {REASON_LABELS[movement.reason] ?? movement.reason}
+                  {getMovementReasonLabel(movement.reason)}
                 </span>
               </div>
             )}
@@ -283,7 +293,36 @@ export function BovineLocationHistoryTab({ bovineId }: BovineLocationHistoryTabP
     queryKey: ['bovine-location-history', bovineId],
     queryFn: async () => {
       const res = await locationsApi.getLocationHistory(bovineId);
-      return res.data.data ?? [];
+      const rows = res.data.data ?? [];
+      // ── Adapter ─────────────────────────────────────────────────────
+      // El backend devuelve la entidad Sequelize `BovineLocationHistory`
+      // cruda, con la location ANIDADA:
+      //   { id, bovineId, locationId, enteredAt, exitedAt,
+      //     location: { id, name, type } }
+      // Pero la UI consume la shape PLANA `LocationMovement`:
+      //   { locationName, locationType, locationCode, ... }
+      //
+      // Sin este adapter `locationType` llegaba undefined y el helper
+      // `getLocationConfig(undefined)` crasheaba con
+      // "Cannot read properties of undefined (reading 'replace')",
+      // dejando el tab en pantalla blanca.
+      return rows.map((r: any): LocationMovement => ({
+        id:           r.id,
+        bovineId:     r.bovineId,
+        locationId:   r.locationId,
+        locationName: r.location?.name        ?? r.locationName ?? 'Ubicación desconocida',
+        locationType: (r.location?.type       ?? r.locationType ?? 'OTHER') as LocationType,
+        locationCode: r.location?.locationCode ?? r.locationCode,
+        enteredAt:    r.enteredAt,
+        exitedAt:     r.exitedAt ?? undefined,
+        durationDays: r.durationDays,
+        reason:       r.reason,
+        movementType: r.movementType,
+        movedBy:      r.movedBy ?? r.recordedBy,
+        movedByName:  r.movedByName ?? r.recordedByName,
+        notes:        r.notes,
+        coordinates:  r.coordinates,
+      }));
     },
     enabled: !!bovineId,
   });

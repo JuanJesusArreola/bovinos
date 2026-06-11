@@ -12,28 +12,49 @@ import { Spinner } from '@/components/ui/Spinner';
 import { cn } from '@/utils/cn';
 import { TreatmentStatus, type HealthRecord, type TreatmentData } from '@/types/health.types';
 import {
+  TREATMENT_STATUS_LABELS,
+  TREATMENT_STATUS_BADGE_CLASSES,
+  ADMIN_ROUTE_LABELS,
+  ADMIN_ROUTE_BADGE_CLASSES,
+} from '@/design-system/tokens';
+import {
   Pill, CheckCircle2, AlertTriangle, Clock, ChevronDown,
   ChevronUp, Calendar, Syringe, FlaskConical, Droplets,
   Package, XCircle, Pause, Activity, DollarSign,
 } from 'lucide-react';
 
 // ─── Route badge config ───────────────────────────────────────────────────────
+// Labels + clases vienen del design-system. Mantener un wrapper local para
+// preservar la firma `{ label, classes }` que consumen los componentes.
 
-const ROUTE_CONFIG: Record<string, { label: string; classes: string }> = {
-  ORAL:           { label: 'Oral',         classes: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-  INJECTABLE:     { label: 'Inyectable',   classes: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-  INTRAMUSCULAR:  { label: 'IM',           classes: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-  INTRAVENOUS:    { label: 'IV',           classes: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
-  SUBCUTANEOUS:   { label: 'SC',           classes: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400' },
-  TOPICAL:        { label: 'Tópico',       classes: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+const ROUTE_CONFIG: Record<string, { label: string; classes: string }> = Object.fromEntries(
+  (Object.keys(ADMIN_ROUTE_LABELS) as Array<keyof typeof ADMIN_ROUTE_LABELS>).map((k) => [
+    k,
+    {
+      label:   ADMIN_ROUTE_LABELS[k],
+      classes: ADMIN_ROUTE_BADGE_CLASSES[k],
+    },
+  ]),
+);
+
+/**
+ * Iconos por estado de tratamiento — viven local porque son componentes
+ * React (no van al token). Labels/clases vienen del design-system.
+ */
+const TREATMENT_STATUS_ICONS: Record<TreatmentStatus, React.ElementType> = {
+  [TreatmentStatus.ACTIVE]:    Activity,
+  [TreatmentStatus.COMPLETED]: CheckCircle2,
+  [TreatmentStatus.SUSPENDED]: Pause,
+  [TreatmentStatus.FAILED]:    XCircle,
+  [TreatmentStatus.CANCELLED]: XCircle,
 };
 
 const TREATMENT_STATUS_CONFIG: Record<TreatmentStatus, { label: string; classes: string; icon: React.ElementType }> = {
-  [TreatmentStatus.ACTIVE]:    { label: 'En Curso',   classes: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', icon: Activity },
-  [TreatmentStatus.COMPLETED]: { label: 'Completado', classes: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',                icon: CheckCircle2 },
-  [TreatmentStatus.SUSPENDED]: { label: 'Suspendido', classes: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',         icon: Pause },
-  [TreatmentStatus.FAILED]:    { label: 'Fallido',    classes: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',                  icon: XCircle },
-  [TreatmentStatus.CANCELLED]: { label: 'Cancelado',  classes: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500',                 icon: XCircle },
+  [TreatmentStatus.ACTIVE]:    { label: TREATMENT_STATUS_LABELS.ACTIVE,    classes: TREATMENT_STATUS_BADGE_CLASSES.ACTIVE,    icon: TREATMENT_STATUS_ICONS.ACTIVE },
+  [TreatmentStatus.COMPLETED]: { label: TREATMENT_STATUS_LABELS.COMPLETED, classes: TREATMENT_STATUS_BADGE_CLASSES.COMPLETED, icon: TREATMENT_STATUS_ICONS.COMPLETED },
+  [TreatmentStatus.SUSPENDED]: { label: TREATMENT_STATUS_LABELS.SUSPENDED, classes: TREATMENT_STATUS_BADGE_CLASSES.SUSPENDED, icon: TREATMENT_STATUS_ICONS.SUSPENDED },
+  [TreatmentStatus.FAILED]:    { label: TREATMENT_STATUS_LABELS.FAILED,    classes: TREATMENT_STATUS_BADGE_CLASSES.FAILED,    icon: TREATMENT_STATUS_ICONS.FAILED },
+  [TreatmentStatus.CANCELLED]: { label: TREATMENT_STATUS_LABELS.CANCELLED, classes: TREATMENT_STATUS_BADGE_CLASSES.CANCELLED, icon: TREATMENT_STATUS_ICONS.CANCELLED },
 };
 
 // ─── Date arithmetic ──────────────────────────────────────────────────────────

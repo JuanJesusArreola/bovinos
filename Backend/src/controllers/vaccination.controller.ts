@@ -12,6 +12,7 @@
 import { Request, Response } from 'express';
 import { vaccinationService } from '../services/VaccinationService';
 import { bovineVaccinationStatusService } from '../services/BovineVaccinationStatusService';
+import { vaccinationScheduleService } from '../services/VaccinationScheduleService';
 import { VaccineType, ApplicationRoute } from '../models/Vaccination';
 import { BovineError } from '../utils/BovineErrors';
 import logger from '../utils/logger';
@@ -23,7 +24,26 @@ export class VaccinationController {
     this.listByBovine = this.listByBovine.bind(this);
     this.create = this.create.bind(this);
     this.getStatus = this.getStatus.bind(this);
+    this.getProtection = this.getProtection.bind(this);
+    this.getSuggestedSchedule = this.getSuggestedSchedule.bind(this);
+    this.update = this.update.bind(this);
     this.delete = this.delete.bind(this);
+  }
+
+  // ==========================================================================
+  // GET /api/bovines/:id/vaccination-schedule   (V-05)
+  // ==========================================================================
+  // Calendario sugerido: qué vacunas le tocan al bovino según edad/sexo/raza
+  // y su estado actual (aplicada/vencida/faltante/dosis única completa).
+  async getSuggestedSchedule(req: Request, res: Response): Promise<void> {
+    try {
+      const { id: bovineId } = req.params;
+      const data = await vaccinationScheduleService.getSuggestedForBovine(bovineId);
+      res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Error en getSuggestedSchedule', this.context, { params: req.params }, error as Error);
+      this.handleError(error, res);
+    }
   }
 
   // ==========================================================================
@@ -114,6 +134,7 @@ export class VaccinationController {
         // Si no se envía applicatorId, asumimos el usuario autenticado
         applicatorId: body.applicatorId || userId,
         withdrawalPeriodDays: body.withdrawalPeriodDays,
+        immunityDurationDays: body.immunityDurationDays,
         notes: body.notes,
         metadata: body.metadata,
       });
@@ -135,6 +156,37 @@ export class VaccinationController {
       res.json({ success: true, data });
     } catch (error) {
       logger.error('Error en getStatus', this.context, { params: req.params }, error as Error);
+      this.handleError(error, res);
+    }
+  }
+
+  // ==========================================================================
+  // GET /api/bovines/:id/protection
+  // ==========================================================================
+  // Estado de protección por enfermedad, derivado de las vacunas aplicadas
+  // cruzadas con el catálogo VaccineDiseaseProtection.
+  async getProtection(req: Request, res: Response): Promise<void> {
+    try {
+      const { id: bovineId } = req.params;
+      const data = await vaccinationService.getProtectionStatus(bovineId);
+      res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Error en getProtection', this.context, { params: req.params }, error as Error);
+      this.handleError(error, res);
+    }
+  }
+
+  // ==========================================================================
+  // PATCH /api/vaccinations/:vaccinationId
+  // ==========================================================================
+  // Edita una vacuna existente (V-04). Recalcula estado e invalida cache.
+  async update(req: Request, res: Response): Promise<void> {
+    try {
+      const { vaccinationId } = req.params;
+      const updated = await vaccinationService.update(vaccinationId, req.body || {});
+      res.json({ success: true, data: updated, message: 'Vacuna actualizada' });
+    } catch (error) {
+      logger.error('Error en update vaccination', this.context, { params: req.params, body: req.body }, error as Error);
       this.handleError(error, res);
     }
   }

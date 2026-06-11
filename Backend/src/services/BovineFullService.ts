@@ -36,6 +36,12 @@ import BovineLocationHistory from '../models/BovineLocationHistory';
 import Health from '../models/Health';
 import Vaccination from '../models/Vaccination';
 import BovineVaccinationStatus from '../models/BovineVaccinationStatus';
+import BovineDiseaseCase, { CaseStatus } from '../models/BovineDiseaseCase';
+import Disease from '../models/Disease';
+import CaseSymptom from '../models/CaseSymptom';
+import Symptom from '../models/Symptom';
+import CaseTreatment from '../models/CaseTreatment';
+import LabTest from '../models/LabTest';
 
 import { bovineMediaService, MediaListResult } from './BovineMediaService';
 import {
@@ -46,7 +52,11 @@ import {
   bovineVaccinationStatusService,
   VaccinationStatusSnapshot,
 } from './BovineVaccinationStatusService';
+import BovineDeath from '../models/BovineDeath';
 import { vaccinationService, VaccinationListItem } from './VaccinationService';
+import { bovineService } from './BovineService';
+import { BovineResponse } from '../dtos/bovine-response.dto';
+import { deathCauseLabel } from '../constants/death.labels';
 import { cacheService } from './CacheService';
 
 // ============================================================================
@@ -75,13 +85,37 @@ export interface BovineRecentMovement {
 }
 
 export interface BovineFullResponse {
-  bovine: any;                 // shape de Bovine + ranch + healthSnapshot eager-loaded
+  bovine: any;                 // shape de Bovine + ranch + healthSnapshot eager-loaded (crudo)
+  /**
+   * D-01: vista formateada del bovino, IDÉNTICA a la que devuelve GET /api/bovines/:id.
+   * Incluye labels (cattleTypeLabel, genderLabel, healthStatusLabel...),
+   * clasificación etaria (classification/classificationLabel), isAdult, ageDisplay, etc.
+   * El frontend debe leer de aquí para mostrar etiquetas/clasificación de forma
+   * consistente entre el listado, el detalle simple y el detalle completo.
+   */
+  profile: BovineResponse;
   media: MediaListResult;
   currentLocation: ConsolidatedCurrentLocation;
   vaccinationStatus: VaccinationStatusSnapshot;
   recentVaccinations: VaccinationListItem[];     // últimas 5
   recentHealthRecords: BovineRecentHealthRecord[]; // últimos 10
   recentMovements: BovineRecentMovement[];         // últimos 20
+  /** Caso clínico activo (abierto). null si no hay ninguno. */
+  activeCase: BovineDiseaseCase | null;
+  /** Módulo 8 (F-28): registro de muerte si el bovino falleció. null si vivo. */
+  death: {
+    deathDate: Date;
+    cause: string;
+    causeLabel: string | null;
+    diseaseId: string | null;
+    diseaseCaseId: string | null;
+    locationId: string | null;
+    weightAtDeath: number | null;
+    slaughterValue: number | null;
+    necropsyPerformed: boolean;
+    necropsyResults: string | null;
+    notes: string | null;
+  } | null;
   computedAt: Date;
   ttlSeconds: number;
 }
@@ -135,6 +169,25 @@ export class BovineFullService {
             as: 'healthSnapshot',
             required: false,
           },
+          // G-05/D-01: madre y padre como mini-objetos → profile.mother / profile.father
+          {
+            model: Bovine,
+            as: 'mother',
+            attributes: ['id', 'earTag', 'name', 'gender', 'breed'],
+            required: false,
+          },
+          {
+            model: Bovine,
+            as: 'father',
+            attributes: ['id', 'earTag', 'name', 'gender', 'breed'],
+            required: false,
+          },
+          // Módulo 8 (F-28): registro de muerte si el bovino falleció
+          {
+            model: BovineDeath,
+            as: 'death',
+            required: false,
+          },
         ],
       });
 
@@ -152,6 +205,7 @@ export class BovineFullService {
         vaccinationsResult,
         recentHealth,
         recentMovementsRaw,
+        activeCase,
       ] = await Promise.all([
         bovineMediaService.listMedia(bovineId),
         bovineLocationService.getCurrentLocationConsolidated(bovineId),
@@ -186,6 +240,26 @@ export class BovineFullService {
           order: [['enteredAt', 'DESC']],
           limit: 20,
         }),
+        // Caso clínico activo: el más reciente cuyo status no sea terminal
+        BovineDiseaseCase.findOne({
+          where: {
+            bovineId,
+            status: {
+              [Op.notIn]: [CaseStatus.RECOVERED, CaseStatus.DECEASED, CaseStatus.DISCARDED],
+            },
+          },
+          include: [
+            { model: Disease,  as: 'disease',  attributes: ['id', 'name', 'slug', 'category', 'severity'] },
+            {
+              model: CaseSymptom,
+              as: 'caseSymptoms',
+              include: [{ model: Symptom, as: 'symptom', attributes: ['id', 'name', 'slug', 'category', 'severityWeight'] }],
+            },
+            { model: CaseTreatment, as: 'treatments' },
+            { model: LabTest,       as: 'labTests' },
+          ],
+          order: [['diagnosedAt', 'DESC']],
+        }),
       ]);
 
       // ────────────────────────────────────────────────────────────────
@@ -215,14 +289,39 @@ export class BovineFullService {
         notes: m.notes ?? null,
       }));
 
+      // D-01: vista formateada (labels + clasificación), misma que GET /:id.
+      // El bovine ya trae `ranch` eager-loaded, así que el formatter lo incluye.
+      const profile = bovineService.formatBovineResponse(bovine);
+
+      // F-28: bloque de muerte (si el bovino falleció) con label de causa
+      const deathRow = (bovine as any).death as BovineDeath | null | undefined;
+      const death = deathRow
+        ? {
+            deathDate:         deathRow.deathDate,
+            cause:             deathRow.cause,
+            causeLabel:        deathCauseLabel(deathRow.cause),
+            diseaseId:         deathRow.diseaseId ?? null,
+            diseaseCaseId:     deathRow.diseaseCaseId ?? null,
+            locationId:        deathRow.locationId ?? null,
+            weightAtDeath:     deathRow.weightAtDeath ?? null,
+            slaughterValue:    deathRow.slaughterValue ?? null,
+            necropsyPerformed: deathRow.necropsyPerformed,
+            necropsyResults:   deathRow.necropsyResults ?? null,
+            notes:             deathRow.notes ?? null,
+          }
+        : null;
+
       const data: BovineFullResponse = {
         bovine,
+        profile,
+        death,
         media,
         currentLocation,
         vaccinationStatus,
         recentVaccinations: vaccinationsResult.items,
         recentHealthRecords,
         recentMovements,
+        activeCase: activeCase ?? null,
         computedAt: new Date(),
         ttlSeconds: CACHE_TTL_SECONDS,
       };

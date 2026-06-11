@@ -1,4 +1,5 @@
 import { UserRole } from '@/types';
+import { getRoleClassName } from '@/design-system/tokens';
 
 // ─── Role hierarchy (higher = more privileges) ────────────────────────────
 
@@ -51,7 +52,38 @@ export type Action =
   | 'MANAGE_MEDICATIONS'
   // Reports
   | 'VIEW_REPORTS'
-  | 'EXPORT_REPORTS';
+  | 'EXPORT_REPORTS'
+  // ─── Disease module (Fases 1-5) ───────────────────────────────────────
+  /**
+   * Ver el catálogo de enfermedades (lista + detalle, síntomas, transmisión).
+   * Es informacional para TODOS los usuarios autenticados — se usa al reportar
+   * casos clínicos. NO confundir con `MANAGE_DISEASES`.
+   */
+  | 'VIEW_DISEASES'
+  /** Crear / editar / desactivar entradas del catálogo global. Solo SUPER_ADMIN. */
+  | 'MANAGE_DISEASES'
+  /**
+   * Subir / editar / eliminar imágenes y videos asociados a una enfermedad
+   * del catálogo. Más permisivo que `MANAGE_DISEASES` porque enriquecer el
+   * catálogo con fotos clínicas es algo que puede hacer cualquier rol
+   * clínico/gerencial, no solo el admin que mantiene la taxonomía.
+   *
+   * Roles permitidos por backend: SUPER_ADMIN, OWNER, MANAGER, RANCH_MANAGER,
+   * VETERINARIAN. Espeja `CLINICAL_ROLES` del router.
+   */
+  | 'MANAGE_DISEASE_MEDIA'
+  /** Registrar un caso clínico (diagnosticar un bovino con una enfermedad). */
+  | 'RECORD_CASE'
+  /** Editar status / severity / notas y agregar síntomas / tratamientos / labs. */
+  | 'MANAGE_CASE'
+  /** Cerrar un caso (outcome: RECOVERED / DECEASED / TRANSFERRED / UNKNOWN). */
+  | 'CLOSE_CASE'
+  /** Ver dashboard epidemiológico (snapshots, trend, top-diseases, brotes). */
+  | 'VIEW_EPIDEMIOLOGY'
+  /** Disparar manualmente el recálculo nocturno de snapshots. Solo SUPER_ADMIN. */
+  | 'COMPUTE_EPIDEMIOLOGY'
+  /** Ejecutar la detección de contactos epidemiológicos para un caso. */
+  | 'DETECT_CONTACTS';
 
 // ─── Resource → minimum role required per action ──────────────────────────
 
@@ -91,8 +123,8 @@ const PERMISSIONS: Record<Action, UserRole[]> = {
   DELETE_LOCATION: [UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
 
   // Users
-  MANAGE_USERS: [UserRole.SUPER_ADMIN, UserRole.OWNER],
-  DELETE_USER:  [UserRole.SUPER_ADMIN, UserRole.OWNER],
+  MANAGE_USERS: [UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+  DELETE_USER:  [UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
 
   // Security
   VIEW_SECURITY:    [UserRole.SUPER_ADMIN, UserRole.OWNER],
@@ -105,6 +137,28 @@ const PERMISSIONS: Record<Action, UserRole[]> = {
   // Reports
   VIEW_REPORTS:   [UserRole.MANAGER, UserRole.VETERINARIAN, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
   EXPORT_REPORTS: [UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+
+  // ─── Disease module ──────────────────────────────────────────────────
+  // Catálogo: lectura abierta a todos los roles (incluye VIEWER) como
+  // material de referencia al diagnosticar. Edición restringida a SUPER_ADMIN
+  // porque el catálogo es global multi-rancho.
+  VIEW_DISEASES:   [UserRole.VIEWER, UserRole.WORKER, UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+  MANAGE_DISEASES: [UserRole.SUPER_ADMIN, UserRole.OWNER],
+  MANAGE_DISEASE_MEDIA: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+
+  // Casos clínicos: alineados con RECORD_HEALTH / MANAGE_HEALTH. Veterinario
+  // y arriba pueden registrar y manejar. Cierre con outcome también requiere
+  // criterio clínico → mismo nivel.
+  RECORD_CASE: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+  MANAGE_CASE: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+  CLOSE_CASE:  [UserRole.VETERINARIAN, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+
+  // Epidemiología: lectura igualada a VIEW_REPORTS (dashboard ejecutivo).
+  // Detección de contactos requiere mismo nivel que registrar caso.
+  // Trigger manual de recálculo es operación de mantenimiento (SUPER_ADMIN).
+  VIEW_EPIDEMIOLOGY:    [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+  DETECT_CONTACTS:      [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+  COMPUTE_EPIDEMIOLOGY: [UserRole.SUPER_ADMIN, UserRole.OWNER],
 };
 
 // ─── Core helpers ─────────────────────────────────────────────────────────
@@ -169,6 +223,32 @@ export function canExportReports(role: UserRole): boolean {
   return canUser(role, 'EXPORT_REPORTS');
 }
 
+// ─── Disease module shortcuts ────────────────────────────────────────────
+
+export function canManageDiseases(role: UserRole): boolean {
+  return canUser(role, 'MANAGE_DISEASES');
+}
+
+export function canRecordCase(role: UserRole): boolean {
+  return canUser(role, 'RECORD_CASE');
+}
+
+export function canCloseCase(role: UserRole): boolean {
+  return canUser(role, 'CLOSE_CASE');
+}
+
+export function canViewEpidemiology(role: UserRole): boolean {
+  return canUser(role, 'VIEW_EPIDEMIOLOGY');
+}
+
+export function canComputeEpidemiology(role: UserRole): boolean {
+  return canUser(role, 'COMPUTE_EPIDEMIOLOGY');
+}
+
+export function canDetectContacts(role: UserRole): boolean {
+  return canUser(role, 'DETECT_CONTACTS');
+}
+
 // ─── Labels & colors ──────────────────────────────────────────────────────
 
 export function getRoleLabel(role: UserRole): string {
@@ -184,15 +264,14 @@ export function getRoleLabel(role: UserRole): string {
   return labels[role] || role;
 }
 
+/**
+ * Devuelve el className completo (light + dark) para mostrar un rol como
+ * badge / chip. La definición vive en el design-system (single source of
+ * truth) — esta función es solo un thin wrapper que conserva el nombre
+ * histórico `getRoleColor` para no romper a los callers existentes.
+ *
+ * @see USER_ROLE_COLORS en `src/design-system/tokens/user-role.colors.ts`
+ */
 export function getRoleColor(role: UserRole): string {
-  const colors: Record<UserRole, string> = {
-    [UserRole.SUPER_ADMIN]:   'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-    [UserRole.OWNER]:         'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-    [UserRole.RANCH_MANAGER]: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',
-    [UserRole.MANAGER]:       'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400',
-    [UserRole.VETERINARIAN]:  'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
-    [UserRole.WORKER]:        'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
-    [UserRole.VIEWER]:        'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400',
-  };
-  return colors[role] || 'bg-gray-100 text-gray-800';
+  return getRoleClassName(role);
 }

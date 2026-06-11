@@ -7,7 +7,8 @@ import Bovine, {
     VaccinationStatus,
     GenderType,
     LocationData,
-    BovineCreationAttributes
+    BovineCreationAttributes,
+    BovineExitReason
 } from '../models/Bovine';
 import Ranch from '../models/Ranch';
 import User, { UserRole } from '../models/User';
@@ -22,6 +23,7 @@ import { bovineVaccinationStatusService } from './BovineVaccinationStatusService
 import { bovineFullService } from './BovineFullService';
 import { BovineResponse } from '../dtos/bovine-response.dto';
 import { BovineLocationService } from './BovineLocationService';
+import BovineHealthSnapshot from '../models/BovineHealthSnapshot';
 
 import {
     BovineError,
@@ -29,6 +31,16 @@ import {
     BovineValidationError,
     BovineStatisticsError
 } from '../utils/BovineErrors';
+import {
+    BOVINE_CONSTANTS,
+    classifyBovine,
+    isAdultAge,
+    isReproductiveAge,
+    resolveAgeGroup,
+    AgeGroup,
+} from '../constants/bovine.constants';
+import { bovineDiseaseService, AddSymptomDTO } from './BovineDiseaseService';
+import { CaseStatus } from '../models/BovineDiseaseCase';
 
 // ============================================================================
 // INTERFACES (CONSERVADAS DE TU CÓDIGO)
@@ -44,6 +56,7 @@ export interface CreateBovineData {
     weight?: number;
     location: LocationData;
     healthStatus?: HealthStatus;
+    disease?: string;
     vaccinationStatus?: VaccinationStatus;
     notes?: string;
     ranchId?: string;
@@ -60,6 +73,21 @@ export interface CreateBovineData {
     entryReason?: MovementReason;  // ej.: 'PURCHASE', 'BIRTH', 'INITIAL'
     entryNotes?: string;
     entryMovementType?: MovementType; // normalmente 'MANUAL'
+
+    /**
+     * C-01: bloque clínico opcional para dar de alta un bovino YA enfermo.
+     * Si se provee, se abre un BovineDiseaseCase en la misma transacción
+     * (reusando openCase), que sincroniza snapshot y healthStatus.
+     */
+    initialCase?: {
+        diseaseId: string;
+        severity: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+        status?: CaseStatus;
+        diagnosedAt?: Date;
+        diagnosedBy?: string;
+        notes?: string;
+        symptoms?: AddSymptomDTO[];
+    };
 }
 
 export interface UpdateBovineData extends Partial<CreateBovineData> {
@@ -77,7 +105,14 @@ export interface BovineFilters {
      * 1:1) — NO contra la columna deprecada `Bovine.vaccinationStatus`.
      */
     vaccinationStatus?: VaccinationStatus;
-    ageRange?: { min: number; max: number };
+    /**
+     * Rango de edad en MESES. `min` y `max` son opcionales (permite rangos
+     * abiertos: solo mínimo o solo máximo). Si se envía `ageGroup`, este tiene
+     * prioridad solo cuando no hay ageRange explícito.
+     */
+    ageRange?: { min?: number; max?: number };
+    /** Preset de grupo etario: 'calf' | 'young' | 'adult' (se resuelve a meses). */
+    ageGroup?: AgeGroup;
     weightRange?: { min: number; max: number };
     /** Filtro por un rancho. Si se proporciona, ignora `ranchIds`. */
     ranchId?: string;
@@ -89,8 +124,34 @@ export interface BovineFilters {
      */
     locationId?: string;
     ownerId?: string;
+    /**
+     * F-30: control de visibilidad por estado de alta.
+     *   - isActive explícito → filtra por ese valor (true/false).
+     *   - includeInactive=true → muestra activos + inactivos (incluye fallecidos).
+     *   - ninguno → por defecto solo activos (isActive=true).
+     */
     isActive?: boolean;
+    includeInactive?: boolean;
+    /** Filtra por motivo de salida del hato (ej. DECEASED para ver solo fallecidos). */
+    exitReason?: BovineExitReason;
     isPregnant?: boolean;
+    /**
+     * @deprecated Filtro legacy por texto del diagnóstico. NO usar: el snapshot
+     * guarda el NOMBRE de la enfermedad y el catálogo expone el SLUG, por lo que
+     * el match es inconsistente. Usar `diseaseId` (UUID) en su lugar.
+     */
+    disease?: string;
+    /** Filtro por enfermedad activa (UUID de Disease). Filtra por activeDiseaseId en BovineHealthSnapshot. */
+    diseaseId?: string;
+    /** G-03: IDs a excluir del resultado (ej. el propio bovino al buscar candidatos). */
+    excludeIds?: string[];
+    /**
+     * G-03: propósito de candidato genealógico.
+     *   'dam'  → madre: gender=FEMALE + edad ≥ REPRODUCTIVE_MIN_MONTHS.FEMALE
+     *   'sire' → padre: gender=MALE  + edad ≥ REPRODUCTIVE_MIN_MONTHS.MALE
+     * El backend resuelve sexo y edad mínima (fuente única de reglas).
+     */
+    purpose?: 'dam' | 'sire';
 }
 
 export interface PaginationOptions {
@@ -247,6 +308,28 @@ export class BovineService {
                 });
             }
 
+            // Filtro por enfermedad → JOIN con BovineHealthSnapshot por `activeDiseaseId`.
+            // B-07: el filtro legacy `disease` (texto vs `diagnosis`) quedó DEPRECADO
+            // por su mismatch nombre/slug. Solo se aplica `diseaseId` (UUID).
+            if (effectiveFilters.disease && !effectiveFilters.diseaseId) {
+                logger.warn(
+                    'Filtro `disease` (texto) está deprecado y se ignora. Usar `diseaseId` (UUID).',
+                    this.context,
+                    { disease: effectiveFilters.disease }
+                );
+            }
+            if (effectiveFilters.diseaseId) {
+                includes.push({
+                    model: BovineHealthSnapshot,
+                    as: 'healthSnapshot',
+                    required: true,
+                    attributes: [],
+                    where: {
+                        healthStatus: { [Op.in]: [HealthStatus.SICK, HealthStatus.RECOVERING, HealthStatus.QUARANTINE] },
+                        activeDiseaseId: effectiveFilters.diseaseId,
+                    },
+                });
+            }
             // ──────────────────────────────────────────────────────────────────
             // PASO 4: Query con findAndCountAll + distinct para evitar count
             // inflado por LEFT JOINs.
@@ -362,16 +445,30 @@ export class BovineService {
     /**
      * Obtiene un bovino específico por ID
      */
-    async getBovineById(bovineId: string, userId: string): Promise<Bovine | null> {
+    async getBovineById(
+        bovineId: string,
+        userId: string,
+        options: { includeParents?: boolean } = {}
+    ): Promise<Bovine | null> {
         try {
-            // ✅ TU CÓDIGO - Mejorado con include opcional
-            const bovine = await Bovine.findByPk(bovineId, {
-                include: [{
-                    model: Ranch,
-                    as: 'ranch',
-                    attributes: ['id', 'name', 'location']
-                }]
-            });
+            const include: any[] = [{
+                model: Ranch,
+                as: 'ranch',
+                // 'coordinates' es la columna real de geo en ranches (NO 'location',
+                // que no existe y provocaba un 500 "column ranch.location does not exist")
+                attributes: ['id', 'name', 'coordinates']
+            }];
+
+            // G-05: eager-load opcional de madre/padre como mini-objetos
+            if (options.includeParents) {
+                const parentAttrs = ['id', 'earTag', 'name', 'gender', 'breed'];
+                include.push(
+                    { model: Bovine, as: 'mother', attributes: parentAttrs, required: false },
+                    { model: Bovine, as: 'father', attributes: parentAttrs, required: false }
+                );
+            }
+
+            const bovine = await Bovine.findByPk(bovineId, { include });
 
             if (!bovine) {
                 throw new BovineNotFoundError(bovineId);
@@ -446,11 +543,22 @@ export class BovineService {
             // ✅ TU CÓDIGO - Validación de datos
             this.validateBovineData(data);
 
+            // C-03 - Coherencia clínica (healthStatus enfermo ⇒ requiere caso)
+            this.validateClinicalCoherence(data);
+
             // ✅ NUEVO - Validación de edad mínima
             this.validateMinimumAge(data.birthDate, data.cattleType);
 
             // ✅ NUEVO - Validar que el rancho existe
             await this.validateRanchExists(data.ranchId!, transaction);
+
+            // G-01/G-02 - Validar padres (madre/padre) si se proveen
+            await this.validateParents({
+                motherId: data.motherId,
+                fatherId: data.fatherId,
+                ranchId: data.ranchId,
+                transaction,
+            });
 
             // ✅ NUEVO - Generar QR
             const qrCode = this.generateQRCode(data.earTag);
@@ -501,6 +609,27 @@ export class BovineService {
                     notes: data.entryNotes,
                 }, transaction);   // ← pasas la transacción actual
             }
+
+            // C-01 - Alta de bovino YA enfermo: abrir caso clínico en la MISMA
+            // transacción (atómico). openCase sincroniza snapshot + healthStatus.
+            if (data.initialCase) {
+                await bovineDiseaseService.openCase(
+                    {
+                        bovineId:    newBovine.id,
+                        ranchId:     data.ranchId!,
+                        diseaseId:   data.initialCase.diseaseId,
+                        severity:    data.initialCase.severity,
+                        status:      data.initialCase.status,
+                        diagnosedAt: data.initialCase.diagnosedAt,
+                        diagnosedBy: data.initialCase.diagnosedBy,
+                        notes:       data.initialCase.notes,
+                        symptoms:    data.initialCase.symptoms,
+                        createdBy:   userId,
+                    },
+                    transaction,   // ← misma transacción → atomicidad
+                );
+            }
+
             await transaction.commit();
 
             logger.info(`Bovino creado: ${newBovine.earTag}`, this.context, {
@@ -516,6 +645,56 @@ export class BovineService {
             logger.error('Error creando bovino', this.context, { data, userId }, error as Error);
             throw error;
         }
+    }
+
+    /**
+     * C-04: marca enfermo a un bovino EXISTENTE abriendo un caso clínico.
+     * Reusa openCase() (que sincroniza snapshot + healthStatus). El ranchId se
+     * toma del propio bovino. Devuelve el caso creado.
+     */
+    async markBovineSick(
+        bovineId: string,
+        dto: {
+            diseaseId: string;
+            severity: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+            status?: CaseStatus;
+            diagnosedAt?: Date;
+            diagnosedBy?: string;
+            notes?: string;
+            symptoms?: AddSymptomDTO[];
+        },
+        userId: string
+    ) {
+        const bovine = await Bovine.findByPk(bovineId, { attributes: ['id', 'ranchId'] });
+        if (!bovine) {
+            throw new BovineNotFoundError(bovineId);
+        }
+        if (!dto.diseaseId || !dto.severity) {
+            throw new BovineError(
+                'Se requiere diseaseId y severity para marcar el bovino como enfermo',
+                'MISSING_CLINICAL_DATA',
+                400
+            );
+        }
+
+        const diseaseCase = await bovineDiseaseService.openCase({
+            bovineId,
+            ranchId:     bovine.ranchId!,
+            diseaseId:   dto.diseaseId,
+            severity:    dto.severity,
+            status:      dto.status,
+            diagnosedAt: dto.diagnosedAt ?? new Date(),
+            diagnosedBy: dto.diagnosedBy,
+            notes:       dto.notes,
+            symptoms:    dto.symptoms,
+            createdBy:   userId,
+        });
+
+        logger.info(`Bovino ${bovineId} marcado como enfermo`, this.context, {
+            bovineId, diseaseId: dto.diseaseId, caseId: diseaseCase.id, userId,
+        });
+
+        return diseaseCase;
     }
 
     /**
@@ -545,6 +724,17 @@ export class BovineService {
             // ✅ TU CÓDIGO - Validar coordenadas
             if (updateData.location) {
                 this.validateCoordinates(updateData.location);
+            }
+
+            // G-01/G-02 - Validar padres si se cambian (null = desvincular, permitido)
+            if (updateData.motherId !== undefined || updateData.fatherId !== undefined) {
+                await this.validateParents({
+                    motherId: updateData.motherId,
+                    fatherId: updateData.fatherId,
+                    ranchId: updateData.ranchId ?? existingBovine.ranchId ?? undefined,
+                    selfId: updateData.id,
+                    transaction,
+                });
             }
 
             // Guardar estado anterior para comparar
@@ -747,14 +937,32 @@ export class BovineService {
      * Construye las condiciones WHERE para los filtros
      */
     private buildWhereConditions(filters: BovineFilters): WhereOptions {
-        // ✅ TU CÓDIGO - 100% conservado
-        const conditions: any = { isActive: true };
+        const conditions: any = {};
+
+        // F-30: visibilidad por estado de alta. Prioridad:
+        //   1) isActive explícito (true/false)
+        //   2) includeInactive=true → sin filtro (muestra activos + inactivos/fallecidos)
+        //   3) default → solo activos
+        if (filters.isActive !== undefined) {
+            conditions.isActive = filters.isActive;
+        } else if (!filters.includeInactive) {
+            conditions.isActive = true;
+        }
+
+        // Filtro por motivo de salida (ej. exitReason=DECEASED → solo fallecidos)
+        if (filters.exitReason) {
+            conditions.exitReason = filters.exitReason;
+        }
 
         if (filters.searchTerm) {
+            // B-01: el search ahora también cubre QR y RFID, para que escanear/
+            // teclear un código identifique al bovino.
             conditions[Op.or] = [
-                { earTag: { [Op.iLike]: `%${filters.searchTerm}%` } },
-                { name: { [Op.iLike]: `%${filters.searchTerm}%` } },
-                { breed: { [Op.iLike]: `%${filters.searchTerm}%` } }
+                { earTag:  { [Op.iLike]: `%${filters.searchTerm}%` } },
+                { name:    { [Op.iLike]: `%${filters.searchTerm}%` } },
+                { breed:   { [Op.iLike]: `%${filters.searchTerm}%` } },
+                { qrCode:  { [Op.iLike]: `%${filters.searchTerm}%` } },
+                { rfidTag: { [Op.iLike]: `%${filters.searchTerm}%` } }
             ];
         }
 
@@ -766,8 +974,22 @@ export class BovineService {
             conditions.breed = { [Op.iLike]: `%${filters.breed}%` };
         }
 
-        if (filters.gender) {
+        // G-03: `purpose` (dam/sire) resuelve sexo + edad reproductiva mínima
+        // (fuente única de reglas). Tiene prioridad sobre `gender` explícito.
+        let purposeMinAge: number | undefined;
+        if (filters.purpose === 'dam') {
+            conditions.gender = GenderType.FEMALE;
+            purposeMinAge = BOVINE_CONSTANTS.REPRODUCTIVE_MIN_MONTHS.FEMALE;
+        } else if (filters.purpose === 'sire') {
+            conditions.gender = GenderType.MALE;
+            purposeMinAge = BOVINE_CONSTANTS.REPRODUCTIVE_MIN_MONTHS.MALE;
+        } else if (filters.gender) {
             conditions.gender = filters.gender;
+        }
+
+        // G-03: excluir IDs (ej. el propio bovino al buscar candidatos)
+        if (filters.excludeIds && filters.excludeIds.length > 0) {
+            conditions.id = { [Op.notIn]: filters.excludeIds };
         }
 
         if (filters.healthStatus) {
@@ -796,13 +1018,33 @@ export class BovineService {
             };
         }
 
-        if (filters.ageRange) {
-            const now = new Date();
-            const maxBirthDate = new Date(now.getFullYear() - filters.ageRange.min, now.getMonth(), now.getDate());
-            const minBirthDate = new Date(now.getFullYear() - filters.ageRange.max - 1, now.getMonth(), now.getDate());
-            conditions.birthDate = {
-                [Op.between]: [minBirthDate, maxBirthDate]
+        // B-02: filtro de edad en MESES (rangos abiertos) + presets (?ageGroup=).
+        // ageRange explícito tiene prioridad; si no hay, se resuelve el preset.
+        // G-03: `purpose` impone un piso de edad reproductiva (se combina como máximo).
+        let effectiveAge: { min?: number; max?: number } | null =
+            filters.ageRange ??
+            (filters.ageGroup ? resolveAgeGroup(filters.ageGroup) : null);
+
+        if (purposeMinAge !== undefined) {
+            const baseMin = effectiveAge?.min;
+            effectiveAge = {
+                ...(effectiveAge ?? {}),
+                min: baseMin !== undefined ? Math.max(baseMin, purposeMinAge) : purposeMinAge,
             };
+        }
+
+        if (effectiveAge && (effectiveAge.min !== undefined || effectiveAge.max !== undefined)) {
+            const now = new Date();
+            const birthCond: any = {};
+            // edad >= min  ⇒  nació hace al menos `min` meses  ⇒ birthDate <= now - min
+            if (effectiveAge.min !== undefined) {
+                birthCond[Op.lte] = this.subtractMonths(now, effectiveAge.min);
+            }
+            // edad < max   ⇒  nació hace menos de `max` meses  ⇒ birthDate > now - max
+            if (effectiveAge.max !== undefined) {
+                birthCond[Op.gt] = this.subtractMonths(now, effectiveAge.max);
+            }
+            conditions.birthDate = birthCond;
         }
 
         if (filters.isPregnant !== undefined) {
@@ -867,15 +1109,160 @@ export class BovineService {
     private validateMinimumAge(birthDate: Date, cattleType: CattleType): void {
         const ageInMonths = this.getAgeInMonths({ birthDate } as Bovine);
 
-        const minAgeByType = {
-            [CattleType.BULL]: 18,
-            [CattleType.COW]: 15,
-            [CattleType.CALF]: 0,
-            [CattleType.CATTLE]: 0
+        // B-04: umbrales desde la fuente única (sin números mágicos)
+        const minAge = BOVINE_CONSTANTS.MIN_AGE_MONTHS[cattleType] ?? 0;
+
+        if (ageInMonths < minAge) {
+            throw new Error(`Edad mínima para ${cattleType} es ${minAge} meses`);
+        }
+    }
+
+    /**
+     * Valida los padres asignados (G-01 + G-02).
+     *   - existen
+     *   - mismo rancho
+     *   - sexo coherente (madre=FEMALE, padre=MALE)
+     *   - edad reproductiva (madre ≥15m, padre ≥18m — REPRODUCTIVE_MIN_MONTHS)
+     *   - no auto-referencia (SELF_PARENT)
+     *   - anti-ciclo directo: el progenitor no puede ser hijo directo de este bovino
+     * Solo valida los IDs provistos (null/undefined = desvincular, se permite).
+     * Errores: 400 INVALID_PARENT / 400 SELF_PARENT.
+     */
+    private async validateParents(opts: {
+        motherId?: string | null;
+        fatherId?: string | null;
+        ranchId?: string;
+        selfId?: string;
+        transaction?: Transaction;
+    }): Promise<void> {
+        const { motherId, fatherId, ranchId, selfId, transaction } = opts;
+
+        const checkParent = async (
+            parentId: string,
+            expectedGender: GenderType,
+            label: 'madre' | 'padre',
+            minAgeMonths: number
+        ): Promise<void> => {
+            // Auto-referencia
+            if (selfId && parentId === selfId) {
+                throw new BovineError(`Un bovino no puede ser su propio/a ${label}`, 'BOVINE_SELF_PARENT', 400);
+            }
+
+            const parent = await Bovine.findByPk(parentId, { transaction });
+            if (!parent) {
+                throw new BovineError(`La ${label} (${parentId}) no existe`, 'BOVINE_INVALID_PARENT', 400);
+            }
+
+            // Mismo rancho
+            if (ranchId && parent.ranchId && parent.ranchId !== ranchId) {
+                throw new BovineError(`La ${label} pertenece a otro rancho`, 'BOVINE_INVALID_PARENT', 400);
+            }
+
+            // Sexo coherente
+            if (parent.gender !== expectedGender) {
+                const sexo = expectedGender === GenderType.FEMALE ? 'hembra' : 'macho';
+                throw new BovineError(`La ${label} debe ser ${sexo}`, 'BOVINE_INVALID_PARENT', 400);
+            }
+
+            // Edad reproductiva (G-02)
+            const ageMonths = this.getAgeInMonths(parent);
+            if (ageMonths < minAgeMonths) {
+                throw new BovineError(
+                    `La ${label} no alcanza la edad reproductiva mínima (${minAgeMonths} meses)`,
+                    'BOVINE_INVALID_PARENT',
+                    400
+                );
+            }
+
+            // D-4: anti-ciclo a N NIVELES. Si el bovino editado (selfId) es ancestro
+            // del progenitor propuesto, asignarlo crearía un ciclo genealógico.
+            if (selfId && await this.wouldCreateGenealogyCycle(selfId, parentId, transaction)) {
+                throw new BovineError(
+                    `La ${label} no puede ser descendiente de este bovino (ciclo genealógico)`,
+                    'BOVINE_SELF_PARENT',
+                    400
+                );
+            }
         };
 
-        if (ageInMonths < minAgeByType[cattleType]) {
-            throw new Error(`Edad mínima para ${cattleType} es ${minAgeByType[cattleType]} meses`);
+        if (motherId) {
+            await checkParent(motherId, GenderType.FEMALE, 'madre', BOVINE_CONSTANTS.REPRODUCTIVE_MIN_MONTHS.FEMALE);
+        }
+        if (fatherId) {
+            await checkParent(fatherId, GenderType.MALE, 'padre', BOVINE_CONSTANTS.REPRODUCTIVE_MIN_MONTHS.MALE);
+        }
+    }
+
+    /**
+     * D-4: ¿asignar `parentId` como progenitor de `selfId` crearía un ciclo?
+     * Camina hacia ARRIBA por la línea genealógica del progenitor (mother/father).
+     * Si en algún nivel aparece `selfId`, significa que selfId es ancestro del
+     * progenitor → asignarlo cerraría un ciclo. Acotado en profundidad y con
+     * set de visitados para resistir datos previamente inconsistentes.
+     */
+    private async wouldCreateGenealogyCycle(
+        selfId: string,
+        parentId: string,
+        transaction?: Transaction
+    ): Promise<boolean> {
+        const MAX_DEPTH = 25;
+        const visited = new Set<string>();
+        let frontier: string[] = [parentId];
+        let depth = 0;
+
+        while (frontier.length > 0 && depth < MAX_DEPTH) {
+            if (frontier.includes(selfId)) return true;
+
+            const ancestors = await Bovine.findAll({
+                where: { id: { [Op.in]: frontier } },
+                attributes: ['id', 'motherId', 'fatherId'],
+                transaction,
+            });
+
+            const next: string[] = [];
+            for (const a of ancestors) {
+                visited.add(a.id);
+                for (const pid of [a.motherId, a.fatherId]) {
+                    if (pid && !visited.has(pid)) next.push(pid);
+                }
+            }
+            frontier = next;
+            depth++;
+        }
+        return false;
+    }
+
+    /**
+     * C-03: coherencia clínica al crear/marcar enfermo.
+     *   - Si healthStatus ∈ {SICK, RECOVERING, QUARANTINE} ⇒ exige bloque clínico.
+     *   - Si hay bloque clínico ⇒ exige diseaseId + severity + diagnosedAt.
+     * Lanza 400 MISSING_CLINICAL_DATA si falta algo. Los síntomas son opcionales.
+     */
+    private validateClinicalCoherence(data: Partial<CreateBovineData>): void {
+        const SICK_STATUSES: HealthStatus[] = [
+            HealthStatus.SICK,
+            HealthStatus.RECOVERING,
+            HealthStatus.QUARANTINE,
+        ];
+        const isSick = !!data.healthStatus && SICK_STATUSES.includes(data.healthStatus);
+
+        if (isSick && !data.initialCase) {
+            throw new BovineError(
+                'Un bovino con estado SICK/RECOVERING/QUARANTINE requiere datos clínicos (diseaseId, severity, diagnosedAt)',
+                'MISSING_CLINICAL_DATA',
+                400
+            );
+        }
+
+        if (data.initialCase) {
+            const { diseaseId, severity, diagnosedAt } = data.initialCase;
+            if (!diseaseId || !severity || !diagnosedAt) {
+                throw new BovineError(
+                    'El caso clínico inicial requiere diseaseId, severity y diagnosedAt',
+                    'MISSING_CLINICAL_DATA',
+                    400
+                );
+            }
         }
     }
 
@@ -931,7 +1318,18 @@ export class BovineService {
     formatBovineResponse(bovine: Bovine): BovineResponse {
         const ageInMonths = this.getAgeInMonths(bovine);
         const { years, months } = this.getAgeInYearsAndMonths(bovine);
-        const bovineWithRanch = bovine as Bovine & { ranch?: { id: string; name: string; } };
+        const bovineWithRanch = bovine as Bovine & {
+            ranch?: { id: string; name: string; };
+            mother?: { id: string; earTag: string; name?: string; gender?: string; breed?: string };
+            father?: { id: string; earTag: string; name?: string; gender?: string; breed?: string };
+        };
+
+        // B-05: clasificación etaria derivada (edad + sexo). No persiste en BD.
+        const classification = classifyBovine(ageInMonths, bovine.gender);
+
+        // G-05: mini-objetos de madre/padre si fueron eager-loaded
+        const toParent = (p?: { id: string; earTag: string; name?: string; gender?: string; breed?: string }) =>
+            p ? { id: p.id, earTag: p.earTag, name: p.name ?? null, gender: p.gender ?? null, breed: p.breed ?? null } : undefined;
 
         return {
             id: bovine.id,
@@ -946,19 +1344,28 @@ export class BovineService {
             ageInMonths,
             ageInYears: years,
             ageDisplay: this.getAgeDisplay(bovine),
+            // B-05: etapa derivada (CALF/YOUNG/ADULT) + etiqueta según sexo
+            classification: classification.code,
+            classificationLabel: classification.label,
+            isReproductiveAge: isReproductiveAge(ageInMonths, bovine.gender),
             weight: bovine.weight,
             healthStatus: bovine.healthStatus,
             healthStatusLabel: this.getHealthStatusLabel(bovine.healthStatus),
-            healthColor: this.getHealthColor(bovine.healthStatus),
-            vaccinationStatus: bovine.vaccinationStatus,
-            vaccinationStatusLabel: this.getVaccinationStatusLabel(bovine.vaccinationStatus),
+            //healthColor: this.getHealthColor(bovine.healthStatus),
+            // P-02: vaccinationStatus/Label se eliminaron de la respuesta formateada.
+            // El estado de vacunación confiable está en el bloque derivado
+            // `vaccinationStatus` de /full o en GET /:id/vaccination-status.
             location: bovine.location,
             qrCode: bovine.qrCode || '',
             isAdult: this.isAdult(bovine),
+            isActive: bovine.isActive,            // FIX: faltaba en la respuesta
+            exitReason: bovine.exitReason ?? null, // motivo de baja (null si activo)
             ranch: bovineWithRanch.ranch ? {   // ← Ahora TypeScript no se queja
                 id: bovineWithRanch.ranch.id,
                 name: bovineWithRanch.ranch.name
             } : undefined,
+            mother: toParent(bovineWithRanch.mother),
+            father: toParent(bovineWithRanch.father),
             lastHealthCheck: bovine.lastHealthCheck,
             isPregnant: bovine.reproductiveInfo?.isPregnant,
             expectedCalvingDate: bovine.reproductiveInfo?.expectedCalvingDate,
@@ -992,13 +1399,29 @@ export class BovineService {
     }
 
     isAdult(bovine: Bovine): boolean {
-        return this.getAgeInMonths(bovine) >= 24;
+        // B-04: umbral de adulto desde la fuente única (≥ 24 meses)
+        return isAdultAge(this.getAgeInMonths(bovine));
+    }
+
+    /**
+     * Resta `months` meses a una fecha (sin mutar la original).
+     * Usado por el filtro de edad en meses (B-02).
+     */
+    private subtractMonths(date: Date, months: number): Date {
+        const d = new Date(date);
+        d.setMonth(d.getMonth() - months);
+        return d;
     }
 
     getDaysInOperation(bovine: Bovine): number {
-        if (!bovine.acquisitionDate) return 0;
-        const diffTime = Math.abs(new Date().getTime() - new Date(bovine.acquisitionDate).getTime());
-        return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        // Sequelize con underscored:true serializa como created_at, no createdAt.
+        // Usamos .get() como fallback para leer el valor real de la instancia.
+        const from = bovine.acquisitionDate
+            ?? bovine.createdAt
+            ?? (bovine as any).get?.('created_at')
+            ?? (bovine as any).created_at;
+        if (!from) return 0;
+        return Math.floor((Date.now() - new Date(from).getTime()) / 86_400_000);
     }
 
     generateQRCode(earTag: string): string {

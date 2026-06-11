@@ -43,12 +43,42 @@ import BovineLocationHistory from './BovineLocationHistory';  // ← FALTA
 import BovineHealthSnapshot from './BovineHealthSnapshot';  // ← FALTA
 import Vaccination from './Vaccination';
 import BovineVaccinationStatus from './BovineVaccinationStatus';
+import VaccineDiseaseProtection from './VaccineDiseaseProtection';
+import VaccinationSchedule from './VaccinationSchedule';
+import BovineDeath from './BovineDeath';
 
 import Notification from './Notification';
 
 import InventoryMovement from './InventoryMovement';
 import PurchaseOrder from './PurchaseOrder';
 import Supplier from './Supplier';
+
+// ── Catálogo de enfermedades (Fase 1) ────────────────────────────────────────
+import Disease from './Disease';
+import DiseaseAlias from './DiseaseAlias';
+import Symptom from './Symptom';
+import DiseaseSymptom from './DiseaseSymptom';
+import TransmissionMethod from './TransmissionMethod';
+import DiseaseTransmission from './DiseaseTransmission';
+
+// ── Fuentes de infección ──────────────────────────────────────────────────────
+import DiseaseSource from './DiseaseSource';
+
+// ── Casos clínicos (Fase 2) ───────────────────────────────────────────────────
+import BovineDiseaseCase from './BovineDiseaseCase';
+import CaseSymptom from './CaseSymptom';
+import CaseTreatment from './CaseTreatment';
+import LabTest from './LabTest';
+
+// ── Epidemiología (Fase 4) ────────────────────────────────────────────────────
+import EpidemiologicalSnapshot from './EpidemiologicalSnapshot';
+import EpidemiologyAlert from './EpidemiologyAlert';
+
+// ── Propagación de contagio (Fase 5) ─────────────────────────────────────────
+import CaseContact from './CaseContact';
+
+// ── Media de enfermedades ─────────────────────────────────────────────────────
+import DiseaseMedia from './DiseaseMedia';
 
 // Interface para configuración de la base de datos
 interface DatabaseConfig {
@@ -123,12 +153,42 @@ class Database {
     BovineLocationHistory: typeof BovineLocationHistory;
     Vaccination: typeof Vaccination;
     BovineVaccinationStatus: typeof BovineVaccinationStatus;
+    VaccineDiseaseProtection: typeof VaccineDiseaseProtection;
+    VaccinationSchedule: typeof VaccinationSchedule;
+    BovineDeath: typeof BovineDeath;
 
     Notification: typeof Notification;
 
     InventoryMovement: typeof InventoryMovement;
     PurchaseOrder: typeof PurchaseOrder;
     Supplier: typeof Supplier;
+
+    // Catálogo de enfermedades (Fase 1)
+    Disease: typeof Disease;
+    DiseaseAlias: typeof DiseaseAlias;
+    Symptom: typeof Symptom;
+    DiseaseSymptom: typeof DiseaseSymptom;
+    TransmissionMethod: typeof TransmissionMethod;
+    DiseaseTransmission: typeof DiseaseTransmission;
+
+    // Fuentes de infección
+    DiseaseSource: typeof DiseaseSource;
+
+    // Casos clínicos (Fase 2)
+    BovineDiseaseCase: typeof BovineDiseaseCase;
+    CaseSymptom: typeof CaseSymptom;
+    CaseTreatment: typeof CaseTreatment;
+    LabTest: typeof LabTest;
+
+    // Epidemiología (Fase 4)
+    EpidemiologicalSnapshot: typeof EpidemiologicalSnapshot;
+    EpidemiologyAlert: typeof EpidemiologyAlert;
+
+    // Propagación de contagio (Fase 5)
+    CaseContact: typeof CaseContact;
+
+    // Media de enfermedades
+    DiseaseMedia: typeof DiseaseMedia;
   };
 
   constructor() {
@@ -170,10 +230,40 @@ class Database {
       BovineHealthSnapshot,
       Vaccination,
       BovineVaccinationStatus,
+      VaccineDiseaseProtection,
+      VaccinationSchedule,
+      BovineDeath,
       Notification,
       InventoryMovement,
       PurchaseOrder,
-      Supplier
+      Supplier,
+
+      // Catálogo de enfermedades (Fase 1)
+      Disease,
+      DiseaseAlias,
+      Symptom,
+      DiseaseSymptom,
+      TransmissionMethod,
+      DiseaseTransmission,
+
+      // Fuentes de infección
+      DiseaseSource,
+
+      // Casos clínicos (Fase 2)
+      BovineDiseaseCase,
+      CaseSymptom,
+      CaseTreatment,
+      LabTest,
+
+      // Epidemiología (Fase 4)
+      EpidemiologicalSnapshot,
+      EpidemiologyAlert,
+
+      // Propagación de contagio (Fase 5)
+      CaseContact,
+
+      // Media de enfermedades
+      DiseaseMedia,
     };
 
     // Establecer las relaciones entre modelos
@@ -468,36 +558,35 @@ class Database {
       onUpdate: 'CASCADE'
     });
 
-    // 15. Relaciones familiares - Madre
+    // 15. Relaciones familiares - Madre (G-04)
+    // constraints:false → FK lógica sin REFERENCES en BD (mismo patrón que el
+    // resto del proyecto). El vínculo se CONSERVA aunque el progenitor se borre/
+    // fallezca (no SET NULL); el valor genealógico es histórico.
     Bovine.belongsTo(Bovine, {
       foreignKey: 'motherId',
       as: 'mother',
-      onDelete: 'SET NULL',
-      onUpdate: 'CASCADE'
+      constraints: false,
     });
 
-    // 16. Relaciones familiares - Padre
+    // 16. Relaciones familiares - Padre (G-04)
     Bovine.belongsTo(Bovine, {
       foreignKey: 'fatherId',
       as: 'father',
-      onDelete: 'SET NULL',
-      onUpdate: 'CASCADE'
+      constraints: false,
     });
 
     // 17. Hijos (crías) - relación inversa con madre
     Bovine.hasMany(Bovine, {
       foreignKey: 'motherId',
       as: 'offspring',
-      onDelete: 'SET NULL',
-      onUpdate: 'CASCADE'
+      constraints: false,
     });
 
     // 18. Descendencia paterna - relación inversa con padre
     Bovine.hasMany(Bovine, {
       foreignKey: 'fatherId',
       as: 'paternalOffspring',
-      onDelete: 'SET NULL',
-      onUpdate: 'CASCADE'
+      constraints: false,
     });
 
     // =============================================
@@ -878,6 +967,42 @@ class Database {
       onUpdate: 'CASCADE'
     });
 
+    // ── Catálogo de protección: vacuna ↔ enfermedad ───────────────────────────
+    // constraints:false → la FK es lógica (no genera REFERENCES en el ALTER),
+    // para no romper el orden de sync (mismo patrón que disease_sources).
+    VaccineDiseaseProtection.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+      constraints: false,
+    });
+    Disease.hasMany(VaccineDiseaseProtection, {
+      foreignKey: 'diseaseId',
+      as: 'vaccineProtections',
+      constraints: false,
+    });
+
+    // ── Muerte / Baja por fallecimiento (Módulo 8) ───────────────────────────
+    Bovine.hasOne(BovineDeath, {
+      foreignKey: 'bovineId',
+      as: 'death',
+      constraints: false,
+    });
+    BovineDeath.belongsTo(Bovine, {
+      foreignKey: 'bovineId',
+      as: 'bovine',
+      constraints: false,
+    });
+    BovineDeath.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+      constraints: false,
+    });
+    BovineDeath.belongsTo(BovineDiseaseCase, {
+      foreignKey: 'diseaseCaseId',
+      as: 'diseaseCase',
+      constraints: false,
+    });
+
     // =============================================
     // ✅ NUEVAS RELACIONES DE NOTIFICACIONES
     // =============================================
@@ -930,6 +1055,15 @@ class Database {
     Ranch.hasMany(Notification, {
       foreignKey: 'ranchId',
       as: 'ranchNotifications',
+      constraints: false
+    });
+
+    // Un evento de seguridad puede pertenecer a un usuario (opcional)
+    SecurityEvent.belongsTo(User, {
+      foreignKey: 'user_id',
+      as: 'user',
+      onDelete: 'SET NULL',
+      onUpdate: 'CASCADE',
       constraints: false
     });
 
@@ -1053,6 +1187,280 @@ class Database {
       onUpdate: 'CASCADE',
     });
 
+    // ============================================================================
+    // CATÁLOGO DE ENFERMEDADES (Fase 1)
+    // ============================================================================
+
+    // Disease ↔ DiseaseAlias (1:N) — una enfermedad tiene muchos aliases
+    Disease.hasMany(DiseaseAlias, {
+      foreignKey: 'diseaseId',
+      as: 'aliases',
+      onDelete: 'CASCADE',
+    });
+    DiseaseAlias.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+    });
+
+    // Disease ↔ Symptom (M:N a través de DiseaseSymptom)
+    Disease.belongsToMany(Symptom, {
+      through: DiseaseSymptom,
+      foreignKey: 'diseaseId',
+      otherKey: 'symptomId',
+      as: 'symptoms',
+    });
+    Symptom.belongsToMany(Disease, {
+      through: DiseaseSymptom,
+      foreignKey: 'symptomId',
+      otherKey: 'diseaseId',
+      as: 'diseases',
+    });
+
+    // Acceso directo a la fila pivote desde cada extremo
+    Disease.hasMany(DiseaseSymptom, {
+      foreignKey: 'diseaseId',
+      as: 'diseaseSymptoms',
+      onDelete: 'CASCADE',
+    });
+    DiseaseSymptom.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+    });
+
+    Symptom.hasMany(DiseaseSymptom, {
+      foreignKey: 'symptomId',
+      as: 'diseaseSymptoms',
+      onDelete: 'CASCADE',
+    });
+    DiseaseSymptom.belongsTo(Symptom, {
+      foreignKey: 'symptomId',
+      as: 'symptom',
+    });
+
+    // Disease ↔ TransmissionMethod (M:N a través de DiseaseTransmission)
+    Disease.belongsToMany(TransmissionMethod, {
+      through: DiseaseTransmission,
+      foreignKey: 'diseaseId',
+      otherKey: 'transmissionMethodId',
+      as: 'transmissionMethods',
+    });
+    TransmissionMethod.belongsToMany(Disease, {
+      through: DiseaseTransmission,
+      foreignKey: 'transmissionMethodId',
+      otherKey: 'diseaseId',
+      as: 'diseases',
+    });
+
+    // Acceso directo a la fila pivote desde cada extremo
+    Disease.hasMany(DiseaseTransmission, {
+      foreignKey: 'diseaseId',
+      as: 'diseaseTransmissions',
+      onDelete: 'CASCADE',
+    });
+    DiseaseTransmission.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+    });
+
+    TransmissionMethod.hasMany(DiseaseTransmission, {
+      foreignKey: 'transmissionMethodId',
+      as: 'diseaseTransmissions',
+      onDelete: 'CASCADE',
+    });
+    DiseaseTransmission.belongsTo(TransmissionMethod, {
+      foreignKey: 'transmissionMethodId',
+      as: 'transmissionMethod',
+    });
+
+    // ============================================================================
+    // CASOS CLÍNICOS (Fase 2)
+    // ============================================================================
+
+    // ── DiseaseSource ↔ BovineDiseaseCase (1:N) ──────────────────────────────
+    DiseaseSource.hasMany(BovineDiseaseCase, {
+      foreignKey: 'sourceId',
+      as: 'cases',
+      constraints: false,   // nullable — no todos los casos tienen fuente identificada
+    });
+    BovineDiseaseCase.belongsTo(DiseaseSource, {
+      foreignKey: 'sourceId',
+      as: 'source',
+      constraints: false,   // nullable — no todos los casos tienen fuente identificada
+    });
+
+    // Bovine ↔ BovineDiseaseCase (1:N)
+    Bovine.hasMany(BovineDiseaseCase, {
+      foreignKey: 'bovineId',
+      as: 'diseaseCases',
+      onDelete: 'CASCADE',
+    });
+    BovineDiseaseCase.belongsTo(Bovine, {
+      foreignKey: 'bovineId',
+      as: 'bovine',
+    });
+
+    // Disease ↔ BovineDiseaseCase (1:N)
+    Disease.hasMany(BovineDiseaseCase, {
+      foreignKey: 'diseaseId',
+      as: 'cases',
+      onDelete: 'RESTRICT',
+    });
+    BovineDiseaseCase.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+    });
+
+    // User ↔ BovineDiseaseCase (1:N — creador del caso)
+    User.hasMany(BovineDiseaseCase, {
+      foreignKey: 'createdBy',
+      as: 'openedCases',
+      onDelete: 'SET NULL',
+    });
+    BovineDiseaseCase.belongsTo(User, {
+      foreignKey: 'createdBy',
+      as: 'creator',
+    });
+
+    // BovineDiseaseCase ↔ CaseSymptom (1:N)
+    BovineDiseaseCase.hasMany(CaseSymptom, {
+      foreignKey: 'caseId',
+      as: 'caseSymptoms',
+      onDelete: 'CASCADE',
+    });
+    CaseSymptom.belongsTo(BovineDiseaseCase, {
+      foreignKey: 'caseId',
+      as: 'case',
+    });
+
+    // Symptom ↔ CaseSymptom (1:N — acceso inverso)
+    Symptom.hasMany(CaseSymptom, {
+      foreignKey: 'symptomId',
+      as: 'caseOccurrences',
+      onDelete: 'RESTRICT',
+    });
+    CaseSymptom.belongsTo(Symptom, {
+      foreignKey: 'symptomId',
+      as: 'symptom',
+    });
+
+    // BovineDiseaseCase ↔ CaseTreatment (1:N)
+    BovineDiseaseCase.hasMany(CaseTreatment, {
+      foreignKey: 'caseId',
+      as: 'treatments',
+      onDelete: 'CASCADE',
+    });
+    CaseTreatment.belongsTo(BovineDiseaseCase, {
+      foreignKey: 'caseId',
+      as: 'case',
+    });
+
+    // BovineDiseaseCase ↔ LabTest (1:N)
+    BovineDiseaseCase.hasMany(LabTest, {
+      foreignKey: 'caseId',
+      as: 'labTests',
+      onDelete: 'CASCADE',
+    });
+    LabTest.belongsTo(BovineDiseaseCase, {
+      foreignKey: 'caseId',
+      as: 'case',
+    });
+
+    // ── EpidemiologicalSnapshot (Fase 4) ─────────────────────────────────────
+    // Ranch (1:N) EpidemiologicalSnapshot
+    Ranch.hasMany(EpidemiologicalSnapshot, {
+      foreignKey: 'ranchId',
+      as: 'epidemiologicalSnapshots',
+      onDelete: 'CASCADE',
+    });
+    EpidemiologicalSnapshot.belongsTo(Ranch, {
+      foreignKey: 'ranchId',
+      as: 'ranch',
+    });
+    // Disease (1:N) EpidemiologicalSnapshot  (FK sin constraints — diseaseId puede ser NULL)
+    Disease.hasMany(EpidemiologicalSnapshot, {
+      foreignKey: 'diseaseId',
+      as: 'epidemiologicalSnapshots',
+      constraints: false,
+    });
+    EpidemiologicalSnapshot.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+      constraints: false,
+    });
+
+    // E-03: alertas epidemiológicas → enfermedad
+    EpidemiologyAlert.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+      constraints: false,
+    });
+
+    // ── CaseContact (Fase 5) ──────────────────────────────────────────────────
+    // BovineDiseaseCase (1:N) CaseContact como fuente
+    BovineDiseaseCase.hasMany(CaseContact, {
+      foreignKey: 'sourceCaseId',
+      as: 'contactsAsSource',
+      onDelete: 'CASCADE',
+    });
+    CaseContact.belongsTo(BovineDiseaseCase, {
+      foreignKey: 'sourceCaseId',
+      as: 'sourceCase',
+    });
+
+    // BovineDiseaseCase (1:N) CaseContact como destino
+    BovineDiseaseCase.hasMany(CaseContact, {
+      foreignKey: 'targetCaseId',
+      as: 'contactsAsTarget',
+      onDelete: 'CASCADE',
+    });
+    CaseContact.belongsTo(BovineDiseaseCase, {
+      foreignKey: 'targetCaseId',
+      as: 'targetCase',
+    });
+
+    // E-04: bovino expuesto sin caso (cuando targetCaseId es null)
+    CaseContact.belongsTo(Bovine, {
+      foreignKey: 'targetBovineId',
+      as: 'targetBovine',
+      constraints: false,
+    });
+
+    // ── Health ↔ Disease (opcional — FK al catálogo) ─────────────────────────
+    Health.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+      constraints: false, // nullable FK; no romper si disease no existe
+    });
+    Disease.hasMany(Health, {
+      foreignKey: 'diseaseId',
+      as: 'healthRecords',
+      constraints: false,
+    });
+
+    // ── DiseaseMedia ──────────────────────────────────────────────────────────
+    // Disease (1:N) DiseaseMedia
+    Disease.hasMany(DiseaseMedia, {
+      foreignKey: 'diseaseId',
+      as: 'media',
+      onDelete: 'CASCADE',
+    });
+    DiseaseMedia.belongsTo(Disease, {
+      foreignKey: 'diseaseId',
+      as: 'disease',
+    });
+
+    // Symptom (1:N) DiseaseMedia (opcional — imagen de un síntoma concreto)
+    Symptom.hasMany(DiseaseMedia, {
+      foreignKey: 'symptomId',
+      as: 'media',
+      constraints: false,
+    });
+    DiseaseMedia.belongsTo(Symptom, {
+      foreignKey: 'symptomId',
+      as: 'symptom',
+      constraints: false,
+    });
+
     console.log('✅ Relaciones configuradas exitosamente');
   }
 
@@ -1063,8 +1471,8 @@ class Database {
   public async syncDatabase(config: Partial<DatabaseConfig> = {}): Promise<void> {
     const defaultConfig: DatabaseConfig = {
       sync: true,
-      force: false,      // ⚠️ CUIDADO: true elimina todas las tablas - se cambio a true para que se elimine todas las tablas y se cree nuevamente
-      alter: true,      // true modifica tablas existentes
+      force: false,      // ⚠️ CUIDADO: true elimina todas las tablas
+      alter: true,       // Propaga columnas nuevas a tablas existentes (ALTER TABLE ADD COLUMN)
       logging: true
     };
 
@@ -1535,6 +1943,7 @@ export {
 
   // Bovine sub-modelos
   BovineTracking, BovineLocationHistory, Vaccination, BovineVaccinationStatus,
+  VaccineDiseaseProtection, VaccinationSchedule, BovineDeath,
 
   // Ranch sub-modelos
   RanchOwnership, RanchProduction, RanchFinancial, RanchSustainability,

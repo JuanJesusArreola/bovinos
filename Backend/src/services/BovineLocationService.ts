@@ -21,6 +21,7 @@ import BovineLocationHistory, {
 import Location from '../models/Location';
 import Bovine from '../models/Bovine';
 import BovineTracking from '../models/BovineTracking';
+import LocationCapacity from '../models/LocationCapacity';
 import { bovineFullService } from './BovineFullService';
 
 // Servicios (con lazy loading para evitar dependencias circulares)
@@ -42,6 +43,8 @@ export interface EntryRecordData {
     movementType: MovementType;
     notes?: string;
     eventId?: string;
+    /** L-01: si true, omite la validación de capacidad del potrero destino. */
+    forceOverride?: boolean;
 }
 
 /**
@@ -229,6 +232,26 @@ export class BovineLocationService {
                 );
             }
 
+            // 3b. (L-02) Validar enteredAt: no futura (>1h tolerancia) ni anterior
+            //     a la última salida registrada del bovino.
+            const enteredAt = data.enteredAt || new Date();
+            const ONE_HOUR_MS = 60 * 60 * 1000;
+            if (enteredAt.getTime() > Date.now() + ONE_HOUR_MS) {
+                throw new BovineValidationError('La fecha de entrada no puede ser futura');
+            }
+            const lastExitedRow = await BovineLocationHistory.findOne({
+                where: { bovineId: data.bovineId, exitedAt: { [Op.not]: null } as any },
+                order: [['exitedAt', 'DESC']],
+                attributes: ['exitedAt'],
+                transaction,
+            });
+            const lastExitedAt = (lastExitedRow as any)?.exitedAt as Date | undefined;
+            if (lastExitedAt && enteredAt < lastExitedAt) {
+                throw new BovineValidationError(
+                    'La fecha de entrada no puede ser anterior a la última salida registrada'
+                );
+            }
+
             // 4. Verificar si tiene entrada activa (opcional, según tu lógica de negocio)
             const activeEntry = await BovineLocationHistory.findOne({
                 where: {
@@ -238,12 +261,34 @@ export class BovineLocationService {
                 transaction
             });
 
+            // M-01: si el bovino YA tiene una estancia activa en el MISMO potrero
+            // destino → no-op. No se crea un movimiento redundante (que ensuciaría
+            // el historial y la detección epidemiológica de contactos). La
+            // actualización de GPS, si la hay, la realiza el caller (updateLocation)
+            // en la misma transacción, por lo que se conserva.
+            if (activeEntry && activeEntry.locationId === data.locationId) {
+                // Auto-sanar currentLocationId por si quedó desincronizado (legacy)
+                await Bovine.update(
+                    { currentLocationId: data.locationId },
+                    { where: { id: data.bovineId }, transaction }
+                );
+                if (isOwnTransaction) await transaction.commit();
+                bovineFullService.invalidate(data.bovineId);
+                logger.info(
+                    `Bovino ${data.bovineId} ya se encuentra en la ubicación ${data.locationId} — movimiento omitido (no-op)`,
+                    this.context,
+                    { bovineId: data.bovineId, locationId: data.locationId }
+                );
+                return activeEntry;
+            }
+
+            // Recordar el potrero anterior (para re-sincronizar su ocupación)
+            let previousLocationId: string | null = null;
             if (activeEntry) {
                 if (data.movementType === MovementType.AUTOMATED) {
                     // Cerrar automáticamente la entrada anterior
-                    await activeEntry.update({
-                        exitedAt: data.enteredAt || new Date()
-                    }, { transaction });
+                    previousLocationId = activeEntry.locationId;
+                    await activeEntry.update({ exitedAt: enteredAt }, { transaction });
                 } else {
                     throw new BovineValidationError(
                         `El bovino ya tiene una entrada activa en otra ubicación. ` +
@@ -252,11 +297,18 @@ export class BovineLocationService {
                 }
             }
 
+            // 4b. (L-01) Validar capacidad del potrero destino contra
+            //     LocationCapacity.maxAnimals, usando el CONTEO EN VIVO de estancias
+            //     activas. Se omite si forceOverride o si no hay capacidad definida.
+            if (!data.forceOverride) {
+                await this.assertLocationHasCapacity(data.locationId, transaction);
+            }
+
             // 5. Crear nueva entrada
             const entry = await BovineLocationHistory.create({
                 bovineId: data.bovineId,
                 locationId: data.locationId,
-                enteredAt: data.enteredAt || new Date(),
+                enteredAt,
                 reason: data.reason,
                 recordedBy: data.recordedBy,
                 movementType: data.movementType,
@@ -264,7 +316,17 @@ export class BovineLocationService {
                 eventId: data.eventId
             }, { transaction });
 
-            // ✅ NO actualizamos bovine (no tiene currentLocationId)
+            // 5b. (L-03) Sincronizar currentLocationId del bovino (lo lee el mapa)
+            await Bovine.update(
+                { currentLocationId: data.locationId },
+                { where: { id: data.bovineId }, transaction }
+            );
+
+            // 5c. (L-01) Sincronizar el contador de ocupación de los potreros afectados
+            await this.syncLocationOccupancy(data.locationId, transaction);
+            if (previousLocationId && previousLocationId !== data.locationId) {
+                await this.syncLocationOccupancy(previousLocationId, transaction);
+            }
 
             if (isOwnTransaction) await transaction.commit();
             // No hacer commit si la transacción es externa
@@ -340,7 +402,14 @@ export class BovineLocationService {
 
             await activeEntry.update({ exitedAt }, { transaction });
 
-            // ✅ NO actualizamos bovine
+            // L-03: el bovino ya no está en ningún potrero → limpiar currentLocationId
+            await Bovine.update(
+                { currentLocationId: null as any },
+                { where: { id: data.bovineId }, transaction }
+            );
+
+            // L-01: re-sincronizar la ocupación del potrero del que salió
+            await this.syncLocationOccupancy(activeEntry.locationId, transaction);
 
             await transaction.commit();
 
@@ -905,6 +974,53 @@ export class BovineLocationService {
     // ==========================================================================
 
     /**
+     * Cuenta las estancias activas (exitedAt IS NULL) en un potrero — ocupación real.
+     */
+    private async countActiveOccupants(locationId: string, transaction?: Transaction): Promise<number> {
+        return BovineLocationHistory.count({
+            where: { locationId, exitedAt: { [Op.is]: null } as any },
+            transaction,
+        });
+    }
+
+    /**
+     * L-01: valida la capacidad del potrero destino contra LocationCapacity.maxAnimals
+     * usando el conteo EN VIVO de ocupantes. Si no hay fila de capacidad o maxAnimals
+     * no está definido (≤ 0), no se valida. Lanza 409 BOVINE_LOCATION_FULL.
+     */
+    private async assertLocationHasCapacity(locationId: string, transaction?: Transaction): Promise<void> {
+        const capacity = await LocationCapacity.findOne({
+            where: { locationId },
+            attributes: ['maxAnimals'],
+            transaction,
+        });
+        const maxAnimals = (capacity as any)?.maxAnimals as number | undefined;
+        if (!maxAnimals || maxAnimals <= 0) return; // sin capacidad definida → no se valida
+
+        const current = await this.countActiveOccupants(locationId, transaction);
+        if (current >= maxAnimals) {
+            const err = new BovineError(
+                `El potrero está lleno (${current}/${maxAnimals})`,
+                'BOVINE_LOCATION_FULL',
+                409,
+            );
+            (err as any).details = { currentOccupancy: current, maxAnimals };
+            throw err;
+        }
+    }
+
+    /**
+     * L-01: recuenta ocupantes activos y actualiza LocationCapacity.currentAnimals.
+     * No-op si el potrero no tiene fila de capacidad.
+     */
+    private async syncLocationOccupancy(locationId: string, transaction?: Transaction): Promise<void> {
+        const capacity = await LocationCapacity.findOne({ where: { locationId }, transaction });
+        if (!capacity) return;
+        const current = await this.countActiveOccupants(locationId, transaction);
+        await capacity.update({ currentAnimals: current }, { transaction });
+    }
+
+    /**
      * Cierra la entrada activa actual de un bovino
      */
     private async closeCurrentEntry(
@@ -1026,7 +1142,11 @@ export class BovineLocationService {
      * en bovine_location_history para mantener el historial de movimientos.
      * Si el bovino ya tenía una entrada activa, la cierra automáticamente.
      */
-    async updateLocation(bovineId: string, data: any, userId?: string): Promise<Bovine> {
+    async updateLocation(
+        bovineId: string,
+        data: any,
+        userId?: string
+    ): Promise<{ bovine: Bovine; wasNoOp: boolean; locationChanged: boolean }> {
         const t = await sequelize.transaction();
         try {
             const bovine = await Bovine.findByPk(bovineId, { transaction: t });
@@ -1039,8 +1159,20 @@ export class BovineLocationService {
                 await bovine.update({ location: data.location }, { transaction: t });
             }
 
+            // L-04: detectar si el movimiento será un no-op (ya está en ese potrero)
+            let wasNoOp = false;
+            let locationChanged = false;
+
             // Crear entrada en historial si se indica una ubicación estructural
             if (data.locationId && userId) {
+                const active = await BovineLocationHistory.findOne({
+                    where: { bovineId, exitedAt: { [Op.is]: null } as any },
+                    attributes: ['locationId'],
+                    transaction: t,
+                });
+                wasNoOp = !!active && active.locationId === data.locationId;
+                locationChanged = !wasNoOp;
+
                 await this.recordEntry({
                     bovineId,
                     locationId: data.locationId,
@@ -1049,13 +1181,15 @@ export class BovineLocationService {
                     // AUTOMATED cierra automáticamente cualquier entrada activa previa
                     movementType: MovementType.AUTOMATED,
                     notes:        data.notes,
+                    enteredAt:    data.enteredAt ? new Date(data.enteredAt) : undefined,
+                    forceOverride: data.forceOverride === true,  // L-01 override
                 }, t);
             }
 
             await t.commit();
             bovineFullService.invalidate(bovineId);
 
-            return bovine.reload();
+            return { bovine: await bovine.reload(), wasNoOp, locationChanged };
         } catch (error) {
             await t.rollback();
             logger.error(`Error en updateLocation para bovino ${bovineId}`, this.context,

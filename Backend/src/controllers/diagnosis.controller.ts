@@ -25,13 +25,19 @@ export class DiagnosisController {
         return;
       }
 
-      const { healthId, diagnosisData } = req.body;
+      const { healthId, diagnosisData, diseaseId } = req.body;
       if (!healthId || !diagnosisData) {
         res.status(400).json({ success: false, error: 'healthId y diagnosisData son requeridos' });
         return;
       }
 
-      const updatedHealth = await diagnosisService.recordDiagnosis(healthId, diagnosisData, userId);
+      // diseaseId es opcional: UUID vincula al catálogo, null desvincula, omitido no toca
+      const updatedHealth = await diagnosisService.recordDiagnosis(
+        healthId,
+        diagnosisData,
+        userId,
+        diseaseId  // undefined si no viene en el body — el servicio no tocará disease_id
+      );
       res.json({
         success: true,
         data: updatedHealth,

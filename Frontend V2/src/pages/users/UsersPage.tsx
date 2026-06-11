@@ -99,11 +99,32 @@ type EditUserFormData = z.infer<typeof editUserSchema>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+const ASSIGNABLE_ROLES_MAP: Partial<Record<UserRole, UserRole[]>> = {
+  [UserRole.SUPER_ADMIN]: [
+    UserRole.OWNER,
+    UserRole.RANCH_MANAGER,
+    UserRole.MANAGER,
+    UserRole.VETERINARIAN,
+    UserRole.WORKER,
+    UserRole.VIEWER,
+  ],
+  [UserRole.OWNER]: [
+    UserRole.RANCH_MANAGER,
+    UserRole.MANAGER,
+    UserRole.VETERINARIAN,
+    UserRole.WORKER,
+    UserRole.VIEWER,
+  ],
+  [UserRole.RANCH_MANAGER]: [
+    UserRole.MANAGER,
+    UserRole.VETERINARIAN,
+    UserRole.WORKER,
+    UserRole.VIEWER,
+  ],
+};
+
 function getAssignableRoles(currentRole: UserRole): { value: string; label: string }[] {
-  const level = ROLE_LEVEL[currentRole];
-  return Object.values(UserRole)
-    .filter((r) => ROLE_LEVEL[r] < level) // Can only assign roles BELOW own level
-    .sort((a, b) => ROLE_LEVEL[b] - ROLE_LEVEL[a])
+  return (ASSIGNABLE_ROLES_MAP[currentRole] ?? [])
     .map((r) => ({ value: r, label: ROLE_LABELS[r] }));
 }
 
@@ -327,7 +348,7 @@ export function UsersPage() {
       header: 'Creado',
       render: (u) => (
         <span className="text-sm text-gray-500 dark:text-gray-400">
-          {formatDate(u.createdAt)}
+          {formatDate((u as any).created_at ?? u.createdAt)}
         </span>
       ),
     },

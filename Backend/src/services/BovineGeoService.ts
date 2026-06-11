@@ -1,16 +1,15 @@
 import { Op, Transaction, QueryTypes } from 'sequelize';
 import sequelize from '../config/database';
 import logger from '../utils/logger';
-import { 
+import {
   BovineError,
   BovineValidationError,
-  BovineNotFoundError 
+  BovineNotFoundError
 } from '../utils/BovineErrors';
 import { getErrorMessage, ensureError } from '../utils/errorUtils';
-import { 
+import {
   GRID_SIZES,
   HEAT_INTENSITY,
-  HEALTH_COLORS 
 } from '../constants/bovine.constants';
 
 // Modelos
@@ -39,12 +38,12 @@ export interface HeatmapPoint {
   lat: number;                   // Latitud
   lng: number;                   // Longitud
   value: number;                 // Intensidad para heatmap (0-1)
-  color: string;                 // Color hexadecimal
+  //color: string;                 // Color hexadecimal
   metadata: {
     healthStatus: HealthStatus;  // Estado de salud (para filtros)
     breed?: string;              // Raza (para filtros)
     age?: number;                // Edad en meses (para filtros)
-    diagnosis?: string;          // Diagnóstico actual (si existe)
+    diagnosis?: string | null;   // Diagnóstico actual (si existe)
   };
 }
 
@@ -59,15 +58,15 @@ export interface HeatmapPoint {
  *   const popup = L.popup().setContent(renderBovinePopup(popupData));
  */
 export interface PopupData {
-  bovineId:      string;
-  shortId:       string;        // últimos 6 chars del ID — para el título
-  healthStatus:  HealthStatus;
-  statusLabel:   string;        // etiqueta en español lista para mostrar
-  statusColor:   string;        // color hex del estado
-  breed?:        string;
-  ageMonths?:    number;
-  diagnosis?:    string;
-  hasDiagnosis:  boolean;       // shortcut para condicionales en el template
+  bovineId: string;
+  shortId: string;        // últimos 6 chars del ID — para el título
+  healthStatus: HealthStatus;
+  statusLabel: string;        // etiqueta en español lista para mostrar
+  //statusColor: string;        // color hex del estado
+  breed?: string;
+  ageMonths?: number;
+  diagnosis?: string | null;
+  hasDiagnosis: boolean;       // shortcut para condicionales en el template
 }
 
 /**
@@ -126,6 +125,8 @@ export interface HeatmapFilters {
   // `diagnosis` del snapshot (string normalizado, ej. "Mastitis", "Fiebre aftosa").
   // El frontend debe enviar los mismos valores que usa al guardar en Health.diagnosis.
   diseases?: string[];
+  /** Filtro por UUID de Disease (Phase 2). Filtra por activeDiseaseId en el snapshot. */
+  diseaseIds?: string[];
 }
 
 /**
@@ -138,9 +139,10 @@ export interface SnapshotUpdateData {
   healthStatus?: HealthStatus;
   location?: LocationData;
   lastUpdate?: Date;
-  healthColor?: string;
-  diagnosis?: string;
+  diagnosis?: string | null;       // null para limpiar diagnóstico, undefined para no tocar
   lastHealthCheck?: Date;
+  activeDiseaseId?: string | null; // null para limpiar al cerrar el caso (Fase 2)
+  activeCaseId?: string | null;    // null para limpiar al cerrar el caso (Fase 2)
 }
 // ============================================================================
 // SERVICIO PRINCIPAL
@@ -169,7 +171,7 @@ export class BovineGeoService {
    */
   async createSnapshot(bovine: Bovine, transaction?: Transaction): Promise<void> {
     const startTime = Date.now();
-    
+
     try {
       // Validar que el bovino tenga ranchId (necesario para filtros)
       if (!bovine.ranchId) {
@@ -199,7 +201,7 @@ export class BovineGeoService {
         location: bovine.location,
         geom,
         lastUpdate: new Date(),
-        healthColor: this.getHealthColor(bovine.healthStatus),
+        //healthColor: this.getHealthColor(bovine.healthStatus),
         clusterSize: 1, // Inicialmente 1, se recalculará después
         breed: bovine.breed,
         ageMonths: ageInMonths,
@@ -208,7 +210,7 @@ export class BovineGeoService {
       }, { transaction });
 
       const duration = Date.now() - startTime;
-      
+
       logger.info(`Snapshot creado para bovino ${bovine.id}`, this.context, {
         bovineId: bovine.id,
         ranchId: bovine.ranchId,
@@ -222,7 +224,7 @@ export class BovineGeoService {
         bovineId: bovine.id,
         durationMs: duration
       }, ensureError(error));
-      
+
       if (error instanceof BovineError) throw error;
       throw new BovineError(
         `Error al crear snapshot para bovino ${bovine.id}`,
@@ -254,7 +256,7 @@ export class BovineGeoService {
     transaction?: Transaction
   ): Promise<void> {
     const startTime = Date.now();
-    
+
     try {
       // Verificar que el snapshot existe
       const snapshot = await BovineHealthSnapshot.findOne({
@@ -266,7 +268,7 @@ export class BovineGeoService {
         // Si no existe, probablemente es un error de consistencia
         // Mejor crearlo que fallar
         logger.warn(`Snapshot no encontrado para bovino ${bovineId}, creando...`, this.context);
-        
+
         const bovine = await Bovine.findByPk(bovineId, { transaction });
         if (bovine) {
           await this.createSnapshot(bovine, transaction);
@@ -277,23 +279,25 @@ export class BovineGeoService {
       // Construir payload de actualización de forma explícita para evitar
       // que un healthColor pasado en data pise el que calculamos aquí
       const updateData: Partial<BovineHealthSnapshot['_attributes']> & Record<string, unknown> = {
-        lastUpdate:  new Date(),
-        ...(data.location        !== undefined && { location:       data.location }),
-        ...(data.diagnosis       !== undefined && { diagnosis:      data.diagnosis }),
-        ...(data.lastHealthCheck !== undefined && { lastHealthCheck: data.lastHealthCheck }),
+        lastUpdate: new Date(),
+        ...(data.location          !== undefined && { location:         data.location }),
+        ...(data.diagnosis         !== undefined && { diagnosis:        data.diagnosis }),
+        ...(data.lastHealthCheck   !== undefined && { lastHealthCheck:  data.lastHealthCheck }),
+        ...(data.activeDiseaseId   !== undefined && { activeDiseaseId:  data.activeDiseaseId }),
+        ...(data.activeCaseId      !== undefined && { activeCaseId:     data.activeCaseId }),
       };
 
       // healthStatus y healthColor siempre van juntos para mantener consistencia
       if (data.healthStatus) {
         updateData.healthStatus = data.healthStatus;
-        updateData.healthColor  = this.getHealthColor(data.healthStatus);
+        //updateData.healthColor = this.getHealthColor(data.healthStatus);
       }
 
       // Actualizar snapshot
       await snapshot.update(updateData, { transaction });
 
       const duration = Date.now() - startTime;
-      
+
       logger.debug(`Snapshot actualizado para bovino ${bovineId}`, this.context, {
         bovineId,
         updatedFields: Object.keys(data),
@@ -307,7 +311,7 @@ export class BovineGeoService {
         data: Object.keys(data),
         durationMs: duration
       }, ensureError(error));
-      
+
       throw new BovineError(
         `Error al actualizar snapshot para bovino ${bovineId}`,
         'SNAPSHOT_UPDATE_ERROR',
@@ -325,7 +329,7 @@ export class BovineGeoService {
    */
   async deleteSnapshot(bovineId: string, transaction?: Transaction): Promise<void> {
     const startTime = Date.now();
-    
+
     try {
       const deleted = await BovineHealthSnapshot.destroy({
         where: { bovineId },
@@ -333,7 +337,7 @@ export class BovineGeoService {
       });
 
       const duration = Date.now() - startTime;
-      
+
       if (deleted > 0) {
         logger.info(`Snapshot eliminado para bovino ${bovineId}`, this.context, {
           bovineId,
@@ -347,7 +351,7 @@ export class BovineGeoService {
         bovineId,
         durationMs: duration
       }, ensureError(error));
-      
+
       throw new BovineError(
         `Error al eliminar snapshot para bovino ${bovineId}`,
         'SNAPSHOT_DELETE_ERROR',
@@ -375,7 +379,7 @@ export class BovineGeoService {
 
     try {
       // Obtener todos los bovinos activos
-      const bovines = await Bovine.findAll({ 
+      const bovines = await Bovine.findAll({
         where: { isActive: true },
         attributes: ['id', 'ranchId', 'healthStatus', 'location', 'birthDate', 'breed', 'lastHealthCheck']
       });
@@ -386,7 +390,7 @@ export class BovineGeoService {
       const BATCH_SIZE = 100;
       for (let i = 0; i < bovines.length; i += BATCH_SIZE) {
         const batch = bovines.slice(i, i + BATCH_SIZE);
-        
+
         // Procesar lote en paralelo
         const results = await Promise.allSettled(
           batch.map(bovine => this.refreshSingleSnapshot(bovine))
@@ -409,7 +413,7 @@ export class BovineGeoService {
       }
 
       const duration = Date.now() - startTime;
-      
+
       logger.info('Refresco de snapshots completado', this.context, {
         processed,
         failed,
@@ -426,7 +430,7 @@ export class BovineGeoService {
         failed,
         durationMs: duration
       }, ensureError(error));
-      
+
       throw new BovineError(
         'Error al refrescar snapshots',
         'SNAPSHOT_REFRESH_ERROR',
@@ -454,7 +458,7 @@ export class BovineGeoService {
       location: bovine.location,
       geom,
       lastUpdate: new Date(),
-      healthColor: this.getHealthColor(bovine.healthStatus),
+      //healthColor: this.getHealthColor(bovine.healthStatus),
       clusterSize: 1, // Se recalculará después
       breed: bovine.breed,
       ageMonths: ageInMonths,
@@ -492,7 +496,6 @@ export class BovineGeoService {
           location,
           geom,
           last_update,
-          health_color,
           cluster_size,
           breed,
           age_months
@@ -512,13 +515,6 @@ export class BovineGeoService {
             4326
           ),
           NOW(),
-          CASE b.health_status
-            WHEN 'HEALTHY'    THEN '#10b981'
-            WHEN 'SICK'       THEN '#ef4444'
-            WHEN 'RECOVERING' THEN '#f59e0b'
-            WHEN 'QUARANTINE' THEN '#8b5cf6'
-            ELSE '#6b7280'
-          END,
           1,
           b.breed,
           EXTRACT(YEAR  FROM age(NOW(), b.birth_date)) * 12 +
@@ -590,11 +586,11 @@ export class BovineGeoService {
     filters?: HeatmapFilters
   ): Promise<HeatmapPoint[]> {
     const startTime = Date.now();
-    
+
     try {
       // Construir where clause dinámico
       const whereClause: any = { ranchId };
-      
+
       if (filters?.healthStatus?.length) {
         whereClause.healthStatus = { [Op.in]: filters.healthStatus };
       }
@@ -617,6 +613,16 @@ export class BovineGeoService {
       // ej: ["Mastitis", "Fiebre aftosa"] → bovinos con cualquiera de las dos.
       if (filters?.diseases?.length) {
         whereClause.diagnosis = { [Op.in]: filters.diseases };
+        if (!filters.healthStatus?.length) {
+          whereClause.healthStatus = { [Op.in]: [HealthStatus.SICK, HealthStatus.RECOVERING, HealthStatus.QUARANTINE] };
+        }
+      }
+
+      if (filters?.diseaseIds?.length) {
+        whereClause.activeDiseaseId = { [Op.in]: filters.diseaseIds };
+        if (!filters.healthStatus?.length && !filters.diseases?.length) {
+          whereClause.healthStatus = { [Op.in]: [HealthStatus.SICK, HealthStatus.RECOVERING, HealthStatus.QUARANTINE] };
+        }
       }
 
       // Consultar snapshots — incluimos geom para no parsear el JSONB
@@ -626,7 +632,7 @@ export class BovineGeoService {
           'bovineId',
           'location',     // mantenemos location para el mapping lat/lng
           'healthStatus',
-          'healthColor',
+          //'healthColor',
           'breed',
           'ageMonths',
           'diagnosis'
@@ -639,7 +645,7 @@ export class BovineGeoService {
         lat: s.location.latitude,
         lng: s.location.longitude,
         value: this.getHeatIntensity(s.healthStatus),
-        color: s.healthColor,
+        //color: s.healthColor,
         metadata: {
           healthStatus: s.healthStatus,
           breed: s.breed,
@@ -649,15 +655,15 @@ export class BovineGeoService {
       }));
 
       const duration = Date.now() - startTime;
-      
+
       logger.info(`Datos de heatmap obtenidos para rancho ${ranchId}`, this.context, {
         ranchId,
         pointCount: points.length,
         appliedFilters: {
           healthStatus: filters?.healthStatus ?? [],
-          breeds:       filters?.breeds       ?? [],
-          diseases:     filters?.diseases     ?? [],
-          hasAgeRange:  !!filters?.ageRange
+          breeds: filters?.breeds ?? [],
+          diseases: filters?.diseases ?? [],
+          hasAgeRange: !!filters?.ageRange
         },
         durationMs: duration
       });
@@ -671,7 +677,7 @@ export class BovineGeoService {
         filters,
         durationMs: duration
       }, ensureError(error));
-      
+
       throw new BovineError(
         `Error al obtener datos de heatmap para rancho ${ranchId}`,
         'HEATMAP_ERROR',
@@ -707,11 +713,11 @@ export class BovineGeoService {
     filters?: HeatmapFilters
   ): Promise<Cluster[]> {
     const startTime = Date.now();
-    
+
     try {
       // Calcular tamaño de grid según zoom
       const gridSize = this.calculateGridSize(zoom);
-      
+
       /**
        * CONSULTA SQL EXPLICADA:
        * 
@@ -737,7 +743,8 @@ export class BovineGeoService {
           WHERE ranch_id = :ranchId
             AND geom && ST_MakeEnvelope(:west, :south, :east, :north, 4326)
             ${filters?.healthStatus ? 'AND health_status = ANY(:healthStatus)' : ''}
-            ${filters?.diseases    ? 'AND diagnosis    = ANY(:diseases)'      : ''}
+            ${filters?.diseases ? 'AND diagnosis    = ANY(:diseases)' : ''}
+            ${filters?.diseases && !filters?.healthStatus?.length ? 'AND health_status IN (\'SICK\', \'RECOVERING\', \'QUARANTINE\')' : ''}
         ),
         clustered AS (
           SELECT
@@ -772,7 +779,7 @@ export class BovineGeoService {
           ...bounds,
           gridSize,
           healthStatus: filters?.healthStatus ?? null,
-          diseases:     filters?.diseases     ?? null
+          diseases: filters?.diseases ?? null
         },
         type: 'SELECT'
       });
@@ -793,7 +800,7 @@ export class BovineGeoService {
       }));
 
       const duration = Date.now() - startTime;
-      
+
       logger.debug(`Clusters obtenidos para rancho ${ranchId}`, this.context, {
         ranchId,
         clusterCount: result.length,
@@ -812,7 +819,7 @@ export class BovineGeoService {
         zoom,
         durationMs: duration
       }, ensureError(error));
-      
+
       throw new BovineError(
         `Error al obtener clusters para rancho ${ranchId}`,
         'CLUSTER_ERROR',
@@ -840,7 +847,7 @@ export class BovineGeoService {
     filters?: HeatmapFilters
   ): Promise<HeatmapPoint[]> {
     const startTime = Date.now();
-    
+
     try {
       const points = await sequelize.query(`
         SELECT
@@ -848,7 +855,6 @@ export class BovineGeoService {
           ST_Y(geom) AS lat,
           ST_X(geom) AS lng,
           health_status,
-          health_color,
           breed,
           age_months,
           diagnosis
@@ -856,13 +862,14 @@ export class BovineGeoService {
         WHERE ranch_id = :ranchId
           AND geom && ST_MakeEnvelope(:west, :south, :east, :north, 4326)
           ${filters?.healthStatus ? 'AND health_status = ANY(:healthStatus)' : ''}
-          ${filters?.diseases     ? 'AND diagnosis    = ANY(:diseases)'      : ''}
+          ${filters?.diseases ? 'AND diagnosis    = ANY(:diseases)' : ''}
+          ${filters?.diseases && !filters?.healthStatus?.length ? 'AND health_status IN (\'SICK\', \'RECOVERING\', \'QUARANTINE\')' : ''}
       `, {
         replacements: {
           ranchId,
           ...bounds,
           healthStatus: filters?.healthStatus ?? null,
-          diseases:     filters?.diseases     ?? null
+          diseases: filters?.diseases ?? null
         },
         type: 'SELECT'
       });
@@ -872,7 +879,7 @@ export class BovineGeoService {
         lat: p.lat,
         lng: p.lng,
         value: this.getHeatIntensity(p.health_status),
-        color: p.health_color,
+        //color: p.health_color,
         metadata: {
           healthStatus: p.health_status,
           breed: p.breed,
@@ -882,7 +889,7 @@ export class BovineGeoService {
       }));
 
       const duration = Date.now() - startTime;
-      
+
       logger.debug(`Cluster expandido en rancho ${ranchId}`, this.context, {
         ranchId,
         pointCount: result.length,
@@ -899,7 +906,7 @@ export class BovineGeoService {
         bounds,
         durationMs: duration
       }, ensureError(error));
-      
+
       throw new BovineError(
         `Error al expandir cluster en rancho ${ranchId}`,
         'CLUSTER_EXPAND_ERROR',
@@ -936,7 +943,7 @@ export class BovineGeoService {
         where: { bovineId },
         attributes: [
           'bovineId', 'location', 'healthStatus',
-          'healthColor', 'breed', 'ageMonths', 'diagnosis'
+          /*healthColor',*/ 'breed', 'ageMonths', 'diagnosis'
         ]
       });
 
@@ -946,39 +953,39 @@ export class BovineGeoService {
       }
 
       const STATUS_LABELS: Record<HealthStatus, string> = {
-        [HealthStatus.HEALTHY]:    'Saludable',
-        [HealthStatus.SICK]:       'Enfermo',
+        [HealthStatus.HEALTHY]: 'Saludable',
+        [HealthStatus.SICK]: 'Enfermo',
         [HealthStatus.RECOVERING]: 'Recuperándose',
         [HealthStatus.QUARANTINE]: 'Cuarentena',
-        [HealthStatus.DECEASED]:   'Fallecido',
-        [HealthStatus.UNKNOWN]:    'Desconocido'
+        [HealthStatus.DECEASED]: 'Fallecido',
+        [HealthStatus.UNKNOWN]: 'Desconocido'
       };
 
       const point: HeatmapPoint = {
-        id:    snapshot.bovineId,
-        lat:   snapshot.location.latitude,
-        lng:   snapshot.location.longitude,
+        id: snapshot.bovineId,
+        lat: snapshot.location.latitude,
+        lng: snapshot.location.longitude,
         value: this.getHeatIntensity(snapshot.healthStatus),
-        color: snapshot.healthColor,
+        //color: snapshot.healthColor,
         metadata: {
           healthStatus: snapshot.healthStatus,
-          breed:        snapshot.breed,
-          age:          snapshot.ageMonths,
-          diagnosis:    snapshot.diagnosis
+          breed: snapshot.breed,
+          age: snapshot.ageMonths,
+          diagnosis: snapshot.diagnosis
         }
       };
 
       // Datos estructurados para el popup — el frontend los usa
       // para construir el HTML/JSX que prefiera, en el idioma que prefiera
       const popup: PopupData = {
-        bovineId:     snapshot.bovineId,
-        shortId:      snapshot.bovineId.slice(-6),
+        bovineId: snapshot.bovineId,
+        shortId: snapshot.bovineId.slice(-6),
         healthStatus: snapshot.healthStatus,
-        statusLabel:  STATUS_LABELS[snapshot.healthStatus] ?? snapshot.healthStatus,
-        statusColor:  snapshot.healthColor,
-        breed:        snapshot.breed,
-        ageMonths:    snapshot.ageMonths,
-        diagnosis:    snapshot.diagnosis,
+        statusLabel: STATUS_LABELS[snapshot.healthStatus] ?? snapshot.healthStatus,
+        //statusColor: snapshot.healthColor,
+        breed: snapshot.breed,
+        ageMonths: snapshot.ageMonths,
+        diagnosis: snapshot.diagnosis,
         hasDiagnosis: !!snapshot.diagnosis
       };
 
@@ -1010,16 +1017,6 @@ export class BovineGeoService {
   // ==========================================================================
   // MÉTODOS DE UTILIDAD
   // ==========================================================================
-
-  /**
-   * Obtiene color según estado de salud
-   * 
-   * 🎨 PARA LEAFLET:
-   *   Los puntos individuales usan estos colores
-   */
-  private getHealthColor(status: HealthStatus): string {
-    return HEALTH_COLORS[status] || HEALTH_COLORS[HealthStatus.DECEASED];
-  }
 
   /**
    * Obtiene intensidad para heatmap
@@ -1063,49 +1060,7 @@ export class BovineGeoService {
     return Math.floor(diffTime / (1000 * 60 * 60 * 24 * 30.44));
   }
 
-  /**
-   * Genera HTML para popup de Leaflet
-   *
-   * @deprecated Usar `getBovinePoint()` y construir el popup en el frontend.
-   *   El backend no debe generar HTML — si cambias el idioma, el framework
-   *   de UI o el proveedor de mapas, este método rompe sin ninguna señal.
-   *   Mantenido temporalmente para no romper clientes existentes.
-   *   Se eliminará en la próxima versión mayor.
-   */
-  generatePopupHTML(point: HeatmapPoint): string {
-    const statusLabels: Record<HealthStatus, string> = {
-      [HealthStatus.HEALTHY]:    'Saludable',
-      [HealthStatus.SICK]:       'Enfermo',
-      [HealthStatus.RECOVERING]: 'Recuperándose',
-      [HealthStatus.QUARANTINE]: 'Cuarentena',
-      [HealthStatus.DECEASED]:   'Fallecido',
-      [HealthStatus.UNKNOWN]:    'Desconocido'
-    };
-
-    const label = statusLabels[point.metadata.healthStatus] ?? point.metadata.healthStatus;
-
-    return `
-      <div class="bovine-popup" style="font-family: Arial, sans-serif; padding: 8px;">
-        <h3 style="margin: 0 0 8px 0; color: #333;">Bovino ${point.id.slice(-6)}</h3>
-        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-          <div style="width:12px;height:12px;border-radius:50%;background:${point.color};margin-right:8px;"></div>
-          <strong>Estado:</strong> ${label}
-        </div>
-        ${point.metadata.breed    ? `<p style="margin:5px 0;"><strong>Raza:</strong> ${point.metadata.breed}</p>` : ''}
-        ${point.metadata.age      ? `<p style="margin:5px 0;"><strong>Edad:</strong> ${point.metadata.age} meses</p>` : ''}
-        ${point.metadata.diagnosis ? `
-          <div style="margin-top:8px;padding:5px;background:#fff3cd;border-radius:4px;">
-            <strong style="color:#856404;">Diagnóstico:</strong>
-            <p style="margin:5px 0 0 0;color:#856404;">${point.metadata.diagnosis}</p>
-          </div>` : ''}
-        <button
-          onclick="window.dispatchEvent(new CustomEvent('bovine-selected',{detail:'${point.id}'}))"
-          style="margin-top:10px;width:100%;padding:5px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;">
-          Ver detalles
-        </button>
-      </div>
-    `.trim();
-  }
+  
 }
 
 // ============================================================================
@@ -1137,7 +1092,8 @@ export interface MapMarker {
   locationId?: string | null;
   lat: number;
   lng: number;
-  color: string;
+  /** @deprecated Eliminado. El frontend deriva color de `healthStatus`. */
+  color?: string;
   healthStatus: HealthStatus;
   breed?: string;
   ageMonths?: number;
@@ -1161,6 +1117,8 @@ export interface MapMarkersFilters {
   genders?: GenderType[];
   ageRange?: { min: number; max: number };
   diseases?: string[];
+  /** Filtro por UUID de Disease (activa). Filtra por activeDiseaseId en el snapshot. */
+  diseaseIds?: string[];
   vaccinationStatus?: VaccinationStatus;
   /** Filtro por ubicación actual (stay activa) */
   locationId?: string;
@@ -1222,6 +1180,16 @@ BovineGeoService.prototype.getMapMarkers = async function (
     }
     if (filters.diseases?.length) {
       where.diagnosis = { [Op.in]: filters.diseases };
+      if (!filters.healthStatus?.length) {
+        where.healthStatus= {[Op.in]: [HealthStatus.SICK, HealthStatus.RECOVERING, HealthStatus.QUARANTINE]};
+      }
+    }
+    // Filtro por UUID de enfermedad activa (Phase 2 schema)
+    if (filters.diseaseIds?.length) {
+      where.activeDiseaseId = { [Op.in]: filters.diseaseIds };
+      if (!filters.healthStatus?.length && !filters.diseases?.length) {
+        where.healthStatus = { [Op.in]: [HealthStatus.SICK, HealthStatus.RECOVERING, HealthStatus.QUARANTINE] };
+      }
     }
 
     // Bbox: filtrar por geom si está disponible (más rápido), sino por
@@ -1253,9 +1221,20 @@ BovineGeoService.prototype.getMapMarkers = async function (
         // `name` para tooltip de hover, `currentLocationId` para agrupar
         // bovinos por potrero en el mapa (cluster por location). Coste
         // extra: ~negligible (2 columnas en el SELECT).
-        attributes: ['id', 'earTag', 'name', 'currentLocationId'],
+        attributes: ['id', 'earTag', 'name'],
         required: true,
         where: bovineWhere,
+      });
+      includes.push({
+        model: BovineLocationHistory,
+        as: 'locationHistory',
+        attributes: ['locationId'],
+        required: !!filters.locationId,
+        where: {
+          exitedAt: { [Op.is]: null as any },
+          ...(filters.locationId ? { locationId: filters.locationId } : {}),
+        },
+        ...(filters.locationId ? {} : { limit: 1 }),
       });
     } else {
       // Aún así traemos earTag para mostrar en el popup
@@ -1265,8 +1244,19 @@ BovineGeoService.prototype.getMapMarkers = async function (
         // `name` para tooltip de hover, `currentLocationId` para agrupar
         // bovinos por potrero en el mapa (cluster por location). Coste
         // extra: ~negligible (2 columnas en el SELECT).
-        attributes: ['id', 'earTag', 'name', 'currentLocationId'],
+        attributes: ['id', 'earTag', 'name'],
         required: false,
+      });
+      includes.push({
+        model: BovineLocationHistory,
+        as: 'locationHistory',
+        attributes: ['locationId'],
+        required: !!filters.locationId,
+        where: {
+          exitedAt: { [Op.is]: null as any },
+          ...(filters.locationId ? { locationId: filters.locationId } : {}),
+        },
+        ...(filters.locationId ? {} : { limit: 1 }),
       });
     }
 
@@ -1294,25 +1284,6 @@ BovineGeoService.prototype.getMapMarkers = async function (
           where: { status: filters.vaccinationStatus },
         });
       }
-    }
-
-    // locationId → JOIN con BovineLocationHistory (stay activa)
-    // El alias correcto desde Bovine→BovineLocationHistory es `locationHistory`
-    // (declarado en `Bovine.hasMany(BovineLocationHistory, { as: 'locationHistory' })`
-    // en models/index.ts). El alias `'visits'` es la otra punta de la relación
-    // (Location.hasMany → BovineLocationHistory), no se usa en este contexto.
-    // Sequelize lanza SequelizeEagerLoadingError si se usa el alias equivocado.
-    if (filters.locationId) {
-      includes.push({
-        model: BovineLocationHistory,
-        as: 'locationHistory',
-        attributes: [],
-        required: true,
-        where: {
-          locationId: filters.locationId,
-          exitedAt: { [Op.is]: null as any },
-        },
-      });
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -1356,7 +1327,7 @@ BovineGeoService.prototype.getMapMarkers = async function (
         'bovineId',
         'location',
         'healthStatus',
-        'healthColor',
+        //'healthColor',
         'breed',
         'ageMonths',
         'diagnosis',
@@ -1400,10 +1371,10 @@ BovineGeoService.prototype.getMapMarkers = async function (
       name: s.bovine?.name,
       // `currentLocationId` puede ser null si el bovino aún no tiene
       // potrero asignado — el frontend lo mostrará como marker huérfano.
-      locationId: s.bovine?.currentLocationId ?? null,
+      locationId: s.bovine?.locationHistory?.[0]?.locationId ?? null,
       lat: s.location.latitude,
       lng: s.location.longitude,
-      color: s.healthColor,
+      //color: s.healthColor,
       healthStatus: s.healthStatus,
       breed: s.breed,
       ageMonths: s.ageMonths,
@@ -1471,7 +1442,12 @@ function clusterRows(rows: any[], gridSize: number): MapClusterPoint[] {
     cell.latSum += lat;
     cell.lngSum += lng;
     cell.count += 1;
-    const color = r.healthColor || '#999999';
+    // Reemplaza el comentario + la línea con:
+    const HEALTH_HEX: Record<string, string> = {
+      HEALTHY: '#10b981', SICK: '#ef4444', RECOVERING: '#f59e0b',
+      QUARANTINE: '#8b5cf6', DECEASED: '#6b7280', UNKNOWN: '#9ca3af',
+    };
+    const color = HEALTH_HEX[r.healthStatus] ?? '#999999';
     cell.colorCount.set(color, (cell.colorCount.get(color) ?? 0) + 1);
   }
 

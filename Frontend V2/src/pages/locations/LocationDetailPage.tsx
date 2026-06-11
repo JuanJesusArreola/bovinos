@@ -16,6 +16,12 @@ import { canUser } from '@/utils/permissions';
 import { getFriendlyMessage } from '@/utils/errorHandler';
 import { formatDate } from '@/utils/formatters';
 import { cn } from '@/utils/cn';
+import {
+  MOVEMENT_REASON_LABELS as REASON_LABELS,
+  getMovementReasonLabel,
+  getServiceChipClasses,
+  type ServiceKey,
+} from '@/design-system/tokens';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -79,14 +85,9 @@ const SOIL_TYPE_LABELS: Record<string, string> = {
   SILT: 'Limoso', ROCKY: 'Rocoso', ORGANIC: 'Orgánico', MIXED: 'Mixto',
 };
 
-const REASON_LABELS: Record<string, string> = {
-  GRAZING: 'Pastoreo',
-  MEDICAL: 'Médico',
-  QUARANTINE: 'Cuarentena',
-  BREEDING: 'Reproducción',
-  TRANSFER: 'Traslado',
-  SALE: 'Venta',
-};
+// `REASON_LABELS` y `getMovementReasonLabel` vienen importados desde
+// `@/design-system/tokens` al inicio del archivo. Eliminamos la definición
+// local duplicada que tenía solo 6 valores (vs los 8 canónicos del enum).
 
 // ─── Leaflet default icon fix ─────────────────────────────────────────────────
 
@@ -190,14 +191,26 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function ServiceChip({ enabled, icon: Icon, label, color }: { enabled: boolean; icon: any; label: string; color: string }) {
+/**
+ * Chip que indica si un servicio está disponible en la ubicación.
+ * La clase visual se resuelve a través de `getServiceChipClasses` del
+ * design-system — un único lugar gobierna los colores y elimina el bug
+ * potencial del template-literal (`bg-${color}-50`) que el purge de
+ * Tailwind no podía detectar.
+ */
+function ServiceChip({
+  enabled, icon: Icon, label, service,
+}: {
+  enabled: boolean;
+  icon: any;
+  label: string;
+  service: ServiceKey;
+}) {
   return (
     <div
       className={cn(
         'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border',
-        enabled
-          ? `bg-${color}-50 dark:bg-${color}-900/20 text-${color}-700 dark:text-${color}-400 border-${color}-200 dark:border-${color}-900/40`
-          : 'bg-gray-50 dark:bg-gray-800/40 text-gray-400 border-gray-200 dark:border-gray-800',
+        getServiceChipClasses(service, enabled),
       )}
     >
       <Icon className="w-3.5 h-3.5" />
@@ -360,7 +373,7 @@ function MovementRow({ m }: { m: LocationMovementEvent }) {
           <span className="text-xs text-gray-400 font-mono">[{m.bovineEarTag}]</span>
           {m.reason && (
             <Badge variant={isEntry ? 'success' : 'info'}>
-              {REASON_LABELS[m.reason] ?? m.reason}
+              {getMovementReasonLabel(m.reason)}
             </Badge>
           )}
         </div>
@@ -635,10 +648,10 @@ export function LocationDetailPage() {
             {capacity && (capacity.hasElectricity || capacity.hasWater || capacity.hasInternet || capacity.hasRoadAccess) !== undefined && (
               <InfoRow label="Servicios">
                 <div className="grid grid-cols-2 gap-1.5">
-                  <ServiceChip enabled={!!capacity.hasElectricity} icon={Zap} label="Electricidad" color="amber" />
-                  <ServiceChip enabled={!!capacity.hasWater} icon={Droplets} label="Agua" color="sky" />
-                  <ServiceChip enabled={!!capacity.hasInternet} icon={Wifi} label="Internet" color="blue" />
-                  <ServiceChip enabled={!!capacity.hasRoadAccess} icon={Route} label="Acceso vial" color="gray" />
+                  <ServiceChip enabled={!!capacity.hasElectricity} icon={Zap}      label="Electricidad" service="ELECTRICITY" />
+                  <ServiceChip enabled={!!capacity.hasWater}       icon={Droplets} label="Agua"         service="WATER" />
+                  <ServiceChip enabled={!!capacity.hasInternet}    icon={Wifi}     label="Internet"     service="INTERNET" />
+                  <ServiceChip enabled={!!capacity.hasRoadAccess}  icon={Route}    label="Acceso vial"  service="ROAD_ACCESS" />
                 </div>
               </InfoRow>
             )}

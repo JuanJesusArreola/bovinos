@@ -15,7 +15,7 @@
  *   - Documentación implícita
  */
 
-import { CattleType, HealthStatus } from '../models/Bovine';
+import { CattleType, HealthStatus, GenderType } from '../models/Bovine';
 
 /**
  * Constantes del dominio bovino
@@ -342,9 +342,104 @@ export const BOVINE_CONSTANTS = {
         CUSTOM: 'custom'
     } as const,
 
+    /**
+     * ========================================================================
+     * CLASIFICACIÓN ETARIA — FUENTE ÚNICA DE VERDAD (B-04 / B-05)
+     * ========================================================================
+     * Umbrales de edad (en MESES) que definen la etapa del bovino.
+     * Toda lógica de edad (isAdult, clasificación, presets de filtro) debe
+     * derivar de aquí. NO duplicar estos números en otros archivos.
+     *
+     *   0  – 12 meses  → Becerro / Becerra  (CALF)
+     *   12 – 24 meses  → Novillo / Vaquilla (YOUNG)
+     *   ≥ 24 meses     → Toro / Vaca        (ADULT)
+     */
+    AGE_CLASSIFICATION: {
+        CALF_MAX_MONTHS: 12,    // límite superior de cría (exclusivo)
+        ADULT_MIN_MONTHS: 24,   // a partir de aquí es adulto (inclusive)
+    } as const,
 
+    /**
+     * Edad reproductiva mínima por SEXO (en meses).
+     * Usado por validaciones y, a futuro, por candidatos madre/padre.
+     *   Macho (toro):  ≥ 18 meses
+     *   Hembra (vaca): ≥ 15 meses
+     */
+    REPRODUCTIVE_MIN_MONTHS: {
+        MALE: 18,
+        FEMALE: 15,
+    } as const,
+
+    /**
+     * Rangos preset de edad (en MESES) para el filtro `?ageGroup=`.
+     * `max` ausente = sin límite superior.
+     */
+    AGE_GROUP_RANGES: {
+        calf:  { min: 0,  max: 12 },   // becerro/becerra
+        young: { min: 12, max: 24 },   // novillo/vaquilla
+        adult: { min: 24 },            // toro/vaca (sin tope)
+    } as const,
 
 } as const;
+
+// ============================================================================
+// HELPERS DE CLASIFICACIÓN ETARIA (derivados — B-05)
+// ============================================================================
+
+export type AgeGroup = keyof typeof BOVINE_CONSTANTS.AGE_GROUP_RANGES;
+export type BovineClassificationCode = 'CALF' | 'YOUNG' | 'ADULT';
+
+export interface BovineClassification {
+    code: BovineClassificationCode;  // etapa (independiente del sexo)
+    label: string;                   // etiqueta en español (según sexo)
+}
+
+/**
+ * Indica si una edad (en meses) corresponde a un adulto (≥ 24m).
+ */
+export function isAdultAge(ageMonths: number): boolean {
+    return ageMonths >= BOVINE_CONSTANTS.AGE_CLASSIFICATION.ADULT_MIN_MONTHS;
+}
+
+/**
+ * Clasifica un bovino por edad (meses) + sexo. Derivado, sin persistencia.
+ *   < 12m         → CALF  (Becerro/Becerra/Cría)
+ *   12m – < 24m   → YOUNG (Novillo/Vaquilla/Joven)
+ *   ≥ 24m         → ADULT (Toro/Vaca/Adulto)
+ */
+export function classifyBovine(ageMonths: number, gender?: GenderType | string | null): BovineClassification {
+    const { CALF_MAX_MONTHS, ADULT_MIN_MONTHS } = BOVINE_CONSTANTS.AGE_CLASSIFICATION;
+    const isMale = gender === GenderType.MALE;
+    const isFemale = gender === GenderType.FEMALE;
+
+    if (ageMonths < CALF_MAX_MONTHS) {
+        return { code: 'CALF', label: isMale ? 'Becerro' : isFemale ? 'Becerra' : 'Cría' };
+    }
+    if (ageMonths < ADULT_MIN_MONTHS) {
+        return { code: 'YOUNG', label: isMale ? 'Novillo' : isFemale ? 'Vaquilla' : 'Joven' };
+    }
+    return { code: 'ADULT', label: isMale ? 'Toro' : isFemale ? 'Vaca' : 'Adulto' };
+}
+
+/**
+ * Indica si una edad (en meses) alcanza la edad reproductiva mínima según sexo.
+ * Para gender UNKNOWN devuelve false (no se puede determinar).
+ */
+export function isReproductiveAge(ageMonths: number, gender?: GenderType | string | null): boolean {
+    const { MALE, FEMALE } = BOVINE_CONSTANTS.REPRODUCTIVE_MIN_MONTHS;
+    if (gender === GenderType.MALE)   return ageMonths >= MALE;
+    if (gender === GenderType.FEMALE) return ageMonths >= FEMALE;
+    return false;
+}
+
+/**
+ * Resuelve un preset de grupo etario a un rango { min, max } en meses.
+ * Devuelve null si el preset no es válido.
+ */
+export function resolveAgeGroup(group: string): { min?: number; max?: number } | null {
+    const ranges = BOVINE_CONSTANTS.AGE_GROUP_RANGES as Record<string, { min?: number; max?: number }>;
+    return ranges[group] ?? null;
+}
 
 
 

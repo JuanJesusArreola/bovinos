@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { UserRole } from '@/types';
 import { ProtectedRoute } from './ProtectedRoute';
 import { PageLoader } from '@/components/ui/Spinner';
+import { RouteErrorBoundary } from '@/components/ui/RouteErrorBoundary';
 
 // Layouts (not lazy — always needed)
 import { AuthLayout } from '@/layouts/AuthLayout';
@@ -25,6 +26,19 @@ const BovinesListPage = lazy(() => import('@/pages/bovines/BovinesListPage').the
 const BovineDetailPage = lazy(() => import('@/pages/bovines/BovineDetailPage').then((m) => ({ default: m.BovineDetailPage })));
 const BovineFormPage = lazy(() => import('@/pages/bovines/BovineFormPage').then((m) => ({ default: m.BovineFormPage })));
 const HealthListPage = lazy(() => import('@/pages/health/HealthListPage').then((m) => ({ default: m.HealthListPage })));
+const HealthRecordsListPage = lazy(() => import('@/pages/health/records/HealthRecordsListPage').then((m) => ({ default: m.HealthRecordsListPage })));
+const HealthRecordDetailPage = lazy(() => import('@/pages/health/records/HealthRecordDetailPage').then((m) => ({ default: m.HealthRecordDetailPage })));
+const DiagnosisStatsPage = lazy(() => import('@/pages/health/diagnosis/DiagnosisStatsPage').then((m) => ({ default: m.DiagnosisStatsPage })));
+const DiseaseCatalogPage = lazy(() => import('@/pages/health/diseases/DiseaseCatalogPage').then((m) => ({ default: m.DiseaseCatalogPage })));
+const DiseaseDetailPage = lazy(() => import('@/pages/health/diseases/DiseaseDetailPage').then((m) => ({ default: m.DiseaseDetailPage })));
+// V2: deshabilitado hasta que exista el CRUD de enfermedades en backend.
+// const DiseaseFormPage = lazy(() => import('@/pages/health/diseases/DiseaseFormPage').then((m) => ({ default: m.DiseaseFormPage })));
+const CasesListPage = lazy(() => import('@/pages/health/cases/CasesListPage').then((m) => ({ default: m.CasesListPage })));
+const CaseFormPage = lazy(() => import('@/pages/health/cases/CaseFormPage').then((m) => ({ default: m.CaseFormPage })));
+const CaseDetailPage = lazy(() => import('@/pages/health/cases/CaseDetailPage').then((m) => ({ default: m.CaseDetailPage })));
+const EpidemiologyDashboardPage = lazy(() => import('@/pages/health/epidemiology/EpidemiologyDashboardPage').then((m) => ({ default: m.EpidemiologyDashboardPage })));
+const OutbreakPage = lazy(() => import('@/pages/health/epidemiology/OutbreakPage').then((m) => ({ default: m.OutbreakPage })));
+const AlertsPage = lazy(() => import('@/pages/health/epidemiology/AlertsPage').then((m) => ({ default: m.AlertsPage })));
 const EventsListPage = lazy(() => import('@/pages/events/EventsListPage').then((m) => ({ default: m.EventsListPage })));
 const FinancePage = lazy(() => import('@/pages/finance/FinancePage').then((m) => ({ default: m.FinancePage })));
 const ProductionPage = lazy(() => import('@/pages/production/ProductionPage').then((m) => ({ default: m.ProductionPage })));
@@ -42,13 +56,32 @@ const SecurityPage = lazy(() => import('@/pages/security/SecurityPage').then((m)
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })));
 const ProfilePage = lazy(() => import('@/pages/profile/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 const MapsPage = lazy(() => import('@/pages/maps/MapsPage').then((m) => ({ default: m.MapsPage })));
+const VaccinationSchedulesPage = lazy(() => import('@/pages/vaccinations/VaccinationSchedulesPage').then((m) => ({ default: m.VaccinationSchedulesPage })));
 
 const ALL_ROLES = Object.values(UserRole);
 const ADMIN_ROLES = [UserRole.SUPER_ADMIN, UserRole.OWNER];
+const USER_MGMT_ROLES = [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.RANCH_MANAGER];
 const MANAGEMENT_ROLES = [UserRole.SUPER_ADMIN, UserRole.OWNER, UserRole.RANCH_MANAGER, UserRole.MANAGER];
+// Roles que pueden registrar/manejar casos clínicos. Espeja la lista
+// del PERMISSIONS map (`RECORD_CASE`/`MANAGE_CASE`) en utils/permissions.ts.
+const CLINICAL_ROLES = [
+  UserRole.SUPER_ADMIN, UserRole.OWNER,
+  UserRole.RANCH_MANAGER, UserRole.MANAGER, UserRole.VETERINARIAN,
+];
 
-function LazyPage({ children }: { children: React.ReactNode }) {
-  return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
+/**
+ * F-33 / P-05: cada pagina lazy se envuelve en un boundary individual. Asi
+ * un throw en `<BovineDetailPage>` no derribra el sidebar / header, y la
+ * pagina ofrece "Recargar" + "Volver al inicio" en lugar de pantalla blanca.
+ * El nombre de la ruta es opcional — si se pasa, aparece en el mensaje
+ * amigable del fallback.
+ */
+function LazyPage({ children, name }: { children: React.ReactNode; name?: string }) {
+  return (
+    <RouteErrorBoundary routeName={name}>
+      <Suspense fallback={<PageLoader />}>{children}</Suspense>
+    </RouteErrorBoundary>
+  );
 }
 
 export function AppRouter() {
@@ -79,6 +112,45 @@ export function AppRouter() {
 
             {/* Modules */}
             <Route path="/health" element={<LazyPage><HealthListPage /></LazyPage>} />
+            {/* Listado paginado global de registros del rancho - mejora 3.
+                Lectura abierta a todos los roles autenticados; las
+                acciones de editar/eliminar se aplican desde el detalle
+                del bovino con su propia gating. */}
+            <Route path="/health/records" element={<LazyPage><HealthRecordsListPage /></LazyPage>} />
+            {/* Detalle dedicado de un HealthRecord. Lectura abierta a todos
+                los roles; las acciones internas (editar/eliminar/etc.) usan
+                PermissionGuard. */}
+            <Route path="/health/records/:id" element={<LazyPage><HealthRecordDetailPage /></LazyPage>} />
+            {/* Dashboard dedicado de estadisticas de diagnostico (Capa 2).
+                Misma gating que el listado: lectura abierta a todos los
+                roles autenticados; el backend ya filtra por permisos. */}
+            <Route path="/health/diagnosis/stats" element={<LazyPage><DiagnosisStatsPage /></LazyPage>} />
+            {/* Catálogo de enfermedades — lectura para TODOS los roles
+                autenticados (es material de referencia al diagnosticar). */}
+            <Route path="/health/diseases/catalogo" element={<LazyPage><DiseaseCatalogPage /></LazyPage>} />
+            {/* V2: ruta de alta de enfermedades deshabilitada — el backend aún
+                no expone POST/PATCH /diseases (solo lectura + media). Reactivar
+                junto con el botón "Nueva enfermedad" cuando exista el CRUD.
+            <Route element={<ProtectedRoute roles={ADMIN_ROLES} />}>
+              <Route path="/health/diseases/catalogo/nuevo" element={<LazyPage><DiseaseFormPage /></LazyPage>} />
+            </Route>
+            */}
+            <Route path="/health/diseases/catalogo/:slug" element={<LazyPage><DiseaseDetailPage /></LazyPage>} />
+            {/* Casos clínicos — listado y detalle abiertos a todos los roles
+                autenticados (lectura). La creación requiere RECORD_CASE. */}
+            <Route path="/health/cases" element={<LazyPage><CasesListPage /></LazyPage>} />
+            {/* `nuevo` ANTES de `:id` para evitar que la ruta dinámica lo capture. */}
+            <Route element={<ProtectedRoute roles={CLINICAL_ROLES} />}>
+              <Route path="/health/cases/nuevo" element={<LazyPage><CaseFormPage /></LazyPage>} />
+            </Route>
+            <Route path="/health/cases/:id" element={<LazyPage><CaseDetailPage /></LazyPage>} />
+            {/* Dashboard epidemiológico — VIEW_EPIDEMIOLOGY (VETERINARIAN+).
+                El listado crudo de casos sigue público en /health/cases. */}
+            <Route element={<ProtectedRoute roles={CLINICAL_ROLES} />}>
+              <Route path="/health/epidemiology" element={<LazyPage><EpidemiologyDashboardPage /></LazyPage>} />
+              <Route path="/health/epidemiology/alerts" element={<LazyPage name="Alertas epidemiológicas"><AlertsPage /></LazyPage>} />
+              <Route path="/health/epidemiology/outbreak/:diseaseId" element={<LazyPage><OutbreakPage /></LazyPage>} />
+            </Route>
             <Route path="/events" element={<LazyPage><EventsListPage /></LazyPage>} />
             <Route path="/finance" element={<LazyPage><FinancePage /></LazyPage>} />
             <Route path="/production" element={<LazyPage><ProductionPage /></LazyPage>} />
@@ -102,9 +174,18 @@ export function AppRouter() {
               <Route path="/ranch/:id" element={<LazyPage><RanchDetailPage /></LazyPage>} />
             </Route>
 
-            {/* Admin restricted */}
-            <Route element={<ProtectedRoute roles={ADMIN_ROLES} />}>
+            {/* Vaccination schedule catalog — OWNER / VETERINARIAN / SUPER_ADMIN */}
+            <Route element={<ProtectedRoute roles={CLINICAL_ROLES} />}>
+              <Route path="/vaccinations/schedules" element={<LazyPage name="Calendarios de vacunación"><VaccinationSchedulesPage /></LazyPage>} />
+            </Route>
+
+            {/* Gestión de usuarios: SUPER_ADMIN, OWNER y RANCH_MANAGER */}
+            <Route element={<ProtectedRoute roles={USER_MGMT_ROLES} />}>
               <Route path="/users" element={<LazyPage><UsersPage /></LazyPage>} />
+            </Route>
+
+            {/* Solo SUPER_ADMIN y OWNER */}
+            <Route element={<ProtectedRoute roles={ADMIN_ROLES} />}>
               <Route path="/security" element={<LazyPage><SecurityPage /></LazyPage>} />
             </Route>
           </Route>

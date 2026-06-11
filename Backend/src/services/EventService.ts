@@ -852,6 +852,7 @@ export class EventService {
             [EventType.WEIGHING]: 'Pesaje',
             [EventType.MOVEMENT]: 'Movimiento',
             [EventType.QUARANTINE]: 'Cuarentena',
+            [EventType.DEATH]: 'Muerte / Baja',
             [EventType.OTHER]: 'Otro'
         };
         return labels[type] || type;

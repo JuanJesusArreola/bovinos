@@ -10,8 +10,8 @@ interface Props {
 }
 
 export function VeterinarianDashboard({ data, user }: Props) {
-  const health = data.healthFull;
-  const reproduction = data.reproductionMetrics;
+  const health = (data as any).health;
+  const repro  = (data as any).production?.reproduction;
 
   return (
     <div className="space-y-6">
@@ -25,25 +25,25 @@ export function VeterinarianDashboard({ data, user }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Pacientes Críticos"
-          value={formatNumber(health?.stats?.critical || 0)}
+          value={formatNumber(health?.criticalCount || 0)}
           icon={HeartPulse}
           color="red"
         />
         <StatCard
           title="En Tratamiento"
-          value={formatNumber(health?.stats?.underTreatment || 0)}
+          value={formatNumber((health?.byStatus?.RECOVERING || 0) + (health?.byStatus?.QUARANTINE || 0))}
           icon={Stethoscope}
           color="amber"
         />
         <StatCard
           title="Tasa de Concepción"
-          value={formatPercentage(reproduction?.conceptionRate || 0)}
+          value={formatPercentage(repro?.conceptionRate || 0)}
           icon={Baby}
           color="purple"
         />
         <StatCard
           title="Partos Recientes"
-          value={formatNumber(reproduction?.recentBirths || 0)}
+          value={formatNumber(repro?.birthsLastMonth || 0)}
           icon={Syringe}
           color="blue"
         />
@@ -54,10 +54,10 @@ export function VeterinarianDashboard({ data, user }: Props) {
           <CardTitle>Estado General del Hato</CardTitle>
           <div className="mt-4 space-y-3">
             {[
-              { label: 'Sanos', value: health?.stats?.healthy || 0, total: health?.stats?.total || 1, color: 'bg-green-500' },
-              { label: 'Enfermos', value: health?.stats?.sick || 0, total: health?.stats?.total || 1, color: 'bg-amber-500' },
-              { label: 'Críticos', value: health?.stats?.critical || 0, total: health?.stats?.total || 1, color: 'bg-red-500' },
-              { label: 'Recuperándose', value: health?.stats?.recovering || 0, total: health?.stats?.total || 1, color: 'bg-blue-500' },
+              { label: 'Sanos', value: health?.byStatus?.HEALTHY || 0, total: health?.totalBovines || 1, color: 'bg-green-500' },
+              { label: 'Enfermos', value: health?.byStatus?.SICK || 0, total: health?.totalBovines || 1, color: 'bg-amber-500' },
+              { label: 'Críticos', value: health?.criticalCount || 0, total: health?.totalBovines || 1, color: 'bg-red-500' },
+              { label: 'Recuperándose', value: health?.byStatus?.RECOVERING || 0, total: health?.totalBovines || 1, color: 'bg-blue-500' },
             ].map((item) => {
               const pct = (item.value / item.total) * 100;
               return (
@@ -81,22 +81,22 @@ export function VeterinarianDashboard({ data, user }: Props) {
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-500">Tasa de Concepción</span>
               <span className="text-lg font-bold text-primary-600">
-                {formatPercentage(reproduction?.conceptionRate || 0)}
+                {formatPercentage(repro?.conceptionRate || 0)}
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-500">Intervalo entre Partos</span>
-              <span className="text-lg font-bold">{reproduction?.calvingInterval || '—'} días</span>
+              <span className="text-sm text-gray-500">Tasa de Partos</span>
+              <span className="text-lg font-bold">{formatPercentage(repro?.calvingRate || 0)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-500">Partos Recientes</span>
-              <span className="text-lg font-bold text-purple-600">{reproduction?.recentBirths || 0}</span>
+              <span className="text-lg font-bold text-purple-600">{repro?.birthsLastMonth || 0}</span>
             </div>
-            {reproduction?.upcomingDueDates && (reproduction.upcomingDueDates as unknown[]).length > 0 && (
+            {(repro?.expectedBirths ?? 0) > 0 && (
               <div className="pt-3 border-t border-gray-100 dark:border-gray-800">
                 <p className="text-xs text-gray-400 mb-2">Próximos partos esperados</p>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {(reproduction.upcomingDueDates as unknown[]).length} bovino(s) con parto próximo
+                  {repro.expectedBirths} bovino(s) con parto próximo
                 </p>
               </div>
             )}

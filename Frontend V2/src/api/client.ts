@@ -54,13 +54,46 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
+/**
+ * Endpoints donde un 401 NO significa "sesión expirada" — significa que
+ * el usuario aún no está autenticado (credenciales incorrectas, token de
+ * verificación inválido, etc.). Para estos casos NO intentamos refresh ni
+ * redirigimos a /login: simplemente propagamos el error al caller para que
+ * lo muestre en la UI del formulario.
+ *
+ * Sin este filtro, un 401 en POST /auth/login dispara el flujo de refresh
+ * → falla por no haber refresh token → `window.location.href = '/login'`
+ * → recarga toda la página y se pierde el mensaje de error que la
+ * LoginPage ya tenía listo para mostrar.
+ */
+const AUTH_PATHS_NO_REDIRECT = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/refresh-token',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/verify-email',
+  '/auth/resend-verification',
+];
+
+function isAuthEndpoint(url: string | undefined): boolean {
+  if (!url) return false;
+  return AUTH_PATHS_NO_REDIRECT.some((p) => url.includes(p));
+}
+
 // Response interceptor — auto-refresh on 401
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      // Solo intentamos refresh si NO es un endpoint de auth (esos 401 son
+      // "credenciales inválidas", no "token expirado").
+      !isAuthEndpoint(originalRequest.url)
+    ) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({
@@ -96,7 +129,11 @@ apiClient.interceptors.response.use(
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(REFRESH_TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
-        window.location.href = '/login';
+        // Solo redirigir si el usuario YA estaba en una página autenticada
+        // (no si simplemente está en /login intentando entrar).
+        if (!window.location.pathname.startsWith('/login')) {
+          window.location.href = '/login';
+        }
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
@@ -127,7 +164,10 @@ apiClient.interceptors.response.use(
 
     // ── Generic toast for non-silent, non-401 errors ──────────────────────
     // Mutations that handle field-level errors should pass { silent: true }.
-    if (!originalRequest.silent && status !== 401) {
+    // Auth endpoints también se excluyen: sus formularios renderizan el error
+    // inline con <Alert variant="error">, mostrar también un toast duplicaría
+    // el mensaje y opacaría la respuesta del componente.
+    if (!originalRequest.silent && status !== 401 && !isAuthEndpoint(originalRequest.url)) {
       const data = error.response.data as any;
       const msg  = data?.error ?? 'Algo salió mal. Intenta de nuevo.';
       if (status === 422 || status === 409) {

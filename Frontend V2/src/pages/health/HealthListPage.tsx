@@ -7,6 +7,12 @@ import { useAuth } from '@/store/AuthContext';
 import { useToast } from '@/store/ToastContext';
 import { healthApi } from '@/api/health.api';
 import { bovinesApi } from '@/api/bovines.api';
+import { bovineCasesApi } from '@/api/bovineCases.api';
+import { useActiveDiseases } from '@/hooks/useDiseases';
+import {
+  CaseSeverity, CaseStatus,
+  type CreateBovineCaseInput,
+} from '@/types/bovineCase.dtos';
 import {
   HealthRecordType,
   DiagnosisStatus,
@@ -25,11 +31,13 @@ import { StatCard } from '@/components/ui/StatCard';
 import { Alert } from '@/components/ui/Alert';
 import { PageLoader } from '@/components/ui/Spinner';
 import { FileUpload } from '@/components/ui/FileUpload';
+import { PermissionGuard } from '@/components/ui/PermissionGuard';
 import { RanchFilterBanner, RanchFilterBannerEmpty } from '@/components/shared/RanchFilterBanner';
+import { Link } from 'react-router-dom';
 import {
   HeartPulse, Plus, Activity, Stethoscope, AlertTriangle,
   Thermometer, ChevronDown, ChevronUp, Pill, FlaskConical,
-  ClipboardCheck, X, Calendar, FileText,
+  ClipboardCheck, X, Calendar, FileText, Microscope,
 } from 'lucide-react';
 
 // ─── Zod schema ────────────────────────────────────────────────────────────
@@ -84,6 +92,41 @@ const healthRecordSchema = z.object({
   // Other
   notes: z.string().max(2000).optional().or(z.literal('')),
   cost: z.preprocess((v) => (v === "" || v == null) ? undefined : v, z.coerce.number().min(0).optional()),
+
+  // ── Vinculación con módulo de Casos Clínicos (opción B) ───────────────
+  // Cuando el VET registra una visita y selecciona una enfermedad del
+  // catálogo, ofrecemos abrir automáticamente un BovineDiseaseCase paralelo.
+  // El backend NO los sincroniza, así que hacemos 2 POST encadenados en
+  // el frontend para que el VET no tenga que crear el caso aparte.
+  /**
+   * UUID de la enfermedad del catálogo. Cumple la mejora 4 del backend
+   * (`diseaseId` en HealthRecord). Si el bovino está SICK / QUARANTINE,
+   * activa la UI de "Abrir caso oficial" abajo.
+   */
+  diseaseId: z.string().optional().or(z.literal('')),
+  /**
+   * Si está marcado al enviar, además del HealthRecord se crea un
+   * BovineDiseaseCase apuntando al mismo bovino + enfermedad. Default `true`
+   * cuando hay diseaseId Y el estado del bovino es de enfermedad activa.
+   */
+  openCase: z.boolean().optional(),
+  /** Severidad del CASO (LOW/MODERATE/HIGH/CRITICAL) — distinta del enum
+   *  SeverityLevel del HealthRecord (que incluye MILD/SEVERE/FATAL). */
+  caseSeverity: z.enum(['LOW', 'MODERATE', 'HIGH', 'CRITICAL']).optional(),
+}).superRefine((data, ctx) => {
+  // Calidad de datos: un diagnóstico marcado como CONFIRMED debe tener
+  // texto. No tiene sentido "confirmar" un diagnóstico vacío. Para estados
+  // DIFFERENTIAL / RULED_OUT el texto sigue siendo opcional.
+  if (
+    data.diagnosisStatus === DiagnosisStatus.CONFIRMED &&
+    (!data.primaryDiagnosis || data.primaryDiagnosis.trim() === '')
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['primaryDiagnosis'],
+      message: 'Escribe el diagnóstico para poder confirmarlo',
+    });
+  }
 });
 
 type FormValues = z.infer<typeof healthRecordSchema>;
@@ -251,8 +294,35 @@ export function HealthListPage() {
       diagnosisStatus: DiagnosisStatus.CONFIRMED,
       medications: [],
       followUpRequired: false,
+      diseaseId: '',
+      // `openCase` arranca en true para que cuando el VET escoja una
+      // enfermedad y un estado de "enfermo", el checkbox ya esté tildado
+      // y el flujo sea de un solo click. Si lo desmarca, solo se crea el
+      // HealthRecord, no el BovineDiseaseCase.
+      openCase: true,
+      caseSeverity: 'MODERATE',
     },
   });
+
+  // Catálogo de enfermedades activas para el Select de diagnóstico.
+  // Lazy: se trae solo cuando el modal está abierto (`enabled: modalOpen`).
+  // Devuelve UUIDs (no slugs) → compatible con el backend que espera
+  // `diseaseId` UUID tanto en POST /health/records como en POST /bovine-cases.
+  const { data: activeDiseases = [] } = useActiveDiseases({ enabled: modalOpen });
+
+  // ── Watch reactivo para mostrar la UI condicional de "Abrir caso" ──────
+  // Mostramos el panel cuando:
+  //   - El bovino está en un estado de enfermedad activa (SICK/QUARANTINE), Y
+  //   - El VET seleccionó una enfermedad concreta del catálogo.
+  // No tiene sentido ofrecer "abrir caso" para HEALTHY ni para DECEASED.
+  const watchedHealthStatus = form.watch('overallHealthStatus');
+  const watchedDiseaseId    = form.watch('diseaseId');
+  const watchedDiagStatus   = form.watch('diagnosisStatus');
+  const isActiveDisease =
+    watchedHealthStatus === OverallHealthStatus.SICK ||
+    watchedHealthStatus === OverallHealthStatus.QUARANTINE ||
+    watchedHealthStatus === OverallHealthStatus.RECOVERING;
+  const canSuggestCase = isActiveDisease && !!watchedDiseaseId;
 
   const { fields: medFields, append: appendMed, remove: removeMed } = useFieldArray({
     control: form.control,
@@ -260,7 +330,7 @@ export function HealthListPage() {
   });
 
   const checkMutation = useMutation({
-    mutationFn: (data: FormValues) => {
+    mutationFn: async (data: FormValues) => {
       // Build the nested payload matching backend HealthRecord structure
       const payload: any = {
         bovineId: data.bovineId,
@@ -269,6 +339,10 @@ export function HealthListPage() {
         isEmergency: data.isEmergency || false,
         chiefComplaint: data.chiefComplaint || undefined,
         overallHealthStatus: data.overallHealthStatus,
+        // Mejora 4 del backend — diseaseId va plano en el HealthRecord.
+        // Vacío → omitir (no se manda el campo) para no sobrescribir
+        // un valor existente al hacer update; en create es indistinto.
+        diseaseId: data.diseaseId || undefined,
         diagnosis: {
           primaryDiagnosis: data.primaryDiagnosis || undefined,
           status: data.diagnosisStatus,
@@ -317,12 +391,95 @@ export function HealthListPage() {
         };
       }
 
-      return healthApi.createRecord(payload);
+      // ── Paso 1: crear el HealthRecord (siempre) ─────────────────────────
+      const recordRes = await healthApi.createRecord(payload);
+      const createdRecord: any = (recordRes as any)?.data?.data ?? null;
+
+      // ── Paso 2 (opcional): abrir BovineDiseaseCase paralelo ─────────────
+      //
+      // Condiciones para crear el caso:
+      //   - El usuario marcó `openCase` (default true cuando aplica),
+      //   - hay diseaseId del catálogo,
+      //   - el estado clínico no es "saludable" ni "fallecido",
+      //   - hay rancho activo en contexto (requerido por el backend).
+      //
+      // Si el POST del caso falla, NO hacemos rollback del HealthRecord —
+      // el registro de salud ya quedó guardado correctamente y es valioso
+      // por sí mismo. Reportamos el error secundario en un toast aparte.
+      const shouldOpenCase =
+        data.openCase === true &&
+        !!data.diseaseId &&
+        !!activeRanchId &&
+        data.overallHealthStatus !== OverallHealthStatus.HEALTHY &&
+        data.overallHealthStatus !== OverallHealthStatus.DECEASED &&
+        data.overallHealthStatus !== OverallHealthStatus.UNKNOWN;
+
+      let createdCase: any = null;
+      let caseError: unknown = null;
+      if (shouldOpenCase) {
+        try {
+          const casePayload: CreateBovineCaseInput = {
+            bovineId:  data.bovineId,
+            diseaseId: data.diseaseId!,
+            ranchId:   activeRanchId!,
+            severity:  (data.caseSeverity as CaseSeverity) ?? CaseSeverity.MODERATE,
+            // Mapeo overallHealthStatus → CaseStatus:
+            //   RECOVERING        → RECOVERING (idéntico)
+            //   SICK + Confirmado → CONFIRMED
+            //   SICK / QUARANTINE → SUSPECTED (el VET todavía investiga)
+            status:
+              data.overallHealthStatus === OverallHealthStatus.RECOVERING
+                ? CaseStatus.RECOVERING
+                : data.diagnosisStatus === DiagnosisStatus.CONFIRMED
+                  ? CaseStatus.CONFIRMED
+                  : CaseStatus.SUSPECTED,
+            diagnosedAt: data.recordDate
+              ? new Date(data.recordDate).toISOString()
+              : undefined,
+            notes: [data.primaryDiagnosis, data.notes].filter(Boolean).join(' · ')
+              || undefined,
+          };
+          const caseRes = await bovineCasesApi.create(casePayload);
+          createdCase = caseRes?.data?.data ?? null;
+        } catch (err) {
+          caseError = err;
+        }
+      }
+
+      return { record: createdRecord, case: createdCase, caseError, shouldOpenCase };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['herd-health-stats'] });
-      queryClient.invalidateQueries({ queryKey: ['bovines-list'] });
-      toast.success('Registro guardado', 'El registro de salud fue creado exitosamente.');
+      // Listado de bovinos: el queryKey real es `['bovines', 'list']`
+      // (bovineKeys.lists()). El anterior `['bovines-list']` NO matcheaba
+      // ninguna cache y los chips de salud no se refrescaban tras crear
+      // un registro o abrir un caso.
+      queryClient.invalidateQueries({ queryKey: ['bovines', 'list'] });
+      queryClient.invalidateQueries({ queryKey: ['bovines'] });
+      // Si abrimos un caso, también invalidamos las cachés del módulo de
+      // casos clínicos + epidemiología (snapshots, top diseases, trend).
+      if (result?.case) {
+        queryClient.invalidateQueries({ queryKey: ['bovine-cases'] });
+        queryClient.invalidateQueries({ queryKey: ['epidemiology'] });
+      }
+
+      // Mensaje contextualizado al usuario:
+      //   - Solo registro creado
+      //   - Registro + caso creado
+      //   - Registro creado pero caso falló (no es bloqueante)
+      if (result?.case) {
+        toast.success(
+          'Registro y caso clínico creados',
+          'Se registró la visita y se abrió el caso oficial en el módulo de Casos Clínicos.',
+        );
+      } else if (result?.shouldOpenCase && result?.caseError) {
+        toast.warning(
+          'Registro guardado, pero falló abrir el caso',
+          `El HealthRecord se creó correctamente. El caso clínico paralelo no pudo crearse — puedes abrirlo manualmente desde /health/cases. (${(result.caseError as Error)?.message ?? 'error desconocido'})`,
+        );
+      } else {
+        toast.success('Registro guardado', 'El registro de salud fue creado exitosamente.');
+      }
       setModalOpen(false);
       form.reset();
     },
@@ -360,6 +517,13 @@ export function HealthListPage() {
       diagnosisStatus: DiagnosisStatus.CONFIRMED,
       medications: [],
       followUpRequired: false,
+      // Defaults para los campos nuevos (vinculación al catálogo + caso).
+      // `openCase: true` solo se materializa cuando además hay diseaseId y
+      // el bovino está enfermo (ver `canSuggestCase`). Para un chequeo
+      // rutinario de un bovino sano, el panel ni siquiera se muestra.
+      diseaseId: '',
+      openCase: true,
+      caseSeverity: 'MODERATE',
     });
     setShowVitals(false);
     setShowSymptoms(false);
@@ -385,12 +549,53 @@ export function HealthListPage() {
             <p className="text-sm text-gray-500 dark:text-gray-400">Monitoreo, diagnóstico y tratamiento</p>
           </div>
         </div>
-        {/* Action button: only useful when a ranch is selected. */}
-        {activeRanchId && (
-          <Button icon={<Plus className="w-4 h-4" />} onClick={() => openNewCheck()}>
-            Nuevo Registro
-          </Button>
-        )}
+        {/* Acciones del header. El acceso al catálogo de enfermedades NO
+            depende del rancho seleccionado — es material de referencia
+            global, así que se muestra siempre. */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <PermissionGuard action="VIEW_EPIDEMIOLOGY">
+            <Link
+              to="/health/epidemiology"
+              className="inline-flex items-center gap-2 px-3 h-10 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              <Activity className="w-4 h-4" />
+              Epidemiología
+            </Link>
+          </PermissionGuard>
+          <Link
+            to="/health/records"
+            className="inline-flex items-center gap-2 px-3 h-10 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            <FileText className="w-4 h-4" />
+            Registros
+          </Link>
+          <Link
+            to="/health/diagnosis/stats"
+            className="inline-flex items-center gap-2 px-3 h-10 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            <Stethoscope className="w-4 h-4" />
+            Stats diagnostico
+          </Link>
+          <Link
+            to="/health/cases"
+            className="inline-flex items-center gap-2 px-3 h-10 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            <Stethoscope className="w-4 h-4" />
+            Casos clínicos
+          </Link>
+          <Link
+            to="/health/diseases/catalogo"
+            className="inline-flex items-center gap-2 px-3 h-10 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            <Microscope className="w-4 h-4" />
+            Catálogo de enfermedades
+          </Link>
+          {activeRanchId && (
+            <Button icon={<Plus className="w-4 h-4" />} onClick={() => openNewCheck()}>
+              Nuevo Registro
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Global ranch filter — same convention as Bovinos / Locations. */}
@@ -542,6 +747,22 @@ export function HealthListPage() {
                 {...form.register('overallHealthStatus')}
               />
             </div>
+            {/* Aviso: crear el registro propaga este estado al bovino en
+                TODO el sistema (lista de hato, KPIs, mapas). Solo se muestra
+                cuando el estado elegido no es "Saludable". */}
+            {watchedHealthStatus && watchedHealthStatus !== OverallHealthStatus.HEALTHY && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 px-3 py-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                  Este registro marcará al animal como{' '}
+                  <strong>
+                    {healthStatusOptions.find((o) => o.value === watchedHealthStatus)?.label
+                      ?? watchedHealthStatus}
+                  </strong>{' '}
+                  en todo el sistema (lista del hato, KPIs y mapas), no solo en este registro.
+                </p>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
               <Input
                 label="Motivo de Consulta"
@@ -624,6 +845,89 @@ export function HealthListPage() {
                 {...form.register('prognosis')}
               />
             </div>
+
+            {/* ── Enfermedad del catálogo (mejora 4) ────────────────────
+                Permite vincular el registro a una entrada concreta del
+                catálogo global de enfermedades. Habilita además la UI
+                de "abrir caso clínico oficial" más abajo cuando el
+                estado del bovino es de enfermedad activa. */}
+            <div className="mt-4">
+              <Select
+                label="Enfermedad del catálogo (opcional)"
+                options={[
+                  { value: '', label: 'Sin vincular al catálogo' },
+                  ...activeDiseases.map((d) => ({ value: d.id, label: d.name })),
+                ]}
+                {...form.register('diseaseId')}
+              />
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                Vincular permite que este registro aparezca en las estadísticas
+                epidemiológicas y, si el bovino está enfermo, abrir un caso oficial.
+              </p>
+            </div>
+
+            {/* ── Panel "Abrir caso clínico" — solo si tiene sentido ────
+                Aparece cuando el bovino está enfermo Y hay enfermedad
+                del catálogo seleccionada. El checkbox controla si se
+                hace el segundo POST (a /bovine-cases) tras crear el
+                HealthRecord. Default checked para que el flujo común
+                (un VET reportando un enfermo) sea de un solo click. */}
+            {canSuggestCase && (
+              <div className="mt-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-900/20 p-4 space-y-3">
+                <Controller
+                  control={form.control}
+                  name="openCase"
+                  render={({ field }) => (
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 w-4 h-4 rounded text-primary-600 focus:ring-primary-500"
+                        checked={field.value ?? false}
+                        onChange={(e) => field.onChange(e.target.checked)}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                          Abrir también un caso clínico oficial
+                        </p>
+                        <p className="text-xs text-blue-700/80 dark:text-blue-300/80 mt-0.5">
+                          Crea una entrada en <strong>Casos Clínicos</strong> para
+                          dar seguimiento al ciclo SUSPECTED → CONFIRMED → RECOVERED
+                          y que aparezca en el dashboard de epidemiología y en el
+                          mapa de brotes. El registro de salud y el caso quedan
+                          ligados al mismo bovino y enfermedad.
+                        </p>
+                      </div>
+                    </label>
+                  )}
+                />
+
+                {/* Severity solo aplica si se abre el caso. */}
+                {form.watch('openCase') && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-blue-200/50 dark:border-blue-700/30">
+                    <Select
+                      label="Severidad del caso"
+                      options={[
+                        { value: 'LOW',      label: 'Baja' },
+                        { value: 'MODERATE', label: 'Moderada' },
+                        { value: 'HIGH',     label: 'Alta' },
+                        { value: 'CRITICAL', label: 'Crítica' },
+                      ]}
+                      {...form.register('caseSeverity')}
+                    />
+                    <div className="flex flex-col justify-center text-xs text-blue-700/80 dark:text-blue-300/80">
+                      Status inicial del caso se derivará de:
+                      <span className="font-mono mt-0.5">
+                        {watchedHealthStatus === OverallHealthStatus.RECOVERING
+                          ? 'RECOVERING'
+                          : watchedDiagStatus === DiagnosisStatus.CONFIRMED
+                            ? 'CONFIRMED'
+                            : 'SUSPECTED'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </fieldset>
 
           {/* ── Treatment ──────────────────────────────────────────────── */}

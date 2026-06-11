@@ -425,9 +425,9 @@ export class BovineHealthService {
             // porque el diagnóstico y la fecha de chequeo sí cambiaron
             await geoService.updateSnapshot(data.bovineId, {
                 healthStatus: newHealthStatus,
-                healthColor: HEALTH_COLORS[newHealthStatus],
+                //healthColor: HEALTH_COLORS[newHealthStatus],
                 lastHealthCheck: data.checkDate,
-                diagnosis: data.diagnosis,
+                diagnosis: newHealthStatus === HealthStatus.HEALTHY ? null : data.diagnosis,
                 lastUpdate: new Date()
             }, transaction);
 
@@ -543,7 +543,8 @@ export class BovineHealthService {
             // Actualizar snapshot — garantizado, sin optional chaining
             await geoService.updateSnapshot(bovineId, {
                 healthStatus: newStatus,
-                healthColor: HEALTH_COLORS[newStatus],
+                //healthColor: HEALTH_COLORS[newStatus],
+                diagnosis: newStatus === HealthStatus.HEALTHY ? null : undefined,
                 lastUpdate: new Date()
             }, transaction);
 
@@ -743,7 +744,7 @@ export class BovineHealthService {
                     where: { recordDate: { [Op.gte]: thirtyDaysAgo } },
                     attributes: [
                         [sequelize.literal("diagnosis->>'primaryDiagnosis'"), 'diagnosis'],
-                        [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+                        [sequelize.fn('COUNT', sequelize.col('Health.id')), 'count']
                     ],
                     include: [{ model: Bovine, as: 'bovine', where: { ranchId }, attributes: [] }],
                     group: [sequelize.literal("diagnosis->>'primaryDiagnosis'") as any],

@@ -32,6 +32,18 @@ export enum GenderType {
   UNKNOWN = 'UNKNOWN'
 }
 
+/**
+ * X-04: motivo por el que un bovino dejó el hato activo (isActive=false).
+ * Distingue una baja legítima de un borrado por error de captura.
+ */
+export enum BovineExitReason {
+  DECEASED = 'DECEASED',           // Muerte (hay registro en bovine_deaths)
+  SOLD = 'SOLD',                   // Venta
+  TRANSFERRED = 'TRANSFERRED',     // Traslado a otro hato/propietario
+  CULLED = 'CULLED',               // Descarte/saca
+  DELETED_ERROR = 'DELETED_ERROR', // Borrado por error de captura
+}
+
 // Interface para la ubicación geográfica
 export interface LocationData {
   latitude: number;
@@ -114,6 +126,8 @@ export interface BovineAttributes {
   updatedAt?: Date;
   deletedAt?: Date; // Para soft delete
   currentLocationId?: string;
+  /** X-04: motivo de salida del hato activo (null mientras está activo) */
+  exitReason?: BovineExitReason | null;
 }
 
 // Atributos opcionales al crear un nuevo bovino
@@ -123,7 +137,7 @@ export interface BovineCreationAttributes
     'trackingConfig' | 'ownerId' | 'ranchId' | 'motherId' | 'fatherId' |
     'acquisitionDate' | 'acquisitionPrice' | 'currentValue' | 'notes' |
     'images' | 'qrCode' | 'rfidTag' | 'lastHealthCheck' | 'nextHealthCheck' |
-    'deletedAt' | "currentLocationId"
+    'deletedAt' | "currentLocationId" | 'exitReason'
   > { }
 
 // Clase del modelo Bovine
@@ -160,6 +174,7 @@ class Bovine extends Model<BovineAttributes, BovineCreationAttributes>
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public deletedAt?: Date;
+  public exitReason?: BovineExitReason | null;
 
 
 }
@@ -244,6 +259,10 @@ Bovine.init(
       type: DataTypes.ENUM(...Object.values(VaccinationStatus)),
       allowNull: false,
       defaultValue: VaccinationStatus.NONE,
+      // @deprecated (P-02) — columna dormante. El estado real de vacunación vive
+      // en la tabla derivada `bovine_vaccination_status` (mantenida por hooks/job).
+      // No usar para lecturas; se conserva solo por compatibilidad de esquema.
+      //comment: 'DEPRECADO: usar bovine_vaccination_status. Columna dormante.',
     },
     location: {
       type: DataTypes.JSONB,
@@ -344,6 +363,11 @@ Bovine.init(
       allowNull: false,
       defaultValue: true,
       comment: 'Si el animal está activo en el sistema'
+    },
+    exitReason: {
+      type: DataTypes.ENUM(...Object.values(BovineExitReason)),
+      allowNull: true,
+      //comment: 'X-04: motivo de salida del hato (DECEASED/SOLD/.../DELETED_ERROR). Null si activo.'
     },
     lastHealthCheck: {
       type: DataTypes.DATE,

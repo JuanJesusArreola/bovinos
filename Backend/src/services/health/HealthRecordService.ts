@@ -1,5 +1,5 @@
 // services/health/HealthRecordService.ts
-import { Op, Transaction } from 'sequelize';
+import { Op, Transaction, literal } from 'sequelize';
 import sequelize from '../../config/database';
 import logger from '../../utils/logger';
 import { HealthError, BovineNotFoundError, EventNotFoundError, } from '../../utils/HealthErrors';
@@ -19,7 +19,8 @@ import Health, {
   ReproductiveAssessment,
 } from '../../models/Health';
 import Bovine, { HealthStatus } from '../../models/Bovine';
-import Event, { EventStatus } from '../../models/Event';
+import Event, { EventStatus, EventType, EventPriority } from '../../models/Event';
+import Disease from '../../models/Disease';
 
 // ============================================================================
 // INTERFACES PÚBLICAS
@@ -62,7 +63,71 @@ export interface CreateHealthRecordDTO {
   isEmergency?: boolean;
   weatherConditions?: string;
   environmentalFactors?: string[];
+  diseaseId?: string;   // FK opcional al catálogo de enfermedades
   createdBy: string;
+}
+
+// DTO para actualizar un registro existente (campos editables solamente)
+export interface UpdateHealthRecordDTO {
+  chiefComplaint?: string;
+  historyPresent?: string;
+  historyPast?: string;
+  vitalSigns?: VitalSigns;
+  physicalExam?: PhysicalExamination;
+  symptoms?: Symptoms;
+  diagnosis?: Diagnosis;
+  treatment?: Treatment;
+  laboratoryResults?: LaboratoryResults[];
+  nutritionalAssessment?: NutritionalAssessment;
+  reproductiveAssessment?: ReproductiveAssessment;
+  overallHealthStatus?: HealthStatus;
+  recommendations?: string[];
+  followUpRequired?: boolean;
+  followUpDate?: Date;
+  followUpNotes?: string;
+  notes?: string;
+  privateNotes?: string;
+  cost?: number;
+  isEmergency?: boolean;
+  weatherConditions?: string;
+  environmentalFactors?: string[];
+  diseaseId?: string | null;  // null para desvincular
+  updatedBy?: string;
+}
+
+// Filtros para el listado global paginado
+export interface GetHealthRecordsFilters {
+  ranchId?: string;
+  bovineId?: string;
+  recordType?: HealthRecordType[];
+  startDate?: Date;
+  endDate?: Date;
+  veterinarianId?: string;
+  overallHealthStatus?: HealthStatus[];
+  isEmergency?: boolean;
+  followUpRequired?: boolean;
+  diseaseId?: string;
+  search?: string;          // busca en chiefComplaint y diagnosis.primaryDiagnosis
+  diagnosisConfirmed?: boolean; // true = solo con confirmedAt en el JSONB diagnosis
+}
+
+export interface GetHealthRecordsOptions {
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'ASC' | 'DESC';
+}
+
+export interface HealthRecordsPage {
+  data: Health[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
 }
 
 export interface HealthRecordFilters {
@@ -131,6 +196,7 @@ export class HealthRecordService {
         {
           bovineId: data.bovineId,
           eventId: data.eventId,
+          diseaseId: data.diseaseId,
           recordType: data.recordType,
           recordDate: data.recordDate,
           veterinarianId: data.veterinarianId,
@@ -180,7 +246,27 @@ export class HealthRecordService {
         { transaction: t }
       );
 
-      // 5. Opcional: actualizar el evento si existe para marcarlo como completado y vincularlo
+      // 5. Crear evento de seguimiento si se requiere
+      if (data.followUpRequired && data.followUpDate) {
+        await Event.create(
+          {
+            bovineId:      data.bovineId,
+            eventType:     EventType.HEALTH_CHECK,
+            title:         `Seguimiento: ${data.chiefComplaint ?? healthRecord.id}`,
+            description:   data.followUpNotes ?? 'Seguimiento de consulta médica',
+            scheduledDate: data.followUpDate,
+            status:        EventStatus.SCHEDULED,
+            priority:      EventPriority.HIGH,
+            healthRecordId: healthRecord.id,
+            requiresVeterinarian: true,
+            isActive:      true,
+            createdBy:     data.createdBy,
+          } as any,
+          { transaction: t }
+        );
+      }
+
+      // 6. Opcional: actualizar el evento si existe para marcarlo como completado y vincularlo
       if (data.eventId) {
         await Event.update(
           {
@@ -305,6 +391,171 @@ export class HealthRecordService {
       }
     }
     return total;
+  }
+
+  // ==========================================================================
+  // ACTUALIZACIÓN
+  // ==========================================================================
+
+  async updateHealthRecord(
+    id: string,
+    data: UpdateHealthRecordDTO,
+    updatedBy: string
+  ): Promise<Health> {
+    try {
+      const record = await Health.findByPk(id);
+      if (!record) {
+        throw new HealthError(`Registro de salud ${id} no encontrado`, 'HEALTH_RECORD_NOT_FOUND', 404);
+      }
+
+      const updateData: Partial<HealthAttributes> = { updatedBy };
+
+      if (data.chiefComplaint        !== undefined) updateData.chiefComplaint        = data.chiefComplaint;
+      if (data.historyPresent        !== undefined) updateData.historyPresent        = data.historyPresent;
+      if (data.historyPast           !== undefined) updateData.historyPast           = data.historyPast;
+      if (data.vitalSigns            !== undefined) updateData.vitalSigns            = data.vitalSigns;
+      if (data.physicalExam          !== undefined) updateData.physicalExam          = data.physicalExam;
+      if (data.symptoms              !== undefined) updateData.symptoms              = data.symptoms;
+      if (data.diagnosis             !== undefined) updateData.diagnosis             = data.diagnosis;
+      if (data.treatment             !== undefined) updateData.treatment             = data.treatment;
+      if (data.laboratoryResults     !== undefined) updateData.laboratoryResults     = data.laboratoryResults;
+      if (data.nutritionalAssessment !== undefined) updateData.nutritionalAssessment = data.nutritionalAssessment;
+      if (data.reproductiveAssessment !== undefined) updateData.reproductiveAssessment = data.reproductiveAssessment;
+      if (data.overallHealthStatus   !== undefined) updateData.overallHealthStatus   = data.overallHealthStatus;
+      if (data.recommendations       !== undefined) updateData.recommendations       = data.recommendations;
+      if (data.followUpRequired      !== undefined) updateData.followUpRequired      = data.followUpRequired;
+      if (data.followUpDate          !== undefined) updateData.followUpDate          = data.followUpDate;
+      if (data.followUpNotes         !== undefined) updateData.followUpNotes         = data.followUpNotes;
+      if (data.notes                 !== undefined) updateData.notes                 = data.notes;
+      if (data.privateNotes          !== undefined) updateData.privateNotes          = data.privateNotes;
+      if (data.cost                  !== undefined) updateData.cost                  = data.cost;
+      if (data.isEmergency           !== undefined) updateData.isEmergency           = data.isEmergency;
+      if (data.weatherConditions     !== undefined) updateData.weatherConditions     = data.weatherConditions;
+      if (data.environmentalFactors  !== undefined) updateData.environmentalFactors  = data.environmentalFactors;
+      if (data.diseaseId             !== undefined) updateData.diseaseId             = data.diseaseId ?? undefined;
+
+      await record.update(updateData);
+
+      logger.info(`Registro de salud actualizado: ${id}`, this.context, { id, updatedBy });
+      return record;
+    } catch (error) {
+      logger.error(`Error actualizando registro de salud ${id}`, this.context, { id }, ensureError(error));
+      throw error;
+    }
+  }
+
+  // ==========================================================================
+  // ELIMINACIÓN (soft delete)
+  // ==========================================================================
+
+  async deleteHealthRecord(id: string): Promise<void> {
+    try {
+      const record = await Health.findByPk(id);
+      if (!record) {
+        throw new HealthError(`Registro de salud ${id} no encontrado`, 'HEALTH_RECORD_NOT_FOUND', 404);
+      }
+      await record.destroy(); // paranoid: true → setea deletedAt
+      logger.info(`Registro de salud eliminado (soft): ${id}`, this.context, { id });
+    } catch (error) {
+      logger.error(`Error eliminando registro de salud ${id}`, this.context, { id }, ensureError(error));
+      throw error;
+    }
+  }
+
+  // ==========================================================================
+  // LISTADO GLOBAL PAGINADO
+  // ==========================================================================
+
+  async getHealthRecords(
+    filters: GetHealthRecordsFilters = {},
+    options: GetHealthRecordsOptions = {}
+  ): Promise<HealthRecordsPage> {
+    try {
+      const page      = Math.max(1, options.page  ?? 1);
+      const limit     = Math.min(100, Math.max(1, options.limit ?? 50));
+      const offset    = (page - 1) * limit;
+      const sortBy    = options.sortBy    ?? 'recordDate';
+      const sortOrder = options.sortOrder ?? 'DESC';
+
+      // ── WHERE conditions ──────────────────────────────────────────────────
+      const where: any = {};
+
+      if (filters.bovineId)         where.bovineId            = filters.bovineId;
+      if (filters.veterinarianId)   where.veterinarianId      = filters.veterinarianId;
+      if (filters.isEmergency       !== undefined) where.isEmergency       = filters.isEmergency;
+      if (filters.followUpRequired  !== undefined) where.followUpRequired  = filters.followUpRequired;
+      if (filters.diseaseId)        where.diseaseId            = filters.diseaseId;
+
+      if (filters.recordType?.length)
+        where.recordType = { [Op.in]: filters.recordType };
+
+      if (filters.overallHealthStatus?.length)
+        where.overallHealthStatus = { [Op.in]: filters.overallHealthStatus };
+
+      if (filters.startDate || filters.endDate) {
+        where.recordDate = {};
+        if (filters.startDate) where.recordDate[Op.gte] = filters.startDate;
+        if (filters.endDate)   where.recordDate[Op.lte] = filters.endDate;
+      }
+
+      if (filters.search) {
+        const q = `%${filters.search}%`;
+        where[Op.or] = [
+          { chiefComplaint: { [Op.iLike]: q } },
+        ];
+      }
+
+      // Filtro por diagnóstico confirmado: comprueba que diagnosis->>'confirmedAt' no sea null
+      if (filters.diagnosisConfirmed !== undefined) {
+        const diagCondition = filters.diagnosisConfirmed
+          ? literal(`"Health"."diagnosis"->>'confirmedAt' IS NOT NULL`)
+          : literal(`("Health"."diagnosis"->>'confirmedAt' IS NULL OR "Health"."diagnosis" IS NULL)`);
+        where[Op.and] = [...(Array.isArray(where[Op.and]) ? where[Op.and] : []), diagCondition];
+      }
+
+      // ── INCLUDE: bovino (siempre) + disease (solo si hay asociación) ──────
+      const include: any[] = [
+        {
+          model: Bovine,
+          as: 'bovine',
+          attributes: ['id', 'earTag', 'name', 'ranchId'],
+          required: filters.ranchId ? true : false,
+          ...(filters.ranchId ? { where: { ranchId: filters.ranchId } } : {}),
+        },
+        {
+          model: Disease,
+          as: 'disease',
+          attributes: ['id', 'name', 'slug', 'severity'],
+          required: false,
+        },
+      ];
+
+      const { rows, count } = await Health.findAndCountAll({
+        where,
+        include,
+        order:    [[sortBy, sortOrder]],
+        limit,
+        offset,
+        distinct: true,
+      });
+
+      const totalPages = Math.ceil(count / limit);
+
+      return {
+        data: rows,
+        pagination: {
+          page,
+          limit,
+          total: count,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error) {
+      logger.error('Error obteniendo listado global de registros de salud', this.context, { filters, options }, ensureError(error));
+      throw error;
+    }
   }
 
   async getHealthSummary(bovineId: string): Promise<HealthSummary | null> {

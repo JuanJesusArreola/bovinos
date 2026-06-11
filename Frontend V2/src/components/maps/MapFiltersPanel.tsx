@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { cn } from '@/utils/cn';
-import { Filter, X, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
+import { Filter, ChevronDown, ChevronUp, RotateCcw, Loader2 } from 'lucide-react';
+import { useActiveDiseases } from '@/hooks/useDiseases';
 
 export interface MapFilters {
   healthStatus: string[];
@@ -11,6 +12,11 @@ export interface MapFilters {
   gender: string[];
   ageMin?: number;
   ageMax?: number;
+  /**
+   * IDs (UUIDs) de las enfermedades seleccionadas — NO nombres.
+   * Los nombres pueden cambiar; los IDs son la única referencia estable que
+   * el backend acepta para filtrar bovinos por enfermedad activa.
+   */
   diseases: string[];
 }
 
@@ -35,18 +41,11 @@ const GENDERS = [
   { value: 'FEMALE', label: 'Hembra' },
 ];
 
-const COMMON_DISEASES = [
-  'Mastitis',
-  'Neumonía',
-  'Diarrea',
-  'Fiebre Aftosa',
-  'Brucelosis',
-  'Tuberculosis',
-  'Parasitosis',
-  'Metritis',
-  'Hipocalcemia',
-  'Leptospirosis',
-];
+// Antes había aquí una lista hardcodeada de nombres de enfermedades. Se
+// eliminó al migrar al catálogo real: ahora `useActiveDiseases()` devuelve
+// las entradas activas (id + name) directamente del backend, evitando que
+// el filtro envíe nombres que el API no reconoce y manteniéndolo sincronizado
+// si el SUPER_ADMIN da de alta nuevas enfermedades.
 
 const DEFAULT_BREEDS = [
   'Holstein', 'Brahman', 'Angus', 'Hereford', 'Charolais',
@@ -63,6 +62,20 @@ export function MapFiltersPanel({
   const [showBreeds, setShowBreeds] = useState(false);
   const [showDiseases, setShowDiseases] = useState(false);
   const breeds = availableBreeds || DEFAULT_BREEDS;
+
+  // Catálogo real de enfermedades activas (lazy: solo se trae cuando el
+  // bloque de filtros está expandido Y la sección de enfermedades abierta).
+  const { data: diseases = [], isLoading: isLoadingDiseases } = useActiveDiseases({
+    enabled: expanded && showDiseases,
+  });
+
+  // Lookup id → name para renderizar chips legibles cuando hay filtros
+  // activos sin tener que tener cargada la lista completa.
+  const diseaseNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    diseases.forEach((d) => map.set(d.id, d.name));
+    return map;
+  }, [diseases]);
 
   const activeCount =
     filters.healthStatus.length +
@@ -220,22 +233,54 @@ export function MapFiltersPanel({
               {showDiseases ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </button>
             {showDiseases && (
-              <div className="flex flex-wrap gap-1.5">
-                {COMMON_DISEASES.map((disease) => (
-                  <button
-                    key={disease}
-                    onClick={() => toggleArrayFilter('diseases', disease)}
-                    className={cn(
-                      'px-2 py-1 rounded-full text-xs border transition-colors',
-                      filters.diseases.includes(disease)
-                        ? 'bg-red-600 text-white border-red-600'
-                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400',
-                    )}
-                  >
-                    {disease}
-                  </button>
-                ))}
-              </div>
+              <>
+                {isLoadingDiseases ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 py-2">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Cargando catálogo…
+                  </div>
+                ) : diseases.length === 0 ? (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 py-2">
+                    No hay enfermedades en el catálogo.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                    {diseases.map((d) => (
+                      <button
+                        key={d.id}
+                        onClick={() => toggleArrayFilter('diseases', d.id)}
+                        title={d.description}
+                        className={cn(
+                          'px-2 py-1 rounded-full text-xs border transition-colors',
+                          filters.diseases.includes(d.id)
+                            ? 'bg-red-600 text-white border-red-600'
+                            : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400',
+                        )}
+                      >
+                        {d.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Chips de IDs seleccionados que ya no están en la lista cargada
+                    (e.g. usuario seleccionó algo, colapsó, ahora la lista no se
+                    recarga). Mostramos al menos un chip con el name si lo
+                    tenemos cacheado, o "Enfermedad" como fallback. */}
+                {filters.diseases.length > 0 && diseases.length === 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {filters.diseases.map((id) => (
+                      <button
+                        key={id}
+                        onClick={() => toggleArrayFilter('diseases', id)}
+                        className="px-2 py-1 rounded-full text-xs bg-red-600 text-white border border-red-600"
+                      >
+                        {diseaseNameById.get(id) ?? 'Enfermedad'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

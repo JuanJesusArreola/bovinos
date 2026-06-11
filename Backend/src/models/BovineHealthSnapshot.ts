@@ -13,7 +13,7 @@ export interface BovineHealthSnapshotAttributes {
   healthStatus: HealthStatus;
   location: LocationData;
   lastUpdate: Date;
-  healthColor: string;
+  //healthColor: string;
   clusterSize: number;
 
   geom?: Geometry;
@@ -21,8 +21,12 @@ export interface BovineHealthSnapshotAttributes {
   // Metadatos para filtros
   breed?: string;
   ageMonths?: number;
-  diagnosis?: string;
+  diagnosis?: string | null;
   lastHealthCheck?: Date;
+
+  // Caso clínico activo (Fase 2)
+  activeDiseaseId?: string | null;
+  activeCaseId?: string | null;
 
   // Timestamps
   deletedAt?: Date;
@@ -34,7 +38,7 @@ export interface BovineHealthSnapshotAttributes {
 export interface BovineHealthSnapshotCreationAttributes
   extends Optional<BovineHealthSnapshotAttributes,
     'id' | 'breed' | 'ageMonths' | 'diagnosis' | 'lastHealthCheck' |
-     'deletedAt'
+    'activeDiseaseId' | 'activeCaseId' | 'deletedAt'
   > { }
 
 // Clase del modelo
@@ -47,15 +51,19 @@ class BovineHealthSnapshot extends Model<BovineHealthSnapshotAttributes, BovineH
   public healthStatus!: HealthStatus;
   public location!: LocationData;
   public lastUpdate!: Date;
-  public healthColor!: string;
+  //public healthColor!: string;
   public clusterSize!: number;
 
   public geom?: Geometry;
 
   public breed?: string;
   public ageMonths?: number;
-  public diagnosis?: string;
+  public diagnosis?: string | null;
   public lastHealthCheck?: Date;
+
+  // Caso clínico activo (Fase 2)
+  public activeDiseaseId?: string | null;
+  public activeCaseId?: string | null;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -113,14 +121,14 @@ BovineHealthSnapshot.init(
       defaultValue: DataTypes.NOW,
       comment: 'Última actualización de este snapshot'
     },
-    healthColor: {
+    /*healthColor: {
       type: DataTypes.STRING(20),
       allowNull: false,
       validate: {
         is: /^#[0-9A-F]{6}$/i  // Validar formato hexadecimal de color
       },
       comment: 'Color para visualización en mapa'
-    },
+    },*/
     clusterSize: {
       type: DataTypes.INTEGER,
       allowNull: false,
@@ -150,6 +158,18 @@ BovineHealthSnapshot.init(
       type: DataTypes.DATE,
       allowNull: true,
       comment: 'Fecha del último chequeo de salud'
+    },
+    activeDiseaseId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      // FK sin constraints para evitar conflicto de orden en sync()
+      comment: 'FK a la enfermedad activa del caso abierto (diseases.id)'
+    },
+    activeCaseId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      // FK sin constraints para evitar conflicto de orden en sync()
+      comment: 'FK al caso clínico activo (bovine_disease_cases.id)'
     },
     geom: {
       type: DataTypes.GEOMETRY('POINT', 4326),

@@ -24,9 +24,12 @@ import logger from '../utils/logger';
 import { ensureError } from '../utils/errorUtils';
 
 import Vaccination from '../models/Vaccination';
+import Bovine from '../models/Bovine';
+import VaccinationSchedule from '../models/VaccinationSchedule';
 import BovineVaccinationStatus, {
   VaccinationStatus,
 } from '../models/BovineVaccinationStatus';
+import { vaccinationStatusLabel } from '../constants/vaccination.labels';
 
 // ============================================================================
 // INTERFACES PÚBLICAS
@@ -35,6 +38,7 @@ import BovineVaccinationStatus, {
 export interface VaccinationStatusSnapshot {
   bovineId: string;
   status: VaccinationStatus;
+  statusLabel: string;            // V-06: etiqueta en español del status
   lastVaccinationAt: Date | null;
   lastVaccineType: string | null;
   nextDueAt: Date | null;
@@ -73,9 +77,10 @@ export class BovineVaccinationStatusService {
 
       // Caso simple: nunca vacunado
       if (totalApplied === 0) {
-        const snapshot = {
+        const snapshot: VaccinationStatusSnapshot = {
           bovineId,
           status: VaccinationStatus.NONE,
+          statusLabel: vaccinationStatusLabel(VaccinationStatus.NONE)!,
           lastVaccinationAt: null,
           lastVaccineType: null,
           nextDueAt: null,
@@ -107,36 +112,90 @@ export class BovineVaccinationStatusService {
 
       let overdueCount = 0;
       let nextDueAt: Date | null = null;
-      let hasFutureSchedule = false;
+      let status: VaccinationStatus;
 
-      for (const { nextDueDate } of latestPerType.values()) {
-        if (!nextDueDate) continue;
-        if (nextDueDate < now) {
-          overdueCount += 1;
-        } else {
-          hasFutureSchedule = true;
-          if (!nextDueAt || nextDueDate < nextDueAt) {
-            nextDueAt = nextDueDate;
-          }
-        }
+      // ── V-04: lógica CALENDARIO-DRIVEN con FALLBACK ─────────────────────────
+      // Cargar el calendario aplicable al bovino (edad + sexo + raza). Si el
+      // calendario está vacío, se cae a la heurística previa (sin sorpresas).
+      const bovine = await Bovine.findByPk(bovineId, {
+        attributes: ['birthDate', 'gender', 'breed'],
+        transaction,
+      });
+
+      const schedules = await VaccinationSchedule.findAll({
+        where: { isActive: true } as any,
+        transaction,
+      });
+
+      let ageMonths = 0;
+      if (bovine?.birthDate) {
+        ageMonths = Math.floor(
+          (now.getTime() - new Date(bovine.birthDate).getTime()) / (1000 * 60 * 60 * 24 * 30.44)
+        );
       }
 
-      // Determinar status:
-      //   - OVERDUE   → al menos un tipo vencido
-      //   - UP_TO_DATE → ninguno vencido y al menos un tipo con nextDueDate futura
-      //   - PENDING   → tiene vacunas pero ninguna con nextDueDate (esquema indefinido / única)
-      let status: VaccinationStatus;
-      if (overdueCount > 0) {
-        status = VaccinationStatus.OVERDUE;
-      } else if (hasFutureSchedule) {
-        status = VaccinationStatus.UP_TO_DATE;
+      const applicable = schedules.filter((s) =>
+        ageMonths >= s.fromAgeMonths &&
+        (s.toAgeMonths == null || ageMonths <= s.toAgeMonths) &&
+        (s.genderFilter == null || s.genderFilter === bovine?.gender) &&
+        (s.breedFilter == null || s.breedFilter === bovine?.breed)
+      );
+
+      if (applicable.length === 0) {
+        // FALLBACK (heurística previa): basada solo en nextDueDate de las vacunas.
+        let hasFutureSchedule = false;
+        for (const { nextDueDate } of latestPerType.values()) {
+          if (!nextDueDate) continue;
+          if (nextDueDate < now) overdueCount += 1;
+          else {
+            hasFutureSchedule = true;
+            if (!nextDueAt || nextDueDate < nextDueAt) nextDueAt = nextDueDate;
+          }
+        }
+        status = overdueCount > 0
+          ? VaccinationStatus.OVERDUE
+          : hasFutureSchedule
+            ? VaccinationStatus.UP_TO_DATE
+            : VaccinationStatus.PENDING;
       } else {
-        status = VaccinationStatus.PENDING;
+        // CALENDARIO-DRIVEN: por cada vacuna que le toca al bovino según su edad.
+        let missingRequired = false;
+        for (const s of applicable) {
+          const appliedOfType = latestPerType.get(s.vaccineType);
+
+          if (!appliedOfType) {
+            // No la tiene aplicada → si es obligatoria, está PENDIENTE
+            if (s.isRequired) missingRequired = true;
+            continue;
+          }
+
+          const freq = s.frequencyMonths ?? 0;
+          if (freq <= 0) {
+            // Dosis única ya aplicada → COMPLETA (esto elimina el "PENDING eterno")
+            continue;
+          }
+
+          // Próximo vencimiento: nextDueDate explícito o última aplicación + frecuencia
+          let due = appliedOfType.nextDueDate;
+          if (!due) {
+            due = new Date(appliedOfType.applicationDate);
+            due.setMonth(due.getMonth() + freq);
+          }
+          if (due < now) overdueCount += 1;
+          else if (!nextDueAt || due < nextDueAt) nextDueAt = due;
+        }
+
+        status = overdueCount > 0
+          ? VaccinationStatus.OVERDUE
+          : missingRequired
+            ? VaccinationStatus.PENDING
+            : VaccinationStatus.UP_TO_DATE;
       }
 
       const snapshot: VaccinationStatusSnapshot = {
         bovineId,
         status,
+        statusLabel: vaccinationStatusLabel(status)!,
         lastVaccinationAt,
         lastVaccineType,
         nextDueAt,
@@ -190,6 +249,65 @@ export class BovineVaccinationStatusService {
     );
   }
 
+  /**
+   * Recalcula el estado de vacunación de TODOS los bovinos activos.
+   * Usado por:
+   *   - El backfill puntual (V-01) → crea filas faltantes para bovinos antiguos.
+   *   - El job diario (V-02) → refresca OVERDUE por el paso del tiempo.
+   *
+   * @param options.onlyMissing  Si true, solo procesa bovinos SIN fila de estado
+   *                              (modo backfill). Si false (default), reprocesa todos.
+   */
+  async recomputeAll(
+    options: { onlyMissing?: boolean } = {}
+  ): Promise<{ processed: number; errors: number; skipped: number }> {
+    const startTime = Date.now();
+    let processed = 0;
+    let errors = 0;
+
+    const bovines = (await Bovine.findAll({
+      attributes: ['id'],
+      where: { isActive: true } as any,
+      raw: true,
+    })) as any[];
+
+    let targetIds: string[] = bovines.map((b) => b.id);
+    const totalActive = targetIds.length;
+
+    if (options.onlyMissing) {
+      const existing = (await BovineVaccinationStatus.findAll({
+        attributes: ['bovineId'],
+        raw: true,
+      })) as any[];
+      const existingSet = new Set(existing.map((e) => e.bovineId));
+      targetIds = targetIds.filter((id) => !existingSet.has(id));
+    }
+
+    for (const id of targetIds) {
+      try {
+        await this.recompute(id);
+        processed++;
+      } catch (error) {
+        errors++;
+        logger.error(
+          `recomputeAll: error en bovino ${id}`,
+          this.context,
+          { bovineId: id },
+          ensureError(error)
+        );
+      }
+    }
+
+    const skipped = totalActive - targetIds.length;
+    logger.info(
+      `recomputeAll finalizado — procesados: ${processed}, errores: ${errors}, omitidos: ${skipped}`,
+      this.context,
+      { processed, errors, skipped, onlyMissing: !!options.onlyMissing, durationMs: Date.now() - startTime }
+    );
+
+    return { processed, errors, skipped };
+  }
+
   // ==========================================================================
   // INTERNOS
   // ==========================================================================
@@ -214,6 +332,7 @@ export class BovineVaccinationStatusService {
     return {
       bovineId: row.bovineId,
       status: row.status,
+      statusLabel: vaccinationStatusLabel(row.status)!,
       lastVaccinationAt: row.lastVaccinationAt ?? null,
       lastVaccineType: row.lastVaccineType ?? null,
       nextDueAt: row.nextDueAt ?? null,

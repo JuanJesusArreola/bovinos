@@ -13,8 +13,8 @@ interface Props {
 
 export function WorkerDashboard({ data, user }: Props) {
   const navigate = useNavigate();
-  const health = data.healthLight;
-  const production = data.productionLight;
+  const health     = (data as any).health;
+  const production = (data as any).production;
 
   return (
     <div className="space-y-6">
@@ -28,25 +28,25 @@ export function WorkerDashboard({ data, user }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Bovinos Sanos"
-          value={formatNumber(health?.healthy || 0)}
+          value={formatNumber(health?.byStatus?.HEALTHY || 0)}
           icon={HeartPulse}
           color="emerald"
         />
         <StatCard
           title="Requieren Atención"
-          value={formatNumber((health?.sick || 0) + (health?.critical || 0))}
+          value={formatNumber((health?.byStatus?.SICK || 0) + (health?.criticalCount || 0))}
           icon={HeartPulse}
           color="red"
         />
         <StatCard
-          title="Producción Hoy"
-          value={`${formatNumber(production?.totalToday || 0)} L`}
+          title="Producción del Período"
+          value={`${formatNumber(production?.milkProduction?.total || 0)} L`}
           icon={Milk}
           color="blue"
         />
         <StatCard
-          title="Promedio Diario"
-          value={`${formatNumber(production?.averageDaily || 0)} L`}
+          title="Promedio por Vaca"
+          value={`${formatNumber(production?.milkProduction?.averagePerCow || 0)} L`}
           icon={Milk}
           color="purple"
         />

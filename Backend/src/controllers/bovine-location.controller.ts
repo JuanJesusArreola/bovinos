@@ -51,7 +51,8 @@ export class BovineLocationController {
                 res.status(error.statusCode).json({
                     success: false,
                     error: error.message,
-                    code: error.code
+                    code: error.code,
+                    ...((error as any).details ? { details: (error as any).details } : {}),
                 });
             } else {
                 res.status(500).json({
@@ -393,9 +394,12 @@ export class BovineLocationController {
 
             const result = await bovineLocationService.updateLocation(id, data, userId);
 
+            // L-04: exponer wasNoOp/locationChanged para que el FE no compare en cliente
             return res.status(200).json({
                 success: true,
-                data: result
+                data: result.bovine,
+                wasNoOp: result.wasNoOp,
+                locationChanged: result.locationChanged,
             });
         } catch (error) {
             logger.error('Error en updateLocation', this.context, { params: req.params, query: req.query }, error as Error);
@@ -404,7 +408,9 @@ export class BovineLocationController {
                 res.status(error.statusCode).json({
                     success: false,
                     error: error.message,
-                    code: error.code
+                    code: error.code,
+                    // L-01: detalles de capacidad para BOVINE_LOCATION_FULL
+                    ...((error as any).details ? { details: (error as any).details } : {}),
                 });
             } else {
                 res.status(500).json({

@@ -70,6 +70,8 @@ export interface HeatmapRequestFilters {
     breeds?: string[];
     ageRange?: { min: number; max: number };
     diseases?: string[];
+    /** Filtro por UUID de Disease (Phase 2). Se mapea a activeDiseaseId en el snapshot. */
+    diseaseIds?: string[];
     startDate?: Date;
     endDate?: Date;
     includeInactive?: boolean;
@@ -120,7 +122,8 @@ export class HeatmapService {
                 healthStatus: filters.healthStatus,
                 breeds: filters.breeds,
                 ageRange: filters.ageRange,
-                diseases: filters.diseases
+                diseases: filters.diseases,
+                diseaseIds: filters.diseaseIds,
             };
 
             // Obtener puntos base del servicio geo
@@ -134,6 +137,7 @@ export class HeatmapService {
                 ...point,
                 metadata: {
                     ...point.metadata,
+                    diagnosis: point.metadata.diagnosis ?? undefined,
                     healthStatusLabel: this.getHealthStatusLabel(point.metadata.healthStatus),
                     ageDisplay: this.getAgeDisplay(point.metadata.age),
                     lastHealthCheck: undefined, // Se puede obtener de otra fuente si es necesario

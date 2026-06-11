@@ -32,8 +32,29 @@ export function LoginPage() {
       await login(data);
       navigate('/dashboard');
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { error?: string; message?: string } } };
-      setError(axiosErr.response?.data?.error || axiosErr.response?.data?.message || 'Error al iniciar sesión');
+      const axiosErr = err as {
+        response?: { status?: number; data?: { error?: string; message?: string } };
+        code?: string;
+      };
+      const status = axiosErr.response?.status;
+      const backendMsg =
+        axiosErr.response?.data?.error ||
+        axiosErr.response?.data?.message;
+
+      // Mensajes amistosos según el tipo de error.
+      let msg: string;
+      if (status === 401 || status === 403) {
+        msg = backendMsg || 'Correo o contraseña incorrectos. Verifica tus credenciales.';
+      } else if (status === 423) {
+        msg = backendMsg || 'Cuenta bloqueada. Contacta al administrador.';
+      } else if (status === 429) {
+        msg = 'Demasiados intentos. Espera unos minutos e intenta de nuevo.';
+      } else if (axiosErr.code === 'ERR_NETWORK' || !axiosErr.response) {
+        msg = 'No se pudo conectar con el servidor. Verifica tu conexión a internet.';
+      } else {
+        msg = backendMsg || 'Error al iniciar sesión. Intenta de nuevo.';
+      }
+      setError(msg);
     }
   };
 

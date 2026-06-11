@@ -25,13 +25,13 @@ export interface DiagnosisStatsFilters {
 }
 
 export interface DiagnosisStats {
-    totalRecords: number;
+    // Forma alineada con DiagnosisStatsResponse del frontend.
+    totalDiagnoses: number;
     uniqueDiagnoses: number;
     topDiagnoses: Array<{ diagnosis: string; count: number; percentage: number }>;
     byHealthStatus: Record<HealthStatus, number>;
-    confirmedCount: number;
+    confirmedVsSuspected: { confirmed: number; suspected: number };
     ruledOutCount: number;
-    differentialCount: number;
 }
 
 // ============================================================================
@@ -43,14 +43,19 @@ export class DiagnosisService {
 
     /**
      * Registra un diagnóstico en un registro de salud existente.
-     * @param healthId ID del registro de salud
-     * @param diagnosisData Datos del diagnóstico (parcial)
-     * @param updatedBy Usuario que realiza la acción
+     *
+     * @param healthId     ID del registro de salud
+     * @param diagnosisData Datos del diagnóstico JSONB (parcial)
+     * @param updatedBy    Usuario que realiza la acción
+     * @param diseaseId    UUID del catálogo de enfermedades (opcional).
+     *                     Si se provee, actualiza health_records.disease_id.
+     *                     Pasar `null` explícitamente desvincula la enfermedad.
      */
     async recordDiagnosis(
         healthId: string,
         diagnosisData: Partial<Diagnosis>,
-        updatedBy: string
+        updatedBy: string,
+        diseaseId?: string | null
     ): Promise<Health> {
         const transaction = await sequelize.transaction();
         const startTime = Date.now();
@@ -61,25 +66,31 @@ export class DiagnosisService {
                 throw new HealthError(`Registro de salud con ID ${healthId} no encontrado`, 'HEALTH_NOT_FOUND', 404);
             }
 
-            // Combinar diagnóstico existente con los nuevos datos
+            // Combinar diagnóstico JSONB existente con los nuevos datos
             const currentDiagnosis = healthRecord.diagnosis || ({} as Diagnosis);
             const updatedDiagnosis = {
                 ...currentDiagnosis,
                 ...diagnosisData,
-                // Asegurar que la fecha de diagnóstico se actualice si es necesario
                 updatedAt: new Date(),
             };
 
-            await healthRecord.update(
-                { diagnosis: updatedDiagnosis },
-                { transaction }
-            );
+            // Construir payload de actualización
+            const updatePayload: any = { diagnosis: updatedDiagnosis };
+
+            // Actualizar FK al catálogo solo si el caller la envió explícitamente
+            // (undefined = no tocar; null = desvincular; uuid = vincular)
+            if (diseaseId !== undefined) {
+                updatePayload.diseaseId = diseaseId ?? undefined;
+            }
+
+            await healthRecord.update(updatePayload, { transaction });
 
             await transaction.commit();
 
             logger.info(`Diagnóstico registrado en health ${healthId}`, this.context, {
                 healthId,
                 updatedBy,
+                diseaseId: diseaseId ?? 'sin cambio',
                 durationMs: Date.now() - startTime,
             });
 
@@ -122,7 +133,11 @@ export class DiagnosisService {
             }
 
             diagnosis.status = DiagnosisStatus.CONFIRMED;
-            // Podríamos agregar un campo "confirmedBy" en el diagnóstico si se desea.
+            // Sellamos quién y cuándo confirmó. El filtro `diagnosisConfirmed`
+            // del listado de registros y el % de confirmación del dashboard
+            // dependen de `confirmedAt`; sin esto el drill-down salía vacío.
+            (diagnosis as any).confirmedAt = new Date();
+            (diagnosis as any).confirmedBy = confirmedBy;
 
             await healthRecord.update({ diagnosis }, { transaction });
 
@@ -172,13 +187,12 @@ export class DiagnosisService {
                 bovineIds = bovines.map(b => b.id);
                 if (bovineIds.length === 0) {
                     return {
-                        totalRecords: 0,
+                        totalDiagnoses: 0,
                         uniqueDiagnoses: 0,
                         topDiagnoses: [],
                         byHealthStatus: {} as Record<HealthStatus, number>,
-                        confirmedCount: 0,
+                        confirmedVsSuspected: { confirmed: 0, suspected: 0 },
                         ruledOutCount: 0,
-                        differentialCount: 0,
                     };
                 }
                 whereHealth.bovineId = { [Op.in]: bovineIds };
@@ -192,9 +206,9 @@ export class DiagnosisService {
                 where: whereHealth,
                 attributes: [
                     'overallHealthStatus',
-                    [Sequelize.fn('COUNT', Sequelize.col('overallHealthStatus')), 'count'],
+                    [Sequelize.fn('COUNT', Sequelize.col('overall_health_status')), 'count'],
                 ],
-                group: ['overallHealthStatus'],
+                group: ['overall_health_status'],
             });
 
             const byHealthStatus: Record<HealthStatus, number> = {} as Record<HealthStatus, number>;
@@ -213,6 +227,7 @@ export class DiagnosisService {
           COUNT(*) as count
         FROM health_records
         WHERE diagnosis->>'primaryDiagnosis' IS NOT NULL
+          AND deleted_at IS NULL
           ${filters.startDate ? `AND record_date >= :startDate` : ''}
           ${filters.endDate ? `AND record_date <= :endDate` : ''}
           ${filters.ranchId ? `AND bovine_id IN (:bovineIds)` : ''}
@@ -244,6 +259,7 @@ export class DiagnosisService {
           COUNT(*) as count
         FROM health_records
         WHERE diagnosis->>'status' IS NOT NULL
+          AND deleted_at IS NULL
           ${filters.startDate ? `AND record_date >= :startDate` : ''}
           ${filters.endDate ? `AND record_date <= :endDate` : ''}
           ${filters.ranchId ? `AND bovine_id IN (:bovineIds)` : ''}
@@ -259,10 +275,15 @@ export class DiagnosisService {
                 }
             );
 
+            // Las raw queries devuelven count como string → parseamos a entero
+            // para que el frontend pueda sumar (confirmed + suspected) sin que
+            // concatene strings ("5" + "3" = "53").
             const statusCounts = statusCountsRaw as any[];
-            const confirmedCount = statusCounts.find(s => s.status === DiagnosisStatus.CONFIRMED)?.count || 0;
-            const ruledOutCount = statusCounts.find(s => s.status === DiagnosisStatus.RULED_OUT)?.count || 0;
-            const differentialCount = statusCounts.find(s => s.status === DiagnosisStatus.DIFFERENTIAL)?.count || 0;
+            const toInt = (status: DiagnosisStatus) =>
+                parseInt(statusCounts.find(s => s.status === status)?.count ?? '0', 10) || 0;
+            const confirmedCount    = toInt(DiagnosisStatus.CONFIRMED);
+            const ruledOutCount     = toInt(DiagnosisStatus.RULED_OUT);
+            const differentialCount = toInt(DiagnosisStatus.DIFFERENTIAL);
 
             const uniqueDiagnoses = topDiagnoses.length;
 
@@ -272,13 +293,14 @@ export class DiagnosisService {
             });
 
             return {
-                totalRecords,
+                totalDiagnoses: totalRecords,
                 uniqueDiagnoses,
                 topDiagnoses,
                 byHealthStatus,
-                confirmedCount,
+                // "Sospechosos" = diagnósticos diferenciales (aún sin confirmar).
+                // Los descartados (RULED_OUT) van aparte y no cuentan como sospecha.
+                confirmedVsSuspected: { confirmed: confirmedCount, suspected: differentialCount },
                 ruledOutCount,
-                differentialCount,
             };
         } catch (error) {
             logger.error('Error obteniendo estadísticas de diagnósticos', this.context, { filters }, ensureError(error));

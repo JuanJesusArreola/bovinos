@@ -1,6 +1,8 @@
 // controllers/health.controller.ts
 import { Request, Response } from 'express';
-import { healthRecordService } from '../services/health/HealthRecordService';
+import { healthRecordService, GetHealthRecordsFilters, GetHealthRecordsOptions } from '../services/health/HealthRecordService';
+import { HealthRecordType } from '../models/Health';
+import { HealthStatus } from '../models/Bovine';
 import { HealthError } from '../utils/HealthErrors';
 import logger from '../utils/logger';
 
@@ -8,10 +10,13 @@ export class HealthController {
     private readonly context = 'HealthController';
 
     constructor() {
-        this.createHealthRecord = this.createHealthRecord.bind(this);
+        this.createHealthRecord    = this.createHealthRecord.bind(this);
         this.getBovineHealthHistory = this.getBovineHealthHistory.bind(this);
-        this.getHealthRecordById = this.getHealthRecordById.bind(this);
-        this.getHealthSummary = this.getHealthSummary.bind(this);
+        this.getHealthRecordById   = this.getHealthRecordById.bind(this);
+        this.getHealthSummary      = this.getHealthSummary.bind(this);
+        this.updateHealthRecord    = this.updateHealthRecord.bind(this);
+        this.deleteHealthRecord    = this.deleteHealthRecord.bind(this);
+        this.getHealthRecords      = this.getHealthRecords.bind(this);
     }
 
     /**
@@ -139,6 +144,98 @@ export class HealthController {
             res.json({ success: true, data: summary });
         } catch (error) {
             logger.error('Error en getHealthSummary', this.context, { params: req.params }, error as Error);
+            if (error instanceof HealthError) {
+                res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+            } else {
+                res.status(500).json({ success: false, error: 'Error interno del servidor' });
+            }
+        }
+    }
+    /**
+     * PATCH /api/health/records/:id
+     * Actualiza campos editables de un registro de salud existente.
+     */
+    async updateHealthRecord(req: Request, res: Response): Promise<void> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                res.status(401).json({ success: false, error: 'Usuario no autenticado' });
+                return;
+            }
+
+            const { id } = req.params;
+            const record = await healthRecordService.updateHealthRecord(id, req.body, userId);
+            res.json({
+                success: true,
+                data: record,
+                message: 'Registro de salud actualizado exitosamente',
+            });
+        } catch (error) {
+            logger.error('Error en updateHealthRecord', this.context, { params: req.params }, error as Error);
+            if (error instanceof HealthError) {
+                res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+            } else {
+                res.status(500).json({ success: false, error: 'Error interno del servidor' });
+            }
+        }
+    }
+
+    /**
+     * DELETE /api/health/records/:id
+     * Soft-delete de un registro de salud (paranoid: true → setea deletedAt).
+     */
+    async deleteHealthRecord(req: Request, res: Response): Promise<void> {
+        try {
+            const { id } = req.params;
+            await healthRecordService.deleteHealthRecord(id);
+            res.json({ success: true, message: 'Registro de salud eliminado exitosamente' });
+        } catch (error) {
+            logger.error('Error en deleteHealthRecord', this.context, { params: req.params }, error as Error);
+            if (error instanceof HealthError) {
+                res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
+            } else {
+                res.status(500).json({ success: false, error: 'Error interno del servidor' });
+            }
+        }
+    }
+
+    /**
+     * GET /api/health/records
+     * Listado paginado global de registros de salud con filtros opcionales.
+     *
+     * Query params:
+     *   ranchId, bovineId, recordType (CSV), startDate, endDate,
+     *   veterinarianId, overallHealthStatus (CSV), isEmergency, followUpRequired,
+     *   diseaseId, search, page, limit, sortBy, sortOrder
+     */
+    async getHealthRecords(req: Request, res: Response): Promise<void> {
+        try {
+            const q = req.query;
+
+            const filters: GetHealthRecordsFilters = {};
+            if (q.ranchId)          filters.ranchId         = q.ranchId as string;
+            if (q.bovineId)         filters.bovineId        = q.bovineId as string;
+            if (q.veterinarianId)   filters.veterinarianId  = q.veterinarianId as string;
+            if (q.diseaseId)        filters.diseaseId       = q.diseaseId as string;
+            if (q.search)           filters.search          = (q.search as string).trim();
+            if (q.recordType)       filters.recordType      = (q.recordType as string).split(',') as HealthRecordType[];
+            if (q.overallHealthStatus) filters.overallHealthStatus = (q.overallHealthStatus as string).split(',') as HealthStatus[];
+            if (q.startDate)        filters.startDate       = new Date(q.startDate as string);
+            if (q.endDate)          filters.endDate         = new Date(q.endDate as string);
+            if (q.isEmergency          !== undefined) filters.isEmergency         = q.isEmergency         === 'true';
+            if (q.followUpRequired     !== undefined) filters.followUpRequired    = q.followUpRequired     === 'true';
+            if (q.diagnosisConfirmed   !== undefined) filters.diagnosisConfirmed  = q.diagnosisConfirmed   === 'true';
+
+            const options: GetHealthRecordsOptions = {};
+            if (q.page)       options.page      = parseInt(q.page as string, 10);
+            if (q.limit)      options.limit     = parseInt(q.limit as string, 10);
+            if (q.sortBy)     options.sortBy    = q.sortBy as string;
+            if (q.sortOrder)  options.sortOrder = q.sortOrder as 'ASC' | 'DESC';
+
+            const result = await healthRecordService.getHealthRecords(filters, options);
+            res.json({ success: true, ...result });
+        } catch (error) {
+            logger.error('Error en getHealthRecords', this.context, { query: req.query }, error as Error);
             if (error instanceof HealthError) {
                 res.status(error.statusCode).json({ success: false, error: error.message, code: error.code });
             } else {

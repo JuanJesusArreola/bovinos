@@ -24,7 +24,8 @@ export enum FileCategory {
   LOCATION_MAPS = 'location_maps',         // Mapas/planos específicos
   BOVINE_IMAGES = 'bovine_images',        // Fotos de bovinos (galería del detalle)
   BOVINE_DOCUMENTS = 'bovine_documents',  // Documentos del bovino (papeles, registros)
-  BOVINE_VIDEOS = 'bovine_videos'         // Videos del bovino
+  BOVINE_VIDEOS = 'bovine_videos',        // Videos del bovino
+  DISEASE_MEDIA = 'disease_media',        // Imágenes/videos de referencia de enfermedades
 }
 
 // Configuración de tipos de archivo por categoría
@@ -223,7 +224,19 @@ const FILE_CONFIGS: Record<FileCategory, {
     requiresAuth: true,
     allowedRoles: [UserRole.WORKER, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
     virusScanRequired: false
-  }
+  },
+  [FileCategory.DISEASE_MEDIA]: {
+    allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/webm'],
+    allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.mp4', '.webm'],
+    maxSize: 50 * 1024 * 1024, // 50MB (videos pueden ser grandes)
+    maxFiles: 10,
+    requiresAuth: true,
+    allowedRoles: [UserRole.VETERINARIAN, UserRole.MANAGER, UserRole.RANCH_MANAGER, UserRole.SUPER_ADMIN, UserRole.OWNER],
+    virusScanRequired: false,
+    thumbnailSizes: [
+      { name: 'small', width: 300, height: 300 },
+    ],
+  },
 };
 
 // Interface para metadatos de archivo

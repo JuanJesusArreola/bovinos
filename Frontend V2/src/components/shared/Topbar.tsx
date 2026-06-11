@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/store/AuthContext';
 import { useTheme } from '@/store/ThemeContext';
 import { getRoleLabel, getRoleColor } from '@/utils/permissions';
-import { Bell, Sun, Moon, LogOut, User, Menu, ChevronDown, Building2 } from 'lucide-react';
+import { Bell, Sun, Moon, LogOut, User, Menu, ChevronDown, Building2, ShieldAlert } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { useEpidemiologyAlerts } from '@/hooks/useEpidemiology';
 
 interface TopbarProps {
   onMenuToggle: () => void;
@@ -20,6 +21,12 @@ export function Topbar({ onMenuToggle }: TopbarProps) {
   const ranchMenuRef = useRef<HTMLDivElement>(null);
 
   const hasMultipleRanches = (user?.ranchAccess?.length || 0) > 1;
+
+  const { data: openAlerts = [] } = useEpidemiologyAlerts(
+    { ranchId: activeRanchId ?? undefined, status: 'OPEN' },
+    { enabled: !!activeRanchId },
+  );
+  const openAlertCount = openAlerts.length;
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -94,6 +101,20 @@ export function Topbar({ onMenuToggle }: TopbarProps) {
         >
           {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
         </button>
+
+        {/* Epidemiology alerts badge */}
+        {openAlertCount > 0 && (
+          <button
+            onClick={() => navigate('/health/epidemiology/alerts')}
+            title={`${openAlertCount} alerta(s) epidemiológica(s) abiertas`}
+            className="relative rounded-lg p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            <ShieldAlert className="w-5 h-5" />
+            <span className="absolute top-1 right-1 min-w-[16px] h-4 px-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+              {openAlertCount > 99 ? '99+' : openAlertCount}
+            </span>
+          </button>
+        )}
 
         {/* Notifications */}
         <button
